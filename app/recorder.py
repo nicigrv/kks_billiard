@@ -27,16 +27,11 @@ class Recorder:
         if os.path.isdir(self.img_dir):
             self.count = len(os.listdir(self.img_dir))
 
-    def save(self, warped, balls):
-        if not self.enabled or self.count >= self.max_images or not balls:
-            return
+    def _next_name(self):
         now = time.time()
-        if now - self._last < self.min_interval_s:
-            return
-        self._last = now
-        os.makedirs(self.img_dir, exist_ok=True)
-        os.makedirs(self.lbl_dir, exist_ok=True)
-        name = time.strftime("%Y%m%d-%H%M%S") + f"-{int(now * 1000) % 1000:03d}"
+        return now, time.strftime("%Y%m%d-%H%M%S") + f"-{int(now * 1000) % 1000:03d}"
+
+    def _write_sample(self, warped, balls, name):
         h, w = warped.shape[:2]
         cv2.imwrite(os.path.join(self.img_dir, name + ".jpg"), warped, [cv2.IMWRITE_JPEG_QUALITY, 92])
         with open(os.path.join(self.lbl_dir, name + ".txt"), "w") as f:
@@ -45,3 +40,29 @@ class Recorder:
                     f.write(f"{CLASSES.index(b.kind)} {b.x / w:.5f} {b.y / h:.5f} "
                             f"{2 * b.r / w:.5f} {2 * b.r / h:.5f}\n")
         self.count += 1
+
+    def save(self, warped, balls):
+        if not self.enabled or self.count >= self.max_images or not balls:
+            return
+        now, name = self._next_name()
+        if now - self._last < self.min_interval_s:
+            return
+        self._last = now
+        os.makedirs(self.img_dir, exist_ok=True)
+        os.makedirs(self.lbl_dir, exist_ok=True)
+        self._write_sample(warped, balls, name)
+
+    def save_manual(self, warped, balls, note=""):
+        if self.count >= self.max_images:
+            return False
+        _, name = self._next_name()
+        os.makedirs(self.img_dir, exist_ok=True)
+        os.makedirs(self.lbl_dir, exist_ok=True)
+        self._write_sample(warped, balls, name)
+        note = (note or "").strip()
+        if note:
+            notes_dir = os.path.join(os.path.dirname(self.img_dir), "notes")
+            os.makedirs(notes_dir, exist_ok=True)
+            with open(os.path.join(notes_dir, name + ".txt"), "w") as f:
+                f.write(note[:4000] + "\n")
+        return True

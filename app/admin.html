@@ -173,6 +173,12 @@ details > div { margin-top: 12px; }
     <button class="primary" type="submit">Speichern</button>
   </form>
 
+  <section>
+    <h2>Live-Ansicht</h2>
+    <img class="liveview" id="liveview" alt="Entzerrte Draufsicht mit erkannten Kugeln">
+    <p class="hint" style="margin-top:8px">Gelb = volle, blau = halbe, weiß = Weiße, grau = 8. Grün = KI-Schlagverbesserung.</p>
+  </section>
+
   <section id="fixSection">
     <h2>Korrigieren</h2>
     <div class="grid">
@@ -209,6 +215,7 @@ details > div { margin-top: 12px; }
     <div id="playingControls" class="grid two">
       <button class="primary" data-cmd="new_rack">Neues Rack</button>
       <button class="quiet" data-cmd="abort">Spiel abbrechen</button>
+      <button class="span2" id="shotAssistBtn" type="button">KI-Schlagverbesserung: an</button>
       <p class="hint span3" style="margin:4px 0 0">Erst die Kugeln aufbauen, dann „Neues Rack“ drücken. Die Teams brechen abwechselnd an.</p>
     </div>
     <form id="startForm">
@@ -227,14 +234,6 @@ details > div { margin-top: 12px; }
       <p class="hint" style="margin-top:8px">Kugeln vorher aufbauen. Die Kamera merkt sich die Aufstellung, sobald der Tisch ruhig ist.</p>
     </form>
   </section>
-
-  <details id="viewDetails">
-    <summary>Was die Kamera sieht</summary>
-    <div>
-      <img class="liveview" id="liveview" alt="Entzerrte Draufsicht mit erkannten Kugeln">
-      <p class="hint" style="margin-top:8px">Gelb = volle, blau = halbe, weiß = Weiße, grau = 8. Fehlt eine Kugel oder ist sie falsch markiert, wird das Licht oder die Kalibrierung das Problem sein.</p>
-    </div>
-  </details>
 
   <details id="calibDetails">
     <summary>Tisch einrichten</summary>
@@ -261,7 +260,10 @@ details > div { margin-top: 12px; }
     <div>
       <p class="hint">Speichert in ruhigen Momenten ein Bild des Tisches mit den erkannten Kugeln. Damit lässt sich später ein KI-Modell für den Coral-Stick trainieren. Die Beschriftungen stammen von der Bildverarbeitung und müssen vor dem Training geprüft werden.</p>
       <p id="datasetInfo">-</p>
-      <button id="recordBtn" type="button" style="width:100%">Sammeln starten</button>
+      <button id="recordBtn" type="button" style="width:100%;margin-bottom:10px">Sammeln starten</button>
+      <label for="misdetectNote">Falscherkennung (kurz beschreiben)</label>
+      <input type="text" id="misdetectNote" maxlength="200" placeholder="z. B. 2 halbe als volle erkannt">
+      <button id="misdetectBtn" type="button" style="width:100%;margin-top:10px">Falscherkennung speichern</button>
     </div>
   </details>
 
@@ -377,6 +379,9 @@ details > div { margin-top: 12px; }
 
     $("datasetInfo").textContent = s.dataset_count + " Bilder gesammelt" + (s.record ? ", Sammeln läuft." : ".");
     $("recordBtn").textContent = s.record ? "Sammeln stoppen" : "Sammeln starten";
+    $("shotAssistBtn").textContent = "KI-Schlagverbesserung: " + (s.shot_assist ? "an" : "aus");
+    $("shotAssistBtn").classList.toggle("primary", !!s.shot_assist);
+    $("shotAssistBtn").classList.toggle("quiet", !s.shot_assist);
     if (!calibDirty && s.table_size) $("tableSize").value = s.table_size;
   }
 
@@ -414,17 +419,17 @@ details > div { margin-top: 12px; }
   });
 
   $("recordBtn").addEventListener("click", () => post("record", { enabled: !(state && state.record) }));
+  $("shotAssistBtn").addEventListener("click", () => post("shot_assist", { enabled: !(state && state.shot_assist) }));
+  $("misdetectBtn").addEventListener("click", async () => {
+    const note = $("misdetectNote").value.trim();
+    const res = await post("record_misdetect", { note });
+    if (res) $("misdetectNote").value = "";
+  });
 
   // ---------------- Live-Ansicht ----------------
-  let viewTimer = null;
-  $("viewDetails").addEventListener("toggle", (e) => {
-    clearInterval(viewTimer);
-    if (e.target.open) {
-      const load = () => { $("liveview").src = "/api/warped.jpg?t=" + Date.now(); };
-      load();
-      viewTimer = setInterval(load, 2000);
-    }
-  });
+  const loadLive = () => { $("liveview").src = "/api/warped.jpg?t=" + Date.now(); };
+  loadLive();
+  setInterval(loadLive, 1500);
 
   // ---------------- Kalibrierung ----------------
   const canvas = $("calibCanvas");

@@ -49,11 +49,31 @@ class App:
         self.reader = MjpegReader(url).start()
         self.recorder = Recorder(os.path.join(config.DATA_DIR, "dataset"))
         self.recorder.enabled = bool(self.cfg.get("record_dataset"))
+        self.shot_assist = bool(self.cfg.get("shot_assist", True))
         table = Table(self.cfg.get("corners"), TABLE_SIZES.get(self.cfg.get("table_size"), TABLE_SIZES["8ft"]))
         self.pipe = Pipeline(table, recorder=self.recorder)
         self.proc_fps = 0.0
         self._stop = threading.Event()
         threading.Thread(target=self._process_loop, name="erkennung", daemon=True).start()
+
+    def _assist_target(self, balls, game_state):
+        cue = next((b for b in balls if b.kind == "cue"), None)
+        if cue is None:
+            return None, None
+        phase, turn, groups, remaining, eight_on_table = game_state
+        candidates = []
+        if phase == "playing":
+            own = groups[turn]
+            if own in ("solid", "stripe") and remaining.get(own, 0) > 0:
+                candidates = [b for b in balls if b.kind == own]
+            elif own in ("solid", "stripe") and eight_on_table:
+                candidates = [b for b in balls if b.kind == "eight"]
+            else:
+                candidates = [b for b in balls if b.kind in ("solid", "stripe")]
+        if not candidates:
+            return cue, None
+        target = min(candidates, key=lambda b: (b.x - cue.x) ** 2 + (b.y - cue.y) ** 2)
+        return cue, target
 
     # ------------------------------------------------------------ Erkennung
     def _process_loop(self):
@@ -94,6 +114,7 @@ class App:
             "table_size": self.cfg.get("table_size"),
             "record": self.recorder.enabled,
             "dataset_count": self.recorder.count,
+            "shot_assist": self.shot_assist,
         }
 
     def jpeg(self, kind):
@@ -104,12 +125,21 @@ class App:
             with self.pipe.lock:
                 warped = self.pipe.last_warped
                 balls = list(self.pipe.balls)
+                g = self.pipe.game
+                game_state = (g.phase, g.turn, list(g.groups), dict(g.remaining), g.eight_on_table)
             if warped is None:
                 img = frame.copy()
             else:
                 img = warped.copy()
                 for b in balls:
                     cv2.circle(img, (int(b.x), int(b.y)), int(b.r + 3), KIND_BGR.get(b.kind, (255, 255, 255)), 2)
+                if self.shot_assist:
+                    cue, target = self._assist_target(balls, game_state)
+                    if cue is not None and target is not None:
+                        p0 = (int(cue.x), int(cue.y))
+                        p1 = (int(target.x), int(target.y))
+                        cv2.arrowedLine(img, p0, p1, (80, 230, 80), 2, tipLength=0.14)
+                        cv2.circle(img, p1, max(3, int(target.r * 0.6)), (80, 230, 80), 2)
         else:
             img = frame
         ok, jpg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
@@ -160,6 +190,19 @@ class App:
                 self.cfg["record_dataset"] = self.recorder.enabled
                 config.save(self.cfg)
                 return "Sammeln gestartet" if self.recorder.enabled else "Sammeln gestoppt"
+            elif name == "record_misdetect":
+                warped = self.pipe.last_warped
+                if warped is None:
+                    raise ValueError("Noch kein entzerrtes Kamerabild")
+                ok = self.recorder.save_manual(warped, list(self.pipe.balls), str(p.get("note", "")))
+                if not ok:
+                    return "Dataset-Limit erreicht"
+                return "Falscherkennung zum Training gespeichert"
+            elif name == "shot_assist":
+                self.shot_assist = bool(p.get("enabled"))
+                self.cfg["shot_assist"] = self.shot_assist
+                config.save(self.cfg)
+                return "KI-Schlagverbesserung aktiviert" if self.shot_assist else "KI-Schlagverbesserung deaktiviert"
             else:
                 return None
             return g.message

@@ -11,6 +11,7 @@ DEFAULTS = {
     "corners": None,            # 4 Ecken der Spielflaeche im Kamerabild
     "table_size": "8ft",
     "record_dataset": False,    # Trainingsbilder fuer das Coral-Modell sammeln
+    "shot_assist": True,        # KI-Schlagverbesserung (Hinweislinie)
 }
 
 _lock = threading.Lock()

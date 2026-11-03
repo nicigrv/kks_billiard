@@ -41,6 +41,7 @@ Im Portal **„Tisch einrichten“** öffnen:
 
 Danach unter **„Was die Kamera sieht“** prüfen: Jede Kugel sollte einen Ring haben.
 Gelb = volle, blau = halbe, weiß = Weiße, grau = 8.
+Im Portal ist die **Live-Ansicht** dauerhaft sichtbar.
 
 ## 3. Spielen
 
@@ -56,6 +57,8 @@ Gelb = volle, blau = halbe, weiß = Weiße, grau = 8.
 Erst wenn der Tisch frei und ruhig ist. Ein Queue, das quer auf dem Tuch liegt, blockiert deshalb die Auswertung („Tisch wird verdeckt“).
 
 Geht etwas schief: **„Rückgängig“** macht die letzte Änderung rückgängig, unter „Weitere Korrekturen“ lassen sich Gruppen, Restkugeln und Sieger von Hand setzen.
+
+Optional kann die **KI-Schlagverbesserung** im Bereich „Spiel“ ein-/ausgeschaltet werden. In der Live-Ansicht wird dann eine grüne Hinweislinie vom Spielball zur nächsten sinnvollen Zielkugel angezeigt.
 
 ## 4. Ohne Tisch testen (Simulator)
 
@@ -77,7 +80,8 @@ Erwartet: `[OK] Coral funktioniert: ~3-5 ms pro Bild`. Den Stick an einen **blau
 **Ehrlich:** Der Test beweist nur, dass Stick und Treiber laufen. Ein Modell, das Billardkugeln erkennt,
 gibt es nicht fertig. Dafür braucht es Trainingsbilder **von eurem Tisch**:
 im Portal unter **„Trainingsdaten für Coral“** sammeln (landen in `data/dataset/`), ein paar Hundert Bilder,
-Beschriftungen prüfen, dann trainieren (nächster Schritt).
+Beschriftungen prüfen, dann trainieren (nächster Schritt). Wenn Kugeln falsch erkannt wurden, im gleichen Bereich
+über **„Falscherkennung speichern“** ein Beispiel inklusive kurzer Notiz ablegen.
 
 ## 6. Genauigkeit (gemessen im Simulator)
 
@@ -98,6 +102,7 @@ Tests selbst laufen lassen (im Ordner `app/`):
 ```bash
 python3 -m sim.test_detector      # Erkennungsqualität
 python3 -m sim.test_game          # Regeln + simuliertes Spiel
+python3 -m sim.test_recorder      # Trainingsdaten-Recorder
 python3 -m sim.benchmark_shots    # Trefferquote pro Stoß
 ```
 
