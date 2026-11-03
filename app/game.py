@@ -71,20 +71,40 @@ class Game:
         self.ball_in_hand = False
         self.shots = 0
 
-    def _save(self):
+    def _save(self, tag="admin"):
         state = {k: copy.deepcopy(v) for k, v in self.__dict__.items() if k != "_history"}
-        self._history.append(state)
+        self._history.append((tag, state))
         if len(self._history) > 50:
             self._history.pop(0)
+
+    def _restore(self, index):
+        """Zustand vor Eintrag 'index' wiederherstellen, alles danach verwerfen."""
+        _, state = self._history[index]
+        hist = self._history[:index]
+        self.__dict__.update(state)
+        self._history = hist
 
     def undo(self):
         if not self._history:
             return "Nichts zum Rückgängigmachen"
-        state = self._history.pop()
-        hist = self._history
-        self.__dict__.update(state)
-        self._history = hist
-        self._event("Letzte Änderung rueckgaengig gemacht")
+        self._restore(len(self._history) - 1)
+        self._event("Letzte Änderung rückgängig gemacht")
+        return self.message
+
+    @property
+    def last_shot_index(self):
+        return next((i for i in range(len(self._history) - 1, -1, -1) if self._history[i][0] == "shot"), None)
+
+    def undo_shot(self):
+        """Faelschlich erkannten Stoss verwerfen: Spielstand wie vor diesem Stoss
+        (spaetere Korrekturen werden mit verworfen)."""
+        i = self.last_shot_index
+        if i is None:
+            return "Kein erkannter Stoß zum Verwerfen"
+        later = len(self._history) - 1 - i
+        self._restore(i)
+        self._event("Erkannter Stoß verworfen" + (f" (inkl. {later} späterer Änderung(en))" if later else "")
+                    + f". {self.shooter} ist dran.")
         return self.message
 
     def _event(self, text):
@@ -160,7 +180,7 @@ class Game:
         die Gesamtzahlen gerechnet (fuer Tests und als Rueckfallebene)."""
         if self.phase != "playing":
             return None
-        self._save()
+        self._save("shot")
         if self.breaking:
             # Im Rack verdecken sich die Kugeln gegenseitig, die Erkennung ist dort am
             # schwaechsten. Die Aufstellung ist aber bekannt. Nur die 8 bleibt beobachtet,
@@ -269,4 +289,5 @@ class Game:
             "message": self.message,
             "log": self.log[-15:][::-1],
             "can_undo": bool(self._history),
+            "can_undo_shot": self.last_shot_index is not None,
         }
