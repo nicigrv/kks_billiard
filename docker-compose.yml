@@ -1,0 +1,58 @@
+# Billard-System auf dem Raspberry Pi
+#
+# Starten (im Ordner ~/billard):   docker compose up -d --build
+# Logs:                             docker logs -f billard
+# Admin-Portal:                     http://<pi-ip>:8080
+#
+# Einmalige Werkzeuge (laufen nur auf Befehl):
+#   docker compose run --rm coral-check                 Coral-Stick testen
+#   docker compose --profile sim up -d fake-table       simulierte Kamera (Test ohne Tisch)
+#   docker compose run --rm updater                     Kamera-Firmware aktualisieren
+
+services:
+  billard:
+    build: ./app
+    image: billard-app:latest
+    container_name: billard
+    restart: unless-stopped
+    # Host-Netzwerk: Portal direkt unter der IP des Pi, Pi-IP wird auf dem Beamer angezeigt
+    network_mode: host
+    environment:
+      CAM_URL: http://192.168.88.200:81/stream    # <- IP der Kamera anpassen
+      ADMIN_PIN: ""                                # <- z. B. "4711", leer = ohne PIN
+    devices:
+      - /dev/dri:/dev/dri                          # HDMI-Ausgabe
+    volumes:
+      - ./data:/data                               # Kalibrierung + Trainingsbilder
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "2" }
+
+  coral-check:
+    build: ./coral
+    image: billard-coral-check:latest
+    profiles: ["tools"]
+    # Der Stick meldet sich nach dem Firmware-Laden mit neuer USB-ID neu an,
+    # deshalb den ganzen USB-Bus durchreichen statt eines einzelnen Geraets.
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+    device_cgroup_rules:
+      - "c 189:* rmw"
+
+  fake-table:
+    image: billard-app:latest
+    profiles: ["sim"]
+    network_mode: host
+    command: ["python3", "-m", "sim.fake_table"]
+
+  updater:
+    build: ./tools
+    image: billard-updater:latest
+    profiles: ["tools"]
+    network_mode: host
+    environment:
+      CAM_HOST: 192.168.88.200                     # <- IP der Kamera
+    volumes:
+      - ./firmware:/firmware:ro
+    stdin_open: true
+    tty: true

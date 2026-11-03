@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Billard Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Barlow+Condensed:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --felt: #0E3F31;
+  --felt-dark: #0A2F25;
+  --rail: #5A3520;
+  --rail-light: #7A4B2E;
+  --chalk: #6FB3E0;
+  --ivory: #EFE6D2;
+  --ivory-dim: #B9B09D;
+  --solid: #F2B705;
+  --foul: #D2453B;
+  --radius-board: 18px;
+  --radius-btn: 12px;
+  --display: "Barlow Condensed", "Arial Narrow", sans-serif;
+  --body: "Atkinson Hyperlegible", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; background: var(--felt-dark); }
+body {
+  margin: 0;
+  background: var(--felt);
+  /* Tuchstruktur, ganz leicht */
+  background-image: radial-gradient(ellipse at 50% 0%, #135140 0%, var(--felt) 60%, var(--felt-dark) 100%);
+  background-repeat: no-repeat;
+  min-height: 100vh;
+  color: var(--ivory);
+  font: 17px/1.5 var(--body);
+  padding: 16px max(16px, env(safe-area-inset-left)) 48px;
+}
+main { max-width: 560px; margin: 0 auto; }
+
+/* ---------- Spielstandstafel ---------- */
+.board {
+  border: 10px solid var(--rail);
+  border-radius: var(--radius-board);
+  background: var(--felt-dark);
+  box-shadow: inset 0 0 0 2px var(--rail-light);
+  padding: 14px 14px 12px;
+  position: relative;
+}
+.teams { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.team { padding: 6px 8px 8px; border-radius: 10px; transition: background .3s; }
+.team.active { background: rgba(111, 179, 224, 0.12); }
+.team .name {
+  font: 700 clamp(26px, 7vw, 34px)/1.05 var(--display);
+  overflow-wrap: anywhere;
+}
+.team .frames { font: 700 54px/1 var(--display); }
+.team .group { color: var(--ivory-dim); font-size: 15px; min-height: 22px; }
+.team:last-child { text-align: right; }
+.rack { display: flex; gap: 4px; flex-wrap: wrap; min-height: 16px; margin-top: 4px; }
+.team:last-child .rack { justify-content: flex-end; }
+.ball { width: 14px; height: 14px; border-radius: 50%; }
+.ball.solid { background: var(--solid); }
+.ball.stripe { background: linear-gradient(var(--ivory) 30%, var(--chalk) 30% 70%, var(--ivory) 70%); }
+.cueball {
+  position: absolute; top: -17px; width: 24px; height: 24px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #fff, #d8d2c4 70%);
+  box-shadow: 0 2px 4px rgba(0,0,0,.4);
+  left: calc(25% - 12px);
+  transition: left .5s cubic-bezier(.3,1.4,.5,1);
+}
+.cueball.right { left: calc(75% - 12px); }
+.cueball.hidden { opacity: 0; }
+.message { margin: 12px 4px 0; font-size: 16px; min-height: 24px; }
+.message.idle { color: var(--ivory-dim); }
+.sys { display: flex; justify-content: space-between; gap: 8px; margin: 10px 4px 0; font-size: 14px; color: var(--ivory-dim); }
+.sys .ok { color: var(--chalk); }
+
+/* ---------- Bereiche ---------- */
+section { margin-top: 28px; }
+h2 { font: 700 26px/1.2 var(--display); margin: 0 0 10px; }
+p.hint { color: var(--ivory-dim); margin: 0 0 12px; font-size: 15px; }
+
+button, select, input {
+  font: inherit; color: inherit;
+}
+button {
+  border: 0; border-radius: var(--radius-btn);
+  padding: 14px 12px; min-height: 52px;
+  background: var(--rail); color: var(--ivory);
+  font-weight: 700; cursor: pointer;
+  touch-action: manipulation;
+}
+button:active { transform: translateY(1px); }
+button.primary { background: var(--chalk); color: var(--felt-dark); }
+button.danger { background: var(--foul); }
+button.quiet { background: transparent; border: 2px solid var(--rail-light); }
+button:disabled { opacity: .45; cursor: default; }
+:focus-visible { outline: 3px solid var(--chalk); outline-offset: 2px; }
+.grid { display: grid; gap: 10px; grid-template-columns: repeat(3, 1fr); }
+.grid.two { grid-template-columns: 1fr 1fr; }
+.span2 { grid-column: span 2; }
+.span3 { grid-column: 1 / -1; }
+
+label { display: block; font-size: 15px; color: var(--ivory-dim); margin-bottom: 4px; }
+input[type=text], input[type=password], select {
+  width: 100%; padding: 12px; min-height: 48px;
+  background: var(--felt-dark); border: 2px solid var(--rail-light); border-radius: 10px;
+}
+.field { margin-bottom: 12px; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; border: 2px solid var(--rail-light); border-radius: 10px; overflow: hidden; }
+.seg input { position: absolute; opacity: 0; }
+.seg label { margin: 0; padding: 12px; text-align: center; color: var(--ivory); cursor: pointer; font-size: 16px; }
+.seg input:checked + label { background: var(--rail); font-weight: 700; }
+.seg input:focus-visible + label { outline: 3px solid var(--chalk); outline-offset: -3px; }
+
+details { border-top: 2px solid rgba(122, 75, 46, .6); padding-top: 14px; margin-top: 22px; }
+summary { font: 700 24px/1.2 var(--display); cursor: pointer; list-style: none; }
+summary::-webkit-details-marker { display: none; }
+summary::after { content: "+"; float: right; color: var(--ivory-dim); }
+details[open] summary::after { content: "\2212"; }
+details > div { margin-top: 12px; }
+
+.log { list-style: none; padding: 0; margin: 0; font-size: 14px; color: var(--ivory-dim); }
+.log li { padding: 6px 0; border-bottom: 1px solid rgba(239, 230, 210, .08); }
+.log time { color: var(--ivory); margin-right: 8px; font-variant-numeric: tabular-nums; }
+
+.calib { position: relative; border-radius: 10px; overflow: hidden; background: #000; touch-action: none; }
+.calib canvas { display: block; width: 100%; height: auto; }
+.liveview { width: 100%; border-radius: 10px; display: block; background: #000; min-height: 120px; }
+
+.toast {
+  position: fixed; left: 50%; bottom: max(20px, env(safe-area-inset-bottom));
+  transform: translate(-50%, 140%); transition: transform .25s, visibility .25s; visibility: hidden;
+  background: var(--ivory); color: var(--felt-dark); font-weight: 700;
+  padding: 12px 18px; border-radius: 12px; max-width: calc(100% - 32px);
+  box-shadow: 0 6px 20px rgba(0,0,0,.35);
+}
+.toast.show { transform: translate(-50%, 0); visibility: visible; }
+.toast.err { background: var(--foul); color: var(--ivory); }
+.pin { display: none; gap: 8px; margin-top: 12px; }
+.pin.show { display: flex; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
+</style>
+</head>
+<body>
+<main>
+
+  <div class="board" aria-live="polite">
+    <div class="cueball hidden" id="cueball" aria-hidden="true"></div>
+    <div class="teams">
+      <div class="team" id="team0">
+        <div class="name" id="name0">Team A</div>
+        <div class="group" id="group0"></div>
+        <div class="rack" id="rack0"></div>
+        <div class="frames" id="frames0">0</div>
+      </div>
+      <div class="team" id="team1">
+        <div class="name" id="name1">Team B</div>
+        <div class="group" id="group1"></div>
+        <div class="rack" id="rack1"></div>
+        <div class="frames" id="frames1">0</div>
+      </div>
+    </div>
+    <div class="message idle" id="message">Verbinde mit dem Tisch ...</div>
+    <div class="sys"><span id="status">-</span><span id="fps"></span></div>
+  </div>
+
+  <form class="pin" id="pinForm">
+    <input type="password" id="pinInput" inputmode="numeric" autocomplete="off" placeholder="Admin-PIN" aria-label="Admin-PIN">
+    <button class="primary" type="submit">Speichern</button>
+  </form>
+
+  <section id="fixSection">
+    <h2>Korrigieren</h2>
+    <div class="grid">
+      <button class="danger" data-cmd="foul">Foul</button>
+      <button data-cmd="switch_turn">Zug wechseln</button>
+      <button class="quiet" data-cmd="undo" id="undoBtn">Rückgängig</button>
+    </div>
+    <details>
+      <summary>Weitere Korrekturen</summary>
+      <div>
+        <p class="hint">Gruppe festlegen</p>
+        <div class="grid two" style="margin-bottom:14px">
+          <button data-cmd="set_group" data-team="0" data-group="solid" class="g0">A spielt Volle</button>
+          <button data-cmd="set_group" data-team="0" data-group="stripe" class="g0">A spielt Halbe</button>
+        </div>
+        <p class="hint">Restkugeln anpassen</p>
+        <div class="grid" style="grid-template-columns:1fr 1fr 1fr 1fr;margin-bottom:14px">
+          <button data-cmd="adjust" data-group="solid" data-delta="-1" aria-label="Eine volle weniger">Volle −</button>
+          <button data-cmd="adjust" data-group="solid" data-delta="1" aria-label="Eine volle mehr">Volle +</button>
+          <button data-cmd="adjust" data-group="stripe" data-delta="-1" aria-label="Eine halbe weniger">Halbe −</button>
+          <button data-cmd="adjust" data-group="stripe" data-delta="1" aria-label="Eine halbe mehr">Halbe +</button>
+        </div>
+        <p class="hint">Rack beenden</p>
+        <div class="grid two">
+          <button data-cmd="winner" data-team="0" id="win0">A gewinnt</button>
+          <button data-cmd="winner" data-team="1" id="win1">B gewinnt</button>
+        </div>
+      </div>
+    </details>
+  </section>
+
+  <section>
+    <h2>Spiel</h2>
+    <div id="playingControls" class="grid two">
+      <button class="primary" data-cmd="new_rack">Neues Rack</button>
+      <button class="quiet" data-cmd="abort">Spiel abbrechen</button>
+      <p class="hint span3" style="margin:4px 0 0">Erst die Kugeln aufbauen, dann „Neues Rack“ drücken. Die Teams brechen abwechselnd an.</p>
+    </div>
+    <form id="startForm">
+      <div class="grid two">
+        <div class="field"><label for="ta">Team 1</label><input type="text" id="ta" maxlength="18" placeholder="z. B. Rot" autocomplete="off"></div>
+        <div class="field"><label for="tb">Team 2</label><input type="text" id="tb" maxlength="18" placeholder="z. B. Blau" autocomplete="off"></div>
+      </div>
+      <div class="field">
+        <label id="breakLabel">Wer bricht an?</label>
+        <div class="seg" role="radiogroup" aria-labelledby="breakLabel">
+          <input type="radio" name="breaker" id="b0" value="0" checked><label for="b0" id="b0l">Team 1</label>
+          <input type="radio" name="breaker" id="b1" value="1"><label for="b1" id="b1l">Team 2</label>
+        </div>
+      </div>
+      <button class="primary" type="submit" style="width:100%">Spiel starten</button>
+      <p class="hint" style="margin-top:8px">Kugeln vorher aufbauen. Die Kamera merkt sich die Aufstellung, sobald der Tisch ruhig ist.</p>
+    </form>
+  </section>
+
+  <details id="viewDetails">
+    <summary>Was die Kamera sieht</summary>
+    <div>
+      <img class="liveview" id="liveview" alt="Entzerrte Draufsicht mit erkannten Kugeln">
+      <p class="hint" style="margin-top:8px">Gelb = volle, blau = halbe, weiß = Weiße, grau = 8. Fehlt eine Kugel oder ist sie falsch markiert, wird das Licht oder die Kalibrierung das Problem sein.</p>
+    </div>
+  </details>
+
+  <details id="calibDetails">
+    <summary>Tisch einrichten</summary>
+    <div>
+      <p class="hint">Tippe die vier Ecken der Spielfläche an, dort wo das Tuch auf die Bande trifft. Reihenfolge: einmal rundherum, beginnend an einer langen Seite.</p>
+      <div class="calib"><canvas id="calibCanvas" width="800" height="600" aria-label="Kamerabild zum Markieren der Tischecken"></canvas></div>
+      <div class="field" style="margin-top:12px">
+        <label for="tableSize">Tischgröße</label>
+        <select id="tableSize">
+          <option value="7ft">7 Fuß (Spielfläche ca. 1,98 m)</option>
+          <option value="8ft">8 Fuß (Spielfläche ca. 2,24 m)</option>
+          <option value="9ft">9 Fuß (Spielfläche ca. 2,54 m)</option>
+        </select>
+      </div>
+      <div class="grid two">
+        <button class="quiet" id="calibReset" type="button">Neu markieren</button>
+        <button class="primary" id="calibSave" type="button" disabled>Ecken speichern</button>
+      </div>
+    </div>
+  </details>
+
+  <details>
+    <summary>Trainingsdaten für Coral</summary>
+    <div>
+      <p class="hint">Speichert in ruhigen Momenten ein Bild des Tisches mit den erkannten Kugeln. Damit lässt sich später ein KI-Modell für den Coral-Stick trainieren. Die Beschriftungen stammen von der Bildverarbeitung und müssen vor dem Training geprüft werden.</p>
+      <p id="datasetInfo">-</p>
+      <button id="recordBtn" type="button" style="width:100%">Sammeln starten</button>
+    </div>
+  </details>
+
+  <details>
+    <summary>Verlauf</summary>
+    <div><ul class="log" id="log"></ul></div>
+  </details>
+
+</main>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  let state = null;
+  let pin = "";
+  try { pin = localStorage.getItem("billardPin") || ""; } catch (e) { /* Speicher nicht verfuegbar */ }
+
+  function toast(text, isErr) {
+    const t = $("toast");
+    t.textContent = text;
+    t.className = "toast show" + (isErr ? " err" : "");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => { t.className = "toast"; }, 3200);
+  }
+
+  async function post(name, payload) {
+    try {
+      const r = await fetch("/api/" + name, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Admin-Pin": pin },
+        body: JSON.stringify(payload || {}),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.status === 403) {
+        $("pinForm").classList.add("show");
+        $("pinInput").focus();
+        toast("PIN fehlt oder ist falsch. Bitte oben eingeben.", true);
+        return null;
+      }
+      if (!r.ok) { toast(data.error || "Befehl fehlgeschlagen", true); return null; }
+      if (data.state) render(data.state);
+      if (data.message) toast(data.message);
+      return data;
+    } catch (e) {
+      toast("Tisch nicht erreichbar. Läuft der Pi?", true);
+      return null;
+    }
+  }
+
+  $("pinForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    pin = $("pinInput").value.trim();
+    try { localStorage.setItem("billardPin", pin); } catch (err) { /* egal */ }
+    $("pinForm").classList.remove("show");
+    toast("PIN gespeichert");
+  });
+
+  // ---------------- Darstellung ----------------
+  function rack(el, group, n) {
+    el.innerHTML = "";
+    if (!group) return;
+    for (let i = 0; i < n; i++) {
+      const b = document.createElement("span");
+      b.className = "ball " + group;
+      el.appendChild(b);
+    }
+  }
+
+  function render(s) {
+    state = s;
+    const g = s.game;
+    const idle = g.phase === "idle";
+    for (const i of [0, 1]) {
+      $("name" + i).textContent = g.teams[i];
+      $("frames" + i).textContent = g.frames_won[i];
+      const grp = g.groups[i];
+      $("group" + i).textContent = idle ? "" :
+        grp ? g.group_names[i] + ", noch " + g.remaining[grp] : "Tisch offen";
+      rack($("rack" + i), idle ? null : grp, grp ? g.remaining[grp] : 0);
+      $("team" + i).classList.toggle("active", g.phase === "playing" && g.turn === i);
+    }
+    const cb = $("cueball");
+    cb.classList.toggle("hidden", g.phase !== "playing");
+    cb.classList.toggle("right", g.turn === 1);
+    const msg = $("message");
+    msg.textContent = g.message;
+    msg.classList.toggle("idle", idle);
+    $("status").textContent = s.status;
+    $("status").className = s.status === "Bereit" ? "ok" : "";
+    $("fps").textContent = s.camera_fps ? s.camera_fps.toFixed(1) + " Bilder/s" : "Kamera getrennt";
+
+    $("fixSection").style.display = idle ? "none" : "";
+    $("playingControls").style.display = idle ? "none" : "";
+    $("startForm").style.display = idle ? "" : "none";
+    $("undoBtn").disabled = !g.can_undo;
+    $("win0").textContent = g.teams[0] + " gewinnt";
+    $("win1").textContent = g.teams[1] + " gewinnt";
+    document.querySelectorAll(".g0")[0].textContent = g.teams[0] + " spielt Volle";
+    document.querySelectorAll(".g0")[1].textContent = g.teams[0] + " spielt Halbe";
+
+    const log = $("log");
+    log.innerHTML = "";
+    for (const [t, text] of g.log) {
+      const li = document.createElement("li");
+      const tm = document.createElement("time");
+      tm.textContent = t;
+      li.appendChild(tm);
+      li.appendChild(document.createTextNode(text));
+      log.appendChild(li);
+    }
+
+    $("datasetInfo").textContent = s.dataset_count + " Bilder gesammelt" + (s.record ? ", Sammeln läuft." : ".");
+    $("recordBtn").textContent = s.record ? "Sammeln stoppen" : "Sammeln starten";
+    if (!calibDirty && s.table_size) $("tableSize").value = s.table_size;
+  }
+
+  async function poll() {
+    try {
+      const r = await fetch("/api/state", { cache: "no-store" });
+      if (r.ok) render(await r.json());
+    } catch (e) {
+      $("status").textContent = "Tisch nicht erreichbar";
+    }
+    setTimeout(poll, 1500);
+  }
+
+  // ---------------- Knöpfe ----------------
+  document.querySelectorAll("[data-cmd]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const d = btn.dataset;
+      const cmd = d.cmd;
+      if (cmd === "abort" && !confirm("Spiel wirklich abbrechen? Der Spielstand geht verloren.")) return;
+      const payload = {};
+      if (d.team !== undefined) payload.team = Number(d.team);
+      if (d.group) payload.group = d.group;
+      if (d.delta) payload.delta = Number(d.delta);
+      post(cmd, payload);
+    });
+  });
+
+  for (const [inp, lbl, def] of [["ta", "b0l", "Team 1"], ["tb", "b1l", "Team 2"]]) {
+    $(inp).addEventListener("input", () => { $(lbl).textContent = $(inp).value.trim() || def; });
+  }
+  $("startForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const breaker = Number(document.querySelector("input[name=breaker]:checked").value);
+    post("start", { team_a: $("ta").value, team_b: $("tb").value, breaker });
+  });
+
+  $("recordBtn").addEventListener("click", () => post("record", { enabled: !(state && state.record) }));
+
+  // ---------------- Live-Ansicht ----------------
+  let viewTimer = null;
+  $("viewDetails").addEventListener("toggle", (e) => {
+    clearInterval(viewTimer);
+    if (e.target.open) {
+      const load = () => { $("liveview").src = "/api/warped.jpg?t=" + Date.now(); };
+      load();
+      viewTimer = setInterval(load, 2000);
+    }
+  });
+
+  // ---------------- Kalibrierung ----------------
+  const canvas = $("calibCanvas");
+  const ctx = canvas.getContext("2d");
+  const img = new Image();
+  let points = [];
+  let calibDirty = false;
+
+  function drawCalib() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (img.complete && img.naturalWidth) ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const pts = points.length ? points : ((state && state.corners) || []);
+    if (pts.length) {
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = points.length ? "#6FB3E0" : "rgba(239,230,210,.7)";
+      ctx.beginPath();
+      pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
+      if (pts.length === 4) ctx.closePath();
+      ctx.stroke();
+      pts.forEach((p, i) => {
+        ctx.fillStyle = "#6FB3E0";
+        ctx.beginPath(); ctx.arc(p[0], p[1], 9, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#0A2F25";
+        ctx.font = "bold 13px sans-serif";
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(String(i + 1), p[0], p[1]);
+      });
+    }
+  }
+  img.onload = () => {
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    drawCalib();
+  };
+  img.onerror = () => toast("Kein Kamerabild. Ist die Kamera verbunden?", true);
+
+  $("calibDetails").addEventListener("toggle", (e) => {
+    if (e.target.open) { points = []; calibDirty = false; img.src = "/api/frame.jpg?t=" + Date.now(); }
+  });
+  canvas.addEventListener("pointerdown", (e) => {
+    if (points.length >= 4) return;
+    const r = canvas.getBoundingClientRect();
+    const x = (e.clientX - r.left) * canvas.width / r.width;
+    const y = (e.clientY - r.top) * canvas.height / r.height;
+    points.push([Math.round(x), Math.round(y)]);
+    calibDirty = true;
+    $("calibSave").disabled = points.length !== 4;
+    drawCalib();
+  });
+  $("tableSize").addEventListener("change", () => {
+    calibDirty = true;
+    $("calibSave").disabled = !(points.length === 4 || (state && state.corners));
+  });
+  $("calibReset").addEventListener("click", () => {
+    points = [];
+    $("calibSave").disabled = true;
+    img.src = "/api/frame.jpg?t=" + Date.now();
+  });
+  $("calibSave").addEventListener("click", async () => {
+    const corners = points.length === 4 ? points : state.corners;
+    const res = await post("calibrate", { corners, table_size: $("tableSize").value });
+    if (res) { points = []; calibDirty = false; $("calibSave").disabled = true; drawCalib(); }
+  });
+
+  poll();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1 @@
+Hier die esp32cam_stream.ino.bin ablegen (fuer den Docker-Updater).
