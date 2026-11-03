@@ -100,7 +100,7 @@ class Display:
                 return False
         return True
 
-    def draw(self, frame, frame_id, pipeline, reader):
+    def draw(self, frame, frame_id, pipeline, reader, gyro_guidance=None):
         sw, sh = self.screen.get_size()
         pw = max(360, int(sw * 0.30))
         cw = sw - pw
@@ -127,6 +127,7 @@ class Display:
                 for b, (x, y) in zip(balls, pts):
                     pygame.draw.circle(self.screen, KIND_COLORS.get(b.kind, TEXT),
                                        (int(ox + x * scale), int(oy + y * scale)), rad, 2)
+                self._draw_guidance(ox, oy, scale, table, gyro_guidance, rad)
         else:
             msg = "Warte auf Kamera ..."
             if reader.last_error:
@@ -135,10 +136,33 @@ class Display:
                 self.text(line, 42, (40, sh // 2 - 30 + i * 44), WARN)
 
         # --- Scoreboard
-        self._draw_panel(cw, pw, sh, pipeline, reader)
+        self._draw_panel(cw, pw, sh, pipeline, reader, gyro_guidance)
         pygame.display.flip()
 
-    def _draw_panel(self, x0, pw, sh, pipeline, reader):
+    def _draw_guidance(self, ox, oy, scale, table, guidance, radius):
+        if not guidance or not guidance.get("available"):
+            return
+        cue = guidance.get("cue")
+        target = guidance.get("target")
+        if not cue or not target:
+            return
+        cue_cam = table.to_camera([cue])[0]
+        target_cam = table.to_camera([target])[0]
+        c0 = (int(ox + cue_cam[0] * scale), int(oy + cue_cam[1] * scale))
+        t0 = (int(ox + target_cam[0] * scale), int(oy + target_cam[1] * scale))
+        pygame.draw.line(self.screen, (60, 60, 60), c0, t0, max(2, radius // 2))
+        actual = guidance.get("actual_angle_deg")
+        if actual is not None:
+            import math
+            rlen = max(40, int(radius * 8))
+            ang = math.radians(actual)
+            ax = int(c0[0] + math.cos(ang) * rlen)
+            ay = int(c0[1] + math.sin(ang) * rlen)
+            pygame.draw.line(self.screen, (230, 230, 230), c0, (ax, ay), max(2, radius // 2))
+        if guidance.get("aligned"):
+            self.text("✓", 180, (c0[0] - 52, c0[1] - 82), ACCENT, bold=True)
+
+    def _draw_panel(self, x0, pw, sh, pipeline, reader, gyro_guidance=None):
         pygame.draw.rect(self.screen, PANEL, (x0, 0, pw, sh))
         game = pipeline.game
         g = game.to_dict()
@@ -197,6 +221,15 @@ class Display:
         self.text(f"Kamera {reader.fps:4.1f} fps", 28, (x0 + pad, fy + 34), MUTED)
         if self.admin_url:
             self.text(f"Admin: {self.admin_url}", 28, (x0 + pad, fy + 64), MUTED)
+        if gyro_guidance and gyro_guidance.get("available"):
+            gy = fy - 34
+            if gyro_guidance.get("actual_angle_deg") is None:
+                self.text("Gyro: kein Winkel", 28, (x0 + pad, gy), WARN)
+            elif gyro_guidance.get("aligned"):
+                self.text("Gyro: Ausrichtung passt", 28, (x0 + pad, gy), ACCENT)
+            else:
+                err = abs(float(gyro_guidance.get("angle_error_deg", 0.0)))
+                self.text(f"Gyro: Abweichung {err:.1f}°", 28, (x0 + pad, gy), WARN)
 
     def _ball_icons(self, x, y, group, n):
         r = 11

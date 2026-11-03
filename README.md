@@ -99,7 +99,25 @@ Tests selbst laufen lassen (im Ordner `app/`):
 python3 -m sim.test_detector      # Erkennungsqualität
 python3 -m sim.test_game          # Regeln + simuliertes Spiel
 python3 -m sim.benchmark_shots    # Trefferquote pro Stoß
+python3 -m sim.test_guidance      # Gyro-Ausrichtung + Stoßplanung
 ```
+
+## 8. Gyroskop im Kö (Ausrichtung)
+
+Der Raspberry Pi nimmt den Kö-Winkel über das Admin-API an:
+
+```bash
+curl -X POST http://<pi-ip>:8080/api/gyro \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Pin: <PIN>" \
+  -d '{"angle_deg": 23.5}'
+```
+
+Auf dem Beamer werden dann zwei Kö-Linien angezeigt:
+- **dunkel** = berechnete Soll-Richtung für den nächsten Stoß
+- **hell** = gemessene Ist-Richtung vom Gyroskop
+
+Bei passender Ausrichtung erscheint ein großer grüner Haken.
 
 ## 7. Kamera-Firmware aktualisieren
 

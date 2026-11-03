@@ -74,6 +74,7 @@ main { max-width: 560px; margin: 0 auto; }
 .message.idle { color: var(--ivory-dim); }
 .sys { display: flex; justify-content: space-between; gap: 8px; margin: 10px 4px 0; font-size: 14px; color: var(--ivory-dim); }
 .sys .ok { color: var(--chalk); }
+.gyro { margin-top: 6px; font-size: 14px; color: var(--ivory-dim); }
 
 /* ---------- Bereiche ---------- */
 section { margin-top: 28px; }
@@ -166,6 +167,7 @@ details > div { margin-top: 12px; }
     </div>
     <div class="message idle" id="message">Verbinde mit dem Tisch ...</div>
     <div class="sys"><span id="status">-</span><span id="fps"></span></div>
+    <div class="gyro" id="gyroInfo">Gyro: keine Daten</div>
   </div>
 
   <form class="pin" id="pinForm">
@@ -233,6 +235,17 @@ details > div { margin-top: 12px; }
     <div>
       <img class="liveview" id="liveview" alt="Entzerrte Draufsicht mit erkannten Kugeln">
       <p class="hint" style="margin-top:8px">Gelb = volle, blau = halbe, weiß = Weiße, grau = 8. Fehlt eine Kugel oder ist sie falsch markiert, wird das Licht oder die Kalibrierung das Problem sein.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>Gyroskop</summary>
+    <div>
+      <p class="hint">Der Kö kann den Winkel per <code>POST /api/gyro</code> mit <code>{"angle_deg": ...}</code> senden. Hier kann der Wert zum Testen gesetzt werden.</p>
+      <div class="grid two">
+        <input type="text" id="gyroAngle" inputmode="decimal" placeholder="Winkel in Grad">
+        <button class="primary" id="gyroSend" type="button">Gyro-Winkel senden</button>
+      </div>
     </div>
   </details>
 
@@ -354,6 +367,17 @@ details > div { margin-top: 12px; }
     $("status").textContent = s.status;
     $("status").className = s.status === "Bereit" ? "ok" : "";
     $("fps").textContent = s.camera_fps ? s.camera_fps.toFixed(1) + " Bilder/s" : "Kamera getrennt";
+    const gg = s.gyro_guidance || {};
+    if (!gg.available) {
+      $("gyroInfo").textContent = "Gyro: warte auf Spielzustand";
+    } else if (gg.actual_angle_deg === null || gg.actual_angle_deg === undefined) {
+      $("gyroInfo").textContent = "Gyro: kein Winkel vom Kö";
+    } else if (gg.aligned) {
+      $("gyroInfo").textContent = "Gyro: ausgerichtet ✓";
+    } else {
+      const err = Math.abs(Number(gg.angle_error_deg || 0)).toFixed(1);
+      $("gyroInfo").textContent = "Gyro: Abweichung " + err + "°";
+    }
 
     $("fixSection").style.display = idle ? "none" : "";
     $("playingControls").style.display = idle ? "none" : "";
@@ -414,6 +438,11 @@ details > div { margin-top: 12px; }
   });
 
   $("recordBtn").addEventListener("click", () => post("record", { enabled: !(state && state.record) }));
+  $("gyroSend").addEventListener("click", () => {
+    const angle = Number(($("gyroAngle").value || "").replace(",", "."));
+    if (!Number.isFinite(angle)) { toast("Bitte einen gültigen Winkel eingeben.", true); return; }
+    post("gyro", { angle_deg: angle });
+  });
 
   // ---------------- Live-Ansicht ----------------
   let viewTimer = null;

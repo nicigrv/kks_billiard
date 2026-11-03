@@ -22,6 +22,7 @@ import time
 import cv2
 
 import config
+import guidance
 import web
 from geometry import Table, TABLE_SIZES
 from pipeline import Pipeline
@@ -52,6 +53,7 @@ class App:
         table = Table(self.cfg.get("corners"), TABLE_SIZES.get(self.cfg.get("table_size"), TABLE_SIZES["8ft"]))
         self.pipe = Pipeline(table, recorder=self.recorder)
         self.proc_fps = 0.0
+        self._gyro = {"angle_deg": None, "updated_at": 0.0}
         self._stop = threading.Event()
         threading.Thread(target=self._process_loop, name="erkennung", daemon=True).start()
 
@@ -77,6 +79,31 @@ class App:
                 n, t0 = 0, time.monotonic()
 
     # ------------------------------------------------------------- Portal-API
+    def guidance_state(self):
+        with self.pipe.lock:
+            balls = list(self.pipe.balls)
+            game = self.pipe.game.to_dict()
+        plan = guidance.plan_shot(balls, game)
+        out = {"available": bool(plan), "actual_angle_deg": self._gyro["angle_deg"]}
+        if self._gyro["updated_at"] > 0:
+            out["gyro_age_s"] = round(max(0.0, time.monotonic() - self._gyro["updated_at"]), 2)
+        if not plan:
+            return out
+        out.update({
+            "optimal_angle_deg": round(plan["angle_deg"], 2),
+            "cue": [round(plan["cue"][0], 2), round(plan["cue"][1], 2)],
+            "target": [round(plan["target"][0], 2), round(plan["target"][1], 2)],
+            "object": [round(plan["object"][0], 2), round(plan["object"][1], 2)],
+            "pocket": [round(plan["pocket"][0], 2), round(plan["pocket"][1], 2)],
+        })
+        if self._gyro["angle_deg"] is not None:
+            err = guidance.angle_diff_deg(self._gyro["angle_deg"], plan["angle_deg"])
+            out["angle_error_deg"] = round(err, 2)
+            out["aligned"] = guidance.is_aligned(self._gyro["angle_deg"], plan["angle_deg"])
+        else:
+            out["aligned"] = False
+        return out
+
     def state_dict(self):
         with self.pipe.lock:
             g = self.pipe.game.to_dict()
@@ -94,6 +121,7 @@ class App:
             "table_size": self.cfg.get("table_size"),
             "record": self.recorder.enabled,
             "dataset_count": self.recorder.count,
+            "gyro_guidance": self.guidance_state(),
         }
 
     def jpeg(self, kind):
@@ -160,6 +188,11 @@ class App:
                 self.cfg["record_dataset"] = self.recorder.enabled
                 config.save(self.cfg)
                 return "Sammeln gestartet" if self.recorder.enabled else "Sammeln gestoppt"
+            elif name == "gyro":
+                angle = p.get("angle_deg")
+                self._gyro["angle_deg"] = float(angle) if angle is not None else None
+                self._gyro["updated_at"] = time.monotonic()
+                return "Gyroskop-Winkel übernommen"
             else:
                 return None
             return g.message
@@ -200,7 +233,7 @@ def main():
     try:
         while disp.handle_events():
             frame, fid, _ = app.reader.latest()
-            disp.draw(frame, fid, app.pipe, app.reader)
+            disp.draw(frame, fid, app.pipe, app.reader, app.guidance_state())
             clock.tick(20)
     finally:
         app.stop()
