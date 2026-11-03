@@ -266,6 +266,18 @@ details > div { margin-top: 12px; }
   </details>
 
   <details>
+    <summary>Rundenaufzeichnung</summary>
+    <div>
+      <p class="hint">Speichert bei jedem Zug die grafische Oberfläche (ohne Kamerabilder) und erstellt nach Rack-Ende automatisch ein kurzes Video.</p>
+      <p id="roundInfo">-</p>
+      <div class="grid two">
+        <button id="roundRecordBtn" type="button">Aufzeichnung starten</button>
+        <a id="roundVideoLink" class="quiet" href="/api/round_video.mp4" target="_blank" rel="noopener" aria-disabled="true">Letztes Video öffnen</a>
+      </div>
+    </div>
+  </details>
+
+  <details>
     <summary>Verlauf</summary>
     <div><ul class="log" id="log"></ul></div>
   </details>
@@ -377,6 +389,14 @@ details > div { margin-top: 12px; }
 
     $("datasetInfo").textContent = s.dataset_count + " Bilder gesammelt" + (s.record ? ", Sammeln läuft." : ".");
     $("recordBtn").textContent = s.record ? "Sammeln stoppen" : "Sammeln starten";
+    $("roundInfo").textContent = s.record_round
+      ? ("Aufzeichnung aktiv, bisher " + s.round_frames + " Zugbilder gespeichert.")
+      : "Aufzeichnung aus.";
+    $("roundRecordBtn").textContent = s.record_round ? "Aufzeichnung stoppen" : "Aufzeichnung starten";
+    $("roundVideoLink").style.pointerEvents = s.round_video_ready ? "auto" : "none";
+    $("roundVideoLink").style.opacity = s.round_video_ready ? "1" : ".5";
+    $("roundVideoLink").setAttribute("aria-disabled", s.round_video_ready ? "false" : "true");
+    if (s.round_video_ready) $("roundVideoLink").href = "/api/round_video.mp4?t=" + Date.now();
     if (!calibDirty && s.table_size) $("tableSize").value = s.table_size;
   }
 
@@ -414,6 +434,7 @@ details > div { margin-top: 12px; }
   });
 
   $("recordBtn").addEventListener("click", () => post("record", { enabled: !(state && state.record) }));
+  $("roundRecordBtn").addEventListener("click", () => post("round_record", { enabled: !(state && state.record_round) }));
 
   // ---------------- Live-Ansicht ----------------
   let viewTimer = null;

@@ -25,7 +25,7 @@ import config
 import web
 from geometry import Table, TABLE_SIZES
 from pipeline import Pipeline
-from recorder import Recorder
+from recorder import Recorder, RoundRecorder
 from stream_reader import MjpegReader
 
 KIND_BGR = {"cue": (255, 255, 255), "eight": (130, 130, 130), "solid": (0, 190, 255), "stripe": (255, 200, 0)}
@@ -49,6 +49,8 @@ class App:
         self.reader = MjpegReader(url).start()
         self.recorder = Recorder(os.path.join(config.DATA_DIR, "dataset"))
         self.recorder.enabled = bool(self.cfg.get("record_dataset"))
+        self.round_recorder = RoundRecorder(os.path.join(config.DATA_DIR, "round_recordings"))
+        self.round_recorder.enabled = bool(self.cfg.get("record_round"))
         table = Table(self.cfg.get("corners"), TABLE_SIZES.get(self.cfg.get("table_size"), TABLE_SIZES["8ft"]))
         self.pipe = Pipeline(table, recorder=self.recorder)
         self.proc_fps = 0.0
@@ -69,6 +71,13 @@ class App:
                 ev = self.pipe.process(frame)
                 if isinstance(ev, tuple):
                     print(f"[spiel] {ev[1]}", flush=True)
+                    if ev[0] == "shot":
+                        state = self.state_dict()
+                        self.round_recorder.save_shot(state)
+                        if state["game"]["phase"] == "finished":
+                            video = self.round_recorder.finish_round()
+                            if video:
+                                print(f"[runde] Video gespeichert: {video}", flush=True)
             except Exception as e:  # ein kaputtes Bild darf das System nicht stoppen
                 print(f"[erkennung] Fehler: {type(e).__name__}: {e}", flush=True)
             n += 1
@@ -94,6 +103,9 @@ class App:
             "table_size": self.cfg.get("table_size"),
             "record": self.recorder.enabled,
             "dataset_count": self.recorder.count,
+            "record_round": self.round_recorder.enabled,
+            "round_frames": self.round_recorder.frame_count,
+            "round_video_ready": bool(self.round_recorder.latest_video()),
         }
 
     def jpeg(self, kind):
@@ -121,11 +133,14 @@ class App:
             if name == "start":
                 g.start_match(str(p.get("team_a", "")), str(p.get("team_b", "")), int(p.get("breaker", 0)) % 2)
                 self.pipe.restart_tracking()
+                self.round_recorder.reset_round()
             elif name == "new_rack":
                 g.new_rack(p.get("breaker"))
                 self.pipe.restart_tracking()
+                self.round_recorder.reset_round()
             elif name == "abort":
                 g.abort()
+                self.round_recorder.reset_round()
             elif name == "foul":
                 g.foul()
             elif name == "switch_turn":
@@ -142,6 +157,10 @@ class App:
                 g.adjust(p["group"], int(p["delta"]))
             elif name == "winner":
                 g.declare_winner(int(p["team"]) % 2)
+                self.round_recorder.save_shot(self.state_dict())
+                video = self.round_recorder.finish_round()
+                if video:
+                    print(f"[runde] Video gespeichert: {video}", flush=True)
             elif name == "calibrate":
                 corners = p.get("corners")
                 size = p.get("table_size", "8ft")
@@ -160,9 +179,26 @@ class App:
                 self.cfg["record_dataset"] = self.recorder.enabled
                 config.save(self.cfg)
                 return "Sammeln gestartet" if self.recorder.enabled else "Sammeln gestoppt"
+            elif name == "round_record":
+                self.round_recorder.enabled = bool(p.get("enabled"))
+                self.cfg["record_round"] = self.round_recorder.enabled
+                config.save(self.cfg)
+                if not self.round_recorder.enabled:
+                    self.round_recorder.reset_round()
+                return "Rundenaufzeichnung gestartet" if self.round_recorder.enabled else "Rundenaufzeichnung gestoppt"
             else:
                 return None
             return g.message
+
+    def round_video(self):
+        path = self.round_recorder.latest_video()
+        if not path:
+            return None
+        try:
+            with open(path, "rb") as f:
+                return f.read()
+        except OSError:
+            return None
 
     def stop(self):
         self._stop.set()

@@ -45,6 +45,11 @@ def make_handler(app, pin):
                 if jpg is None:
                     return self._send(503, {"error": "Noch kein Kamerabild"})
                 return self._send(200, jpg, "image/jpeg")
+            if path == "/api/round_video.mp4":
+                video = app.round_video()
+                if video is None:
+                    return self._send(404, {"error": "Noch kein Rundenvideo"})
+                return self._send(200, video, "video/mp4")
             return self._send(404, {"error": "Nicht gefunden"})
 
         def do_POST(self):

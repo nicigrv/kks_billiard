@@ -57,6 +57,8 @@ Erst wenn der Tisch frei und ruhig ist. Ein Queue, das quer auf dem Tuch liegt, 
 
 Geht etwas schief: **„Rückgängig“** macht die letzte Änderung rückgängig, unter „Weitere Korrekturen“ lassen sich Gruppen, Restkugeln und Sieger von Hand setzen.
 
+Optional im Portal unter **„Rundenaufzeichnung“** aktivieren: Dann wird nach jedem Zug ein Stand der grafischen Oberfläche gespeichert und nach Rack-Ende als kurzes Video bereitgestellt. Kamerabilder werden dabei nicht gespeichert.
+
 ## 4. Ohne Tisch testen (Simulator)
 
 ```bash
