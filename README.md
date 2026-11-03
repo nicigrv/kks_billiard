@@ -15,7 +15,8 @@ Mannschaften, Frames, Punkte und alle 15 Kugeln – versenkte sind durchgestrich
 | `app/` | **Hauptprogramm**: Erkennung, 8-Ball-Regeln, Scoreboard, Admin-Portal |
 | `app/sim/` | Simulator + Tests (laufen ohne Tisch) |
 | `cue_sensor/` | Firmware für das Gyroskop im Queue (ESP32 + MPU6050, PlatformIO) |
-| `coral/` | Hardwaretest für den Coral USB Accelerator |
+| `coral/` | Coral-Container: führt das KI-Modell aus + Hardwaretest |
+| `training/` | Kugelmodell für den Coral trainieren (PC / Google Colab) |
 | `esp32cam_stream/` | Firmware der Kamera |
 | `firmware/` | fertige Kamera-Firmware (`.bin`) |
 | `tools/` | `update_cam.py`: Kamera-Firmware übers Netzwerk aktualisieren |
@@ -71,9 +72,11 @@ links die **aktuelle Grafik vom Pi** (wie auf dem Beamer, aktualisiert sich selb
 - **Spiel starten / Neues Rack / Abbrechen**
 - **Letzten erkannten Stoß verwerfen**: wenn das System einen Stoß gezählt hat, der keiner war.
   Der Spielstand springt auf vor diesem Stoß zurück.
-- **Kugeln korrigieren (KI-Training)**: Kugel antippen → Weiße / 8 / Volle / Halbe / keine Kugel
-  und Farbe wählen; fehlende Kugel: auf die freie Stelle tippen. Gespeichert wird Bild + richtige
-  Beschriftung in `data/dataset/korrigiert/` (fürs Training), auf Wunsch auch sofort im laufenden Spiel.
+- **KI-Training: Bilder prüfen**: die nach jedem Spielzug gesammelten Bilder durchgehen –
+  „Passt alles“ oder Kugel antippen → Weiße / 8 / Volle / Halbe / keine Kugel und Farbe wählen;
+  fehlende Kugel: auf die freie Stelle tippen. Geprüfte Bilder landen in `data/dataset/geprueft/`.
+  Unter „Live-Bild jetzt“ lässt sich auch das aktuelle Bild korrigieren, auf Wunsch sofort im Spiel.
+- **KI-Modell (Coral)**: Status, Trainingsdaten laden, Modell hochladen (siehe 5)
 - **KI-Schlagverbesserung an/aus** (siehe 3b)
 - **Spielaufzeichnung** (siehe 3c)
 
@@ -110,18 +113,26 @@ Ecken für den Simulator: einfach die vier Ecken des grünen Bereichs antippen. 
 
 Simuliertes Queue-Gyroskop: `docker compose --profile sim up -d fake-cue` (Schlagverbesserung im Portal einschalten).
 
-## 5. Coral-Stick testen
+## 5. KI-Modell für den Coral-Stick
 
+Der Coral läuft im eigenen Container `billard-coral` (startet mit `docker compose up -d`).
+Solange kein Modell da ist, erkennt der Pi die Kugeln mit klassischer Bildverarbeitung (OpenCV).
+Das Portal zeigt unter **„KI-Modell (Coral)“**, womit gerade erkannt wird.
+
+1. **Sammeln:** Nach jedem Spielzug macht der Pi ein Bild und ordnet alle Kugeln zu (abschaltbar).
+2. **Prüfen (iPad):** „KI-Training: Bilder prüfen“ → „Passt alles“, Kugel antippen und korrigieren,
+   oder „Verwerfen“. Die Zahl am Titel zeigt, wie viele Bilder warten.
+3. **Trainieren:** „Trainingsdaten laden“ → mit `training/train_coral.py` trainieren, am einfachsten
+   in Google Colab. Anleitung: `training/README.md`.
+4. **Hochladen:** `billard_edgetpu.tflite` unter „Modell hochladen“. Der Coral übernimmt es sofort.
+
+Hardware-Test des Sticks:
 ```bash
-docker compose build coral-check      # einmalig, lädt Googles Coral-Pakete
+docker compose stop coral                # der Stick kann nur einen Benutzer haben
 docker compose run --rm coral-check
+docker compose start coral
 ```
 Erwartet: `[OK] Coral funktioniert: ~3-5 ms pro Bild`. Den Stick an einen **blauen USB-3-Port** stecken.
-
-**Ehrlich:** Der Test beweist nur, dass Stick und Treiber laufen. Ein Modell, das Billardkugeln erkennt,
-gibt es nicht fertig. Dafür braucht es Trainingsbilder **von eurem Tisch**:
-im Portal unter **„Trainingsdaten für Coral“** sammeln (landen in `data/dataset/`), ein paar Hundert Bilder,
-Beschriftungen prüfen, dann trainieren (nächster Schritt).
 
 ## 6. Genauigkeit (gemessen im Simulator)
 
@@ -146,6 +157,7 @@ python3 -m sim.test_detector      # Erkennungsqualität
 python3 -m sim.test_game          # Regeln + simuliertes Spiel
 python3 -m sim.benchmark_shots    # Trefferquote pro Stoß
 python3 -m sim.test_features      # Stoßvorschlag, Gyroskop, Game-Bar, Aufzeichnung
+python3 -m sim.test_coral         # Trainingsbilder prüfen, Coral-Anbindung
 ```
 
 ## 7. Kamera-Firmware aktualisieren

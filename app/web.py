@@ -10,12 +10,14 @@ import json
 import os
 import re
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from config import UserError
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+MAX_MODEL_BYTES = 64 * 1024 * 1024
 
 
 def make_handler(app, pin):
@@ -37,7 +39,7 @@ def make_handler(app, pin):
             self.end_headers()
             self.wfile.write(body)
 
-        def _send_file(self, path, ctype):
+        def _send_file(self, path, ctype, filename=None):
             """Datei mit Range-Unterstuetzung (Safari auf iPad/iPhone spielt Videos nur so ab)."""
             size = os.path.getsize(path)
             start, end = 0, size - 1
@@ -59,6 +61,8 @@ def make_handler(app, pin):
             self.send_response(206 if partial else 200)
             self.send_header("Content-Type", ctype)
             self.send_header("Accept-Ranges", "bytes")
+            if filename:
+                self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
             self.send_header("Content-Length", str(end - start + 1))
             if partial:
                 self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
@@ -99,6 +103,30 @@ def make_handler(app, pin):
                 if jpg is None:
                     return self._send(404, {"error": "Bild nicht mehr vorhanden"})
                 return self._send(200, jpg, "image/jpeg")
+            if path == "/api/review/next":
+                item = app.recorder.next_pending(query.get("after", [None])[0])
+                if item is None:
+                    return self._send(404, {"error": "Keine Bilder zu prüfen"})
+                return self._send(200, item)
+            if path == "/api/review/image":
+                fpath = app.recorder.pending_image(query.get("name", [""])[0])
+                if fpath is None:
+                    return self._send(404, {"error": "Bild nicht gefunden"})
+                return self._send_file(fpath, "image/jpeg")
+            if path == "/api/dataset.zip":
+                # Trainingsdaten herunterladen (fuer training/train_coral.py)
+                tmp = os.path.join(os.path.dirname(app.recorder.base_dir), f"trainingsdaten-{threading.get_ident()}.zip")
+                try:
+                    n = app.recorder.export_zip(tmp)
+                    if n == 0:
+                        return self._send(404, {"error": "Noch keine geprüften Bilder"})
+                    return self._send_file(tmp, "application/zip",
+                                           filename=time.strftime("billard-training-%Y%m%d.zip"))
+                except (BrokenPipeError, ConnectionResetError):
+                    return None
+                finally:
+                    if os.path.exists(tmp):
+                        os.remove(tmp)
             if path.startswith("/videos/"):
                 fpath = app.rounds.video_path(unquote(path[len("/videos/"):]))
                 if fpath is None:
@@ -117,6 +145,17 @@ def make_handler(app, pin):
         def do_POST(self):
             if pin and self.headers.get("X-Admin-Pin", "") != pin:
                 return self._send(403, {"error": "Falsche PIN"})
+            if self.path.split("?")[0] == "/api/model":
+                # Coral-Modell hochladen (Datei roh im Body)
+                n = int(self.headers.get("Content-Length", "0"))
+                if not 0 < n <= MAX_MODEL_BYTES:
+                    return self._send(400, {"error": "Datei fehlt oder ist zu groß"})
+                data = self.rfile.read(n)
+                try:
+                    msg = app.save_model(data)
+                except UserError as e:
+                    return self._send(400, {"error": str(e)})
+                return self._send(200, {"ok": True, "message": msg, "state": app.state_dict()})
             try:
                 n = int(self.headers.get("Content-Length", "0"))
                 payload = json.loads(self.rfile.read(n) or b"{}") if n else {}

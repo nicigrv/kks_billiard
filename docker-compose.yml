@@ -5,7 +5,8 @@
 # Admin-Portal:                     http://<pi-ip>:8080
 #
 # Einmalige Werkzeuge (laufen nur auf Befehl):
-#   docker compose run --rm coral-check                 Coral-Stick testen
+#   docker compose stop coral && docker compose run --rm coral-check && docker compose start coral
+#                                                       Coral-Stick testen
 #   docker compose --profile sim up -d fake-table       simulierte Kamera (Test ohne Tisch)
 #   docker compose --profile sim up -d fake-cue         simuliertes Queue-Gyroskop
 #   docker compose run --rm updater                     Kamera-Firmware aktualisieren
@@ -22,6 +23,7 @@ services:
       CAM_URL: http://192.168.88.200:81/stream    # <- IP der Kamera anpassen
       ADMIN_PIN: ""                                # <- z. B. "4711", leer = ohne PIN
       CUE_PORT: "5005"                             # UDP-Port fuer das Gyroskop im Queue
+      CORAL_PORT: "8765"                           # Coral-Container (Dienst "coral")
     devices:
       - /dev/dri:/dev/dri                          # HDMI-Ausgabe
     volumes:
@@ -36,12 +38,30 @@ services:
     network_mode: host
     command: ["python3", "-m", "sim.fake_cue"]
 
-  coral-check:
+  # Fuehrt das trainierte Kugelmodell auf dem Coral-Stick aus (Python 3.9, Googles Pakete).
+  # Ohne Modell oder ohne Stick nutzt das Hauptprogramm automatisch die klassische Erkennung.
+  coral:
     build: ./coral
-    image: billard-coral-check:latest
-    profiles: ["tools"]
+    image: billard-coral:latest
+    container_name: billard-coral
+    restart: unless-stopped
+    network_mode: host                             # Hauptprogramm erreicht ihn auf 127.0.0.1:8765
     # Der Stick meldet sich nach dem Firmware-Laden mit neuer USB-ID neu an,
     # deshalb den ganzen USB-Bus durchreichen statt eines einzelnen Geraets.
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+      - ./data:/data:ro                            # Modell: data/models/billard_edgetpu.tflite
+    device_cgroup_rules:
+      - "c 189:* rmw"
+    logging:
+      driver: json-file
+      options: { max-size: "2m", max-file: "2" }
+
+  # Hardware-Test. Vorher "docker compose stop coral", der Stick kann nur einen Benutzer haben.
+  coral-check:
+    image: billard-coral:latest
+    profiles: ["tools"]
+    command: ["python3", "check_coral.py"]
     volumes:
       - /dev/bus/usb:/dev/bus/usb
     device_cgroup_rules:

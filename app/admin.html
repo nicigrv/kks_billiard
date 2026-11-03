@@ -61,6 +61,9 @@ main { max-width: 560px; margin: 0 auto; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .chip { min-height: 44px; min-width: 44px; padding: 8px 12px; border-radius: 22px; border: 2px solid transparent; font-weight: 700; }
 .chip.sel { border-color: var(--ivory); box-shadow: 0 0 0 2px var(--felt-dark) inset; }
+.badge { display: inline-block; min-width: 26px; padding: 2px 8px; margin-left: 6px; border-radius: 13px; background: var(--chalk); color: var(--felt-dark); font: 700 16px/1.3 var(--body); text-align: center; vertical-align: middle; }
+.btnlink { display: flex; align-items: center; justify-content: center; min-height: 52px; padding: 14px 12px; border-radius: var(--radius-btn); background: var(--rail); color: var(--ivory); font-weight: 700; text-decoration: none; text-align: center; }
+.btnlink.off { opacity: .45; pointer-events: none; }
 .check { display: flex; align-items: center; gap: 10px; margin: 12px 0; font-size: 15px; color: var(--ivory); }
 .check input { width: 24px; height: 24px; }
 
@@ -297,21 +300,55 @@ details > div { margin-top: 12px; }
   </section>
 
   <details id="fixBallsDetails">
-    <summary>Kugeln korrigieren (KI-Training)</summary>
+    <summary>KI-Training: Bilder prüfen <span class="badge" id="reviewBadge" hidden></span></summary>
     <div>
-      <p class="hint">Wird eine Kugel falsch erkannt: Kugel antippen und richtig einordnen. Fehlt eine Kugel, auf die freie Stelle tippen. Gespeichert werden Bild und richtige Beschriftung für das Training des KI-Modells.</p>
-      <canvas class="fixcanvas" id="fixCanvas" width="800" height="400" aria-label="Tischbild mit erkannten Kugeln zum Korrigieren"></canvas>
+      <p class="hint">Nach jedem Spielzug macht das System ein Bild und ordnet alle Kugeln zu. Hier prüfen: Stimmt alles, „Passt alles“ drücken. Sonst die Kugel antippen und richtig einordnen; fehlt eine Kugel, auf die freie Stelle tippen. Nur geprüfte Bilder werden zum Training benutzt.</p>
+      <p class="statusline" id="trainInfo"></p>
+      <div class="seg" role="radiogroup" aria-label="Welche Bilder" style="margin-bottom:12px">
+        <input type="radio" name="fixMode" id="modeReview" value="review" checked><label for="modeReview">Gesammelte Bilder</label>
+        <input type="radio" name="fixMode" id="modeLive" value="live"><label for="modeLive">Live-Bild jetzt</label>
+      </div>
+      <p class="statusline" id="editorTitle"></p>
+      <canvas class="fixcanvas" id="fixCanvas" width="800" height="400" aria-label="Tischbild mit zugeordneten Kugeln zum Prüfen"></canvas>
       <div class="picker" id="picker">
         <p class="hint" id="pickerTitle" style="margin:0">Kugel</p>
         <div class="chips" id="kindChips"></div>
         <div class="chips" id="colorChips"></div>
       </div>
-      <label class="check"><input type="checkbox" id="applyFix" checked> Korrektur auch im laufenden Spiel übernehmen</label>
-      <div class="grid two">
-        <button class="quiet" type="button" id="fixReload">Neues Bild</button>
-        <button class="primary" type="button" id="fixSave" disabled>Korrektur speichern</button>
+      <div id="reviewActions" class="grid" style="margin-top:12px">
+        <button class="danger" type="button" id="reviewDiscard">Verwerfen</button>
+        <button class="quiet" type="button" id="reviewSkip">Später</button>
+        <button class="primary" type="button" id="reviewSave" disabled>Passt alles</button>
       </div>
-      <p class="statusline" id="fixInfo"></p>
+      <p class="hint" id="reviewHint" style="margin-top:8px">„Verwerfen“ bei unbrauchbaren Bildern (Arm im Bild, verwackelt).</p>
+      <div id="liveActions" hidden>
+        <label class="check"><input type="checkbox" id="applyFix" checked> Korrektur auch im laufenden Spiel übernehmen</label>
+        <div class="grid two">
+          <button class="quiet" type="button" id="fixReload">Neues Bild</button>
+          <button class="primary" type="button" id="fixSave" disabled>Korrektur speichern</button>
+        </div>
+      </div>
+      <label class="check" style="margin-top:16px"><input type="checkbox" id="collectToggle"> Nach jedem Spielzug ein Bild sammeln</label>
+    </div>
+  </details>
+
+  <details id="modelDetails">
+    <summary>KI-Modell (Coral)</summary>
+    <div>
+      <p class="statusline" id="modelStatus">-</p>
+      <div class="field">
+        <label for="detMode">Kugelerkennung</label>
+        <select id="detMode">
+          <option value="auto">Coral, sobald ein Modell da ist (sonst OpenCV)</option>
+          <option value="opencv">Nur OpenCV (ohne KI-Modell)</option>
+        </select>
+      </div>
+      <p class="hint">So kommt ein Modell auf den Coral: 1. Trainingsdaten laden. 2. Am PC oder in Google Colab trainieren (Anleitung: training/README.md). 3. Die Datei <b>billard_edgetpu.tflite</b> hier hochladen. Der Coral übernimmt sie sofort.</p>
+      <div class="grid two">
+        <a class="btnlink" id="datasetLink" href="/api/dataset.zip" download>Trainingsdaten laden</a>
+        <button type="button" id="modelUploadBtn">Modell hochladen</button>
+      </div>
+      <input type="file" id="modelFile" accept=".tflite" hidden>
     </div>
   </details>
 
@@ -350,14 +387,6 @@ details > div { margin-top: 12px; }
     </div>
   </details>
 
-  <details>
-    <summary>Trainingsdaten für Coral</summary>
-    <div>
-      <p class="hint">Speichert in ruhigen Momenten ein Bild des Tisches mit den erkannten Kugeln. Damit lässt sich später ein KI-Modell für den Coral-Stick trainieren. Die Beschriftungen stammen von der Bildverarbeitung und müssen vor dem Training geprüft werden.</p>
-      <p id="datasetInfo">-</p>
-      <button id="recordBtn" type="button" style="width:100%">Sammeln starten</button>
-    </div>
-  </details>
 
   <details>
     <summary>Verlauf</summary>
@@ -472,8 +501,7 @@ details > div { margin-top: 12px; }
       log.appendChild(li);
     }
 
-    $("datasetInfo").textContent = s.dataset_count + " Bilder gesammelt" + (s.record ? ", Sammeln läuft." : ".");
-    $("recordBtn").textContent = s.record ? "Sammeln stoppen" : "Sammeln starten";
+    renderTraining(s);
     if (!calibDirty && s.table_size) $("tableSize").value = s.table_size;
     if (!calibDirty && s.cloth) $("clothColor").value = s.cloth;
   }
@@ -526,7 +554,6 @@ details > div { margin-top: 12px; }
     $("roundStatus").textContent = r.active ? ("Aufzeichnung läuft, " + r.steps + " Züge gespeichert.")
       : r.building ? "Video wird erstellt ..." : (r.error || "");
     renderVideos(s.videos || []);
-    $("fixInfo").textContent = (s.corrected_count || 0) + " korrigierte Bilder gespeichert.";
   }
 
   let videoKey = "";
@@ -636,13 +663,28 @@ details > div { margin-top: 12px; }
     }
   }
 
+  let fixMode = "review";
+
   function afterEdit() {
-    $("fixSave").disabled = !snap || !snap.balls.some((b) => b.changed);
+    const changed = !!snap && snap.balls.some((b) => b.changed);
+    $("fixSave").disabled = !changed;
+    $("reviewSave").disabled = !snap;
+    $("reviewDiscard").disabled = !snap;
+    $("reviewSkip").disabled = !snap;
+    $("reviewSave").textContent = changed ? "Korrektur speichern" : "Passt alles";
     drawFix(); renderPicker();
+  }
+
+  function showMode() {
+    $("reviewActions").hidden = fixMode !== "review";
+    $("reviewHint").hidden = fixMode !== "review";
+    $("liveActions").hidden = fixMode !== "live";
+    fixCanvas.hidden = false;
   }
 
   async function loadSnapshot() {
     snap = null; selected = -1; afterEdit();
+    $("editorTitle").textContent = "Aktuelles Kamerabild mit der Zuordnung des Systems";
     try {
       const r = await fetch("/api/snapshot", { cache: "no-store" });
       const data = await r.json();
@@ -650,9 +692,92 @@ details > div { margin-top: 12px; }
       snap = data;
       fixCanvas.width = data.width; fixCanvas.height = data.height;
       fixImg.src = "/api/snapshot.jpg?id=" + data.id;
+      afterEdit();
     } catch (e) { toast("Tisch nicht erreichbar", true); }
   }
+
+  async function loadReview(after) {
+    snap = null; selected = -1; afterEdit();
+    try {
+      const r = await fetch("/api/review/next" + (after ? "?after=" + encodeURIComponent(after) : ""), { cache: "no-store" });
+      const data = await r.json();
+      if (r.status === 404) {
+        fctx.clearRect(0, 0, fixCanvas.width, fixCanvas.height);
+        fixCanvas.hidden = true;
+        $("editorTitle").textContent = "Keine Bilder zu prüfen. Nach dem nächsten Spielzug kommen neue dazu.";
+        return;
+      }
+      if (!r.ok) { toast(data.error || "Kein Bild", true); return; }
+      fixCanvas.hidden = false;
+      snap = data;
+      const t = data.name.slice(9, 11) + ":" + data.name.slice(11, 13);
+      $("editorTitle").textContent = "Bild von " + t + " Uhr, noch " + data.pending + " zu prüfen";
+      fixCanvas.width = data.width; fixCanvas.height = data.height;
+      fixImg.src = "/api/review/image?name=" + encodeURIComponent(data.name);
+      afterEdit();
+    } catch (e) { toast("Tisch nicht erreichbar", true); }
+  }
+
+  function loadEditor() { showMode(); if (fixMode === "review") loadReview(); else loadSnapshot(); }
   fixImg.onload = drawFix;
+
+  document.querySelectorAll("input[name=fixMode]").forEach((r) => r.addEventListener("change", () => {
+    fixMode = document.querySelector("input[name=fixMode]:checked").value; loadEditor();
+  }));
+  $("reviewSave").addEventListener("click", async () => {
+    if (!snap) return;
+    const res = await post("review_save", { name: snap.name, balls: snap.balls });
+    if (res) loadReview();
+  });
+  $("reviewDiscard").addEventListener("click", async () => {
+    if (!snap) return;
+    const res = await post("review_save", { name: snap.name, discard: true });
+    if (res) loadReview();
+  });
+  $("reviewSkip").addEventListener("click", () => { if (snap) loadReview(snap.name); });
+  $("collectToggle").addEventListener("change", () => post("collect", { enabled: $("collectToggle").checked }));
+
+  // ---------------- KI-Modell ----------------
+  function renderTraining(s) {
+    const t = s.training || {};
+    const badge = $("reviewBadge");
+    badge.hidden = !t.pending;
+    badge.textContent = t.pending || "";
+    $("trainInfo").textContent = (t.pending || 0) + " Bilder zu prüfen  ·  " + (t.verified || 0) + " geprüft (für das Training)";
+    $("collectToggle").checked = !!t.collect;
+    $("datasetLink").classList.toggle("off", !t.verified);
+    const d = s.detector || {}, c = d.coral || {};
+    const ms = $("modelStatus");
+    ms.innerHTML = "";
+    const line = (label, value, cls) => {
+      if (ms.childNodes.length) ms.appendChild(document.createElement("br"));
+      const b = document.createElement("b"); b.textContent = value; if (cls) b.className = cls;
+      ms.appendChild(document.createTextNode(label)); ms.appendChild(b);
+    };
+    line("Erkennung läuft mit: ", d.active === "coral" ? "Coral (KI-Modell)" : "OpenCV (Bildverarbeitung)", d.active === "coral" ? "good" : "");
+    if (c.ready) {
+      line("Modell: ", (c.model_time ? "vom " + c.model_time : "geladen") + (c.ms ? ", " + c.ms.toFixed(0) + " ms pro Bild" : ""), "good");
+    } else {
+      line("Coral: ", c.error || "nicht bereit");
+    }
+    if (document.activeElement !== $("detMode") && d.mode) $("detMode").value = d.mode;
+  }
+  $("detMode").addEventListener("change", () => post("detector_mode", { mode: $("detMode").value }));
+  $("modelUploadBtn").addEventListener("click", () => $("modelFile").click());
+  $("modelFile").addEventListener("change", async () => {
+    const f = $("modelFile").files[0];
+    $("modelFile").value = "";
+    if (!f) return;
+    toast("Modell wird hochgeladen ...");
+    try {
+      const r = await fetch("/api/model", { method: "POST", headers: { "Content-Type": "application/octet-stream", "X-Admin-Pin": pin }, body: f });
+      const data = await r.json().catch(() => ({}));
+      if (r.status === 403) { $("pinForm").classList.add("show"); toast("PIN fehlt oder ist falsch.", true); return; }
+      if (!r.ok) { toast(data.error || "Hochladen fehlgeschlagen", true); return; }
+      if (data.state) render(data.state);
+      toast(data.message);
+    } catch (e) { toast("Tisch nicht erreichbar", true); }
+  });
 
   fixCanvas.addEventListener("click", (e) => {
     if (!snap) return;
@@ -670,7 +795,7 @@ details > div { margin-top: 12px; }
     afterEdit();
   });
   $("fixReload").addEventListener("click", loadSnapshot);
-  $("fixBallsDetails").addEventListener("toggle", (e) => { if (e.target.open) loadSnapshot(); });
+  $("fixBallsDetails").addEventListener("toggle", (e) => { if (e.target.open) loadEditor(); });
   $("fixSave").addEventListener("click", async () => {
     const res = await post("train_correction", { id: snap.id, apply: $("applyFix").checked, balls: snap.balls });
     if (res) loadSnapshot();
@@ -711,7 +836,6 @@ details > div { margin-top: 12px; }
     post("start", { team_a: $("ta").value, team_b: $("tb").value, breaker });
   });
 
-  $("recordBtn").addEventListener("click", () => post("record", { enabled: !(state && state.record) }));
 
   // ---------------- Live-Ansicht ----------------
   let viewTimer = null;
