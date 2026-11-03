@@ -7,8 +7,9 @@ Wird identisch vom echten Programm (main.py) und vom Simulator-Test benutzt.
 
 import threading
 import time
+from collections import Counter
 
-from detector import ClassicDetector
+from detector import Ball, ClassicDetector
 from game import Game
 from geometry import Table
 from shots import MotionMeter, ShotEvent, ShotMonitor
@@ -77,6 +78,41 @@ class Pipeline:
         if self.monitor.state == "bewegung" or self.moving:
             return "Kugeln rollen ..."
         return "Bereit"
+
+    def current_balls(self):
+        """Stabiler Zustand (ueber viele Bilder abgestimmt), sonst das letzte Einzelbild."""
+        ref = self.monitor.reference
+        return list(ref.balls) if ref else list(self.balls)
+
+    def correct_balls(self, corrections):
+        """Korrekturen aus dem Portal in den stabilen Zustand uebernehmen.
+        corrections: [{"x", "y", "kind", "color"}], kind "none" = keine Kugel.
+        Die Korrektur bekommt sehr viele Stimmen, damit sie die naechsten
+        Abstimmungen ueberlebt (siehe shots.inherit_votes)."""
+        ref = self.monitor.reference
+        if ref is None:
+            return 0
+        r = self.table.ball_radius_px
+        changed = 0
+        for c in corrections:
+            near = min(ref.balls, key=lambda b: (b.x - c["x"]) ** 2 + (b.y - c["y"]) ** 2, default=None)
+            hit = near is not None and (near.x - c["x"]) ** 2 + (near.y - c["y"]) ** 2 <= (1.2 * r) ** 2
+            if c["kind"] == "none":
+                if hit:
+                    ref.balls.remove(near)
+                    changed += 1
+                continue
+            if not hit:
+                near = Ball(float(c["x"]), float(c["y"]), r, c["kind"])
+                ref.balls.append(near)
+            near.kind = c["kind"]
+            near.votes = Counter({c["kind"]: 300})
+            if c.get("color"):
+                near.color = c["color"]
+                near.color_votes = Counter({c["color"]: 300})
+            changed += 1
+        self.monitor.ref_id += 1
+        return changed
 
     def stable_counts(self):
         ref = self.monitor.reference

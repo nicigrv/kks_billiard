@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Billard">
 <title>Billard Admin</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Barlow+Condensed:wght@500;700&display=swap" rel="stylesheet">
@@ -36,6 +38,31 @@ body {
   padding: 16px max(16px, env(safe-area-inset-left)) 48px;
 }
 main { max-width: 560px; margin: 0 auto; }
+/* iPad quer / breite Bildschirme: links Grafik + Spielstand, rechts Bedienung */
+@media (min-width: 900px) {
+  main { max-width: 1240px; display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 28px; align-items: start; }
+  .col-left { position: sticky; top: 16px; }
+  .col-right > section:first-child { margin-top: 0; }
+}
+.graphic { width: 100%; aspect-ratio: 16 / 9; display: block; border-radius: 12px; background: #0E1218; margin-bottom: 14px; }
+.toggle.on { background: var(--chalk); color: var(--felt-dark); }
+.statusline { font-size: 15px; color: var(--ivory-dim); margin: 8px 0 12px; }
+.statusline b { color: var(--ivory); }
+.statusline .good { color: #7FE0A0; }
+.statusline .bad { color: var(--foul); }
+.videos { list-style: none; padding: 0; margin: 12px 0 0; }
+.videos li { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid rgba(239, 230, 210, .08); font-size: 15px; }
+.videos a { color: var(--chalk); font-weight: 700; text-decoration: none; padding: 8px 0; }
+.player { width: 100%; border-radius: 10px; margin-top: 12px; background: #000; display: none; }
+.player.show { display: block; }
+.fixcanvas { display: block; width: 100%; height: auto; border-radius: 10px; background: #000; touch-action: manipulation; cursor: pointer; }
+.picker { display: none; margin-top: 12px; padding: 12px; border: 2px solid var(--rail-light); border-radius: 12px; }
+.picker.show { display: block; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.chip { min-height: 44px; min-width: 44px; padding: 8px 12px; border-radius: 22px; border: 2px solid transparent; font-weight: 700; }
+.chip.sel { border-color: var(--ivory); box-shadow: 0 0 0 2px var(--felt-dark) inset; }
+.check { display: flex; align-items: center; gap: 10px; margin: 12px 0; font-size: 15px; color: var(--ivory); }
+.check input { width: 24px; height: 24px; }
 
 /* ---------- Spielstandstafel ---------- */
 .board {
@@ -147,6 +174,9 @@ details > div { margin-top: 12px; }
 </head>
 <body>
 <main>
+ <div class="col-left">
+
+  <img class="graphic" id="graphic" alt="Grafische Ansicht des Tisches wie auf dem Beamer">
 
   <div class="board" aria-live="polite">
     <div class="cueball hidden" id="cueball" aria-hidden="true"></div>
@@ -172,6 +202,8 @@ details > div { margin-top: 12px; }
     <input type="password" id="pinInput" inputmode="numeric" autocomplete="off" placeholder="Admin-PIN" aria-label="Admin-PIN">
     <button class="primary" type="submit">Speichern</button>
   </form>
+ </div>
+ <div class="col-right">
 
   <section id="fixSection">
     <h2>Korrigieren</h2>
@@ -179,7 +211,9 @@ details > div { margin-top: 12px; }
       <button class="danger" data-cmd="foul">Foul</button>
       <button data-cmd="switch_turn">Zug wechseln</button>
       <button class="quiet" data-cmd="undo" id="undoBtn">Rückgängig</button>
+      <button class="quiet span3" data-cmd="undo_shot" id="undoShotBtn">Letzten erkannten Stoß verwerfen</button>
     </div>
+    <p class="hint" style="margin-top:8px">„Stoß verwerfen“, wenn das System einen Stoß erkannt hat, der keiner war (z. B. Kugel von Hand verschoben). Der Spielstand springt auf vor diesem Stoß zurück.</p>
     <details>
       <summary>Weitere Korrekturen</summary>
       <div>
@@ -228,6 +262,59 @@ details > div { margin-top: 12px; }
     </form>
   </section>
 
+  <section>
+    <h2>KI-Schlagverbesserung</h2>
+    <p class="hint">Zeigt auf dem Beamer den einfachsten Stoß: dunkler Queue = optimale Lage, heller Queue = echte Lage (Gyroskop im Queue). Passt die Lage, kommt ein großer grüner Haken.</p>
+    <button class="toggle" id="assistBtn" type="button" style="width:100%">Schlagverbesserung: aus</button>
+    <p class="statusline" id="suggestionText"></p>
+    <details id="cueDetails">
+      <summary>Queue mit Gyroskop</summary>
+      <div>
+        <p class="statusline" id="cueStatus">-</p>
+        <p class="hint">Kalibrieren: Queue flach an die lange Bande legen, die Spitze zeigt in der Grafik nach <b>rechts</b>. Dann drücken und den Queue kurz ruhig lassen.</p>
+        <button class="primary" type="button" id="cueCalib" style="width:100%">Queue kalibrieren</button>
+        <div class="grid two" style="margin-top:12px">
+          <button class="quiet" type="button" id="cueFlip">Drehrichtung umkehren</button>
+          <div>
+            <label for="cueTol">Grüner Haken ab</label>
+            <select id="cueTol">
+              <option value="1">± 1°</option><option value="2">± 2°</option><option value="3">± 3°</option><option value="5">± 5°</option>
+            </select>
+          </div>
+        </div>
+        <p class="hint" style="margin-top:8px">Dreht sich der helle Queue in der Grafik falsch herum, „Drehrichtung umkehren“ drücken.</p>
+      </div>
+    </details>
+  </section>
+
+  <section>
+    <h2>Spielaufzeichnung</h2>
+    <p class="hint">Speichert bei jedem Zug die grafische Ansicht (keine Kamerabilder) und macht daraus am Ende ein kurzes Video. Endet automatisch, wenn das Rack vorbei ist.</p>
+    <button type="button" id="roundBtn" style="width:100%">Runde aufzeichnen</button>
+    <p class="statusline" id="roundStatus"></p>
+    <ul class="videos" id="videos"></ul>
+    <video class="player" id="player" controls playsinline preload="metadata"></video>
+  </section>
+
+  <details id="fixBallsDetails">
+    <summary>Kugeln korrigieren (KI-Training)</summary>
+    <div>
+      <p class="hint">Wird eine Kugel falsch erkannt: Kugel antippen und richtig einordnen. Fehlt eine Kugel, auf die freie Stelle tippen. Gespeichert werden Bild und richtige Beschriftung für das Training des KI-Modells.</p>
+      <canvas class="fixcanvas" id="fixCanvas" width="800" height="400" aria-label="Tischbild mit erkannten Kugeln zum Korrigieren"></canvas>
+      <div class="picker" id="picker">
+        <p class="hint" id="pickerTitle" style="margin:0">Kugel</p>
+        <div class="chips" id="kindChips"></div>
+        <div class="chips" id="colorChips"></div>
+      </div>
+      <label class="check"><input type="checkbox" id="applyFix" checked> Korrektur auch im laufenden Spiel übernehmen</label>
+      <div class="grid two">
+        <button class="quiet" type="button" id="fixReload">Neues Bild</button>
+        <button class="primary" type="button" id="fixSave" disabled>Korrektur speichern</button>
+      </div>
+      <p class="statusline" id="fixInfo"></p>
+    </div>
+  </details>
+
   <details id="viewDetails">
     <summary>Was die Kamera sieht</summary>
     <div>
@@ -270,6 +357,7 @@ details > div { margin-top: 12px; }
     <div><ul class="log" id="log"></ul></div>
   </details>
 
+ </div>
 </main>
 <div class="toast" id="toast" role="status"></div>
 
@@ -359,6 +447,8 @@ details > div { margin-top: 12px; }
     $("playingControls").style.display = idle ? "none" : "";
     $("startForm").style.display = idle ? "" : "none";
     $("undoBtn").disabled = !g.can_undo;
+    $("undoShotBtn").disabled = !g.can_undo_shot;
+    renderExtras(s);
     $("win0").textContent = g.teams[0] + " gewinnt";
     $("win1").textContent = g.teams[1] + " gewinnt";
     document.querySelectorAll(".g0")[0].textContent = g.teams[0] + " spielt Volle";
@@ -380,6 +470,204 @@ details > div { margin-top: 12px; }
     if (!calibDirty && s.table_size) $("tableSize").value = s.table_size;
   }
 
+  // ---------------- Grafik, Schlagverbesserung, Aufzeichnung ----------------
+  let graphicVersion = -1, graphicBusy = false, graphicAt = 0;
+  function refreshGraphic(s) {
+    const live = s.assist && s.cue && s.cue.connected;
+    const due = s.scene_version !== graphicVersion || (live && Date.now() - graphicAt > 400) || Date.now() - graphicAt > 5000;
+    if (!due || graphicBusy) return;
+    graphicBusy = true;
+    const im = new Image();
+    im.onload = () => { $("graphic").src = im.src; graphicVersion = s.scene_version; graphicAt = Date.now(); graphicBusy = false; };
+    im.onerror = () => { graphicBusy = false; graphicAt = Date.now(); };
+    im.src = "/api/graphic.jpg?t=" + Date.now();
+  }
+
+  function fmtNum(v, d) { return (v === null || v === undefined) ? "-" : Number(v).toFixed(d).replace(".", ","); }
+
+  function renderExtras(s) {
+    refreshGraphic(s);
+    const ab = $("assistBtn");
+    ab.textContent = "Schlagverbesserung: " + (s.assist ? "an" : "aus");
+    ab.classList.toggle("on", !!s.assist);
+    ab.setAttribute("aria-pressed", s.assist ? "true" : "false");
+    $("suggestionText").textContent = s.assist ? (s.suggestion || "Noch kein Vorschlag (Spiel läuft? Tisch ruhig?)") : "";
+
+    const c = s.cue || {};
+    const cs = $("cueStatus");
+    cs.innerHTML = "";
+    const add = (label, value, cls) => {
+      const b = document.createElement("b"); b.textContent = value; if (cls) b.className = cls;
+      if (cs.childNodes.length) cs.appendChild(document.createTextNode("  ·  "));
+      cs.appendChild(document.createTextNode(label)); cs.appendChild(b);
+    };
+    add("Queue: ", c.connected ? "verbunden" : "nicht verbunden", c.connected ? "good" : "bad");
+    if (c.connected) {
+      add("Winkel: ", fmtNum(c.angle, 1) + "°");
+      if (c.err !== null && c.err !== undefined) add("Abweichung: ", fmtNum(c.err, 1) + "°", c.ok ? "good" : "");
+      if (c.battery) add("Akku: ", fmtNum(c.battery, 2) + " V");
+    }
+    $("cueCalib").disabled = !c.connected;
+    $("cueFlip").classList.toggle("on", !!c.flip);
+    $("cueFlip").classList.toggle("toggle", true);
+    if (document.activeElement !== $("cueTol") && c.tolerance) $("cueTol").value = String(Math.round(c.tolerance));
+
+    const r = s.round || {};
+    $("roundBtn").textContent = r.active ? "Aufzeichnung beenden" : "Runde aufzeichnen";
+    $("roundBtn").className = r.active ? "danger" : "";
+    $("roundStatus").textContent = r.active ? ("Aufzeichnung läuft, " + r.steps + " Züge gespeichert.")
+      : r.building ? "Video wird erstellt ..." : (r.error || "");
+    renderVideos(s.videos || []);
+    $("fixInfo").textContent = (s.corrected_count || 0) + " korrigierte Bilder gespeichert.";
+  }
+
+  let videoKey = "";
+  function renderVideos(list) {
+    const key = list.map((v) => v.name + v.size_mb).join("|");
+    if (key === videoKey) return;
+    videoKey = key;
+    const ul = $("videos");
+    ul.innerHTML = "";
+    if (!list.length) {
+      const li = document.createElement("li"); li.textContent = "Noch keine Videos."; ul.appendChild(li); return;
+    }
+    for (const v of list) {
+      const li = document.createElement("li");
+      const span = document.createElement("span");
+      span.textContent = v.time + "  ·  " + v.size_mb.toFixed(1).replace(".", ",") + " MB";
+      const play = document.createElement("a");
+      play.href = "/videos/" + encodeURIComponent(v.name);
+      play.textContent = "Ansehen";
+      play.addEventListener("click", (e) => {
+        e.preventDefault();
+        const p = $("player"); p.src = play.href; p.classList.add("show"); p.play().catch(() => {});
+      });
+      const dl = document.createElement("a");
+      dl.href = play.href; dl.download = v.name; dl.textContent = "Laden";
+      const right = document.createElement("span");
+      right.style.display = "flex"; right.style.gap = "16px";
+      right.appendChild(play); right.appendChild(dl);
+      li.appendChild(span); li.appendChild(right);
+      ul.appendChild(li);
+    }
+  }
+
+  $("assistBtn").addEventListener("click", () => post("assist", { enabled: !(state && state.assist) }));
+  $("cueCalib").addEventListener("click", () => post("cue_calibrate", {}));
+  $("cueFlip").addEventListener("click", () => post("cue_settings", { flip: !(state && state.cue && state.cue.flip) }));
+  $("cueTol").addEventListener("change", () => post("cue_settings", { tolerance: Number($("cueTol").value) }));
+  $("roundBtn").addEventListener("click", () => {
+    const active = state && state.round && state.round.active;
+    post("record_round", { enabled: !active });
+  });
+
+  // ---------------- Kugeln korrigieren (KI-Training) ----------------
+  const KINDS = [["cue", "Weiße"], ["eight", "8"], ["solid", "Volle"], ["stripe", "Halbe"], ["none", "Keine Kugel"]];
+  const COLORS = [["gelb", "#F5C314", 1], ["blau", "#2355CD", 2], ["rot", "#D72D28", 3], ["violett", "#7837A0", 4],
+                  ["orange", "#F57D19", 5], ["gruen", "#198C41", 6], ["weinrot", "#871E2D", 7]];
+  const KIND_STROKE = { cue: "#FFFFFF", eight: "#9A9A9A", solid: "#F2B705", stripe: "#6FB3E0", none: "#D2453B" };
+  const fixCanvas = $("fixCanvas"), fctx = fixCanvas.getContext("2d");
+  const fixImg = new Image();
+  let snap = null, selected = -1;
+
+  function numberOf(b) {
+    if (b.kind === "eight") return 8;
+    const c = COLORS.find((x) => x[0] === b.color);
+    if (!c || (b.kind !== "solid" && b.kind !== "stripe")) return null;
+    return b.kind === "solid" ? c[2] : c[2] + 8;
+  }
+
+  function drawFix() {
+    fctx.clearRect(0, 0, fixCanvas.width, fixCanvas.height);
+    if (fixImg.complete && fixImg.naturalWidth) fctx.drawImage(fixImg, 0, 0, fixCanvas.width, fixCanvas.height);
+    if (!snap) return;
+    const r = snap.radius;
+    snap.balls.forEach((b, i) => {
+      fctx.lineWidth = i === selected ? 4 : 2;
+      fctx.strokeStyle = KIND_STROKE[b.kind] || "#fff";
+      fctx.setLineDash(b.kind === "none" ? [4, 4] : []);
+      fctx.beginPath(); fctx.arc(b.x, b.y, r + 4, 0, Math.PI * 2); fctx.stroke();
+      if (i === selected) { fctx.strokeStyle = "#6FB3E0"; fctx.beginPath(); fctx.arc(b.x, b.y, r + 9, 0, Math.PI * 2); fctx.stroke(); }
+      const n = numberOf(b);
+      const label = b.kind === "none" ? "×" : b.kind === "cue" ? "W" : (n === null ? "?" : String(n));
+      fctx.setLineDash([]);
+      fctx.font = "bold 13px sans-serif"; fctx.textAlign = "center"; fctx.textBaseline = "middle";
+      fctx.fillStyle = "rgba(0,0,0,.7)"; fctx.fillRect(b.x + r - 2, b.y - r - 14, 22, 16);
+      fctx.fillStyle = b.changed ? "#7FE0A0" : "#fff";
+      fctx.fillText(label, b.x + r + 9, b.y - r - 6);
+    });
+  }
+
+  function renderPicker() {
+    const pk = $("picker");
+    if (!snap || selected < 0) { pk.classList.remove("show"); return; }
+    pk.classList.add("show");
+    const b = snap.balls[selected];
+    const n = numberOf(b);
+    $("pickerTitle").textContent = "Diese Kugel ist: " + (b.kind === "none" ? "keine Kugel" :
+      (KINDS.find((k) => k[0] === b.kind) || ["", "?"])[1] + (n && b.kind !== "eight" ? " (Nr. " + n + ")" : ""));
+    const kc = $("kindChips"); kc.innerHTML = "";
+    for (const [k, label] of KINDS) {
+      const bt = document.createElement("button");
+      bt.type = "button"; bt.className = "chip" + (b.kind === k ? " sel" : ""); bt.textContent = label;
+      bt.addEventListener("click", () => { b.kind = k; b.changed = true; if (k === "cue" || k === "none") b.color = ""; if (k === "eight") b.color = "schwarz"; else if (b.color === "schwarz") b.color = ""; afterEdit(); });
+      kc.appendChild(bt);
+    }
+    const cc = $("colorChips"); cc.innerHTML = "";
+    if (b.kind === "solid" || b.kind === "stripe") {
+      for (const [c, hex, num] of COLORS) {
+        const bt = document.createElement("button");
+        bt.type = "button"; bt.className = "chip" + (b.color === c ? " sel" : "");
+        bt.style.background = b.kind === "solid" ? hex : "linear-gradient(#EFE6D2 28%, " + hex + " 28% 72%, #EFE6D2 72%)";
+        bt.style.color = b.kind === "solid" ? "#fff" : "#111";
+        bt.textContent = String(b.kind === "solid" ? num : num + 8);
+        bt.setAttribute("aria-label", c + " " + bt.textContent);
+        bt.addEventListener("click", () => { b.color = c; b.changed = true; afterEdit(); });
+        cc.appendChild(bt);
+      }
+    }
+  }
+
+  function afterEdit() {
+    $("fixSave").disabled = !snap || !snap.balls.some((b) => b.changed);
+    drawFix(); renderPicker();
+  }
+
+  async function loadSnapshot() {
+    snap = null; selected = -1; afterEdit();
+    try {
+      const r = await fetch("/api/snapshot", { cache: "no-store" });
+      const data = await r.json();
+      if (!r.ok) { toast(data.error || "Kein Bild", true); return; }
+      snap = data;
+      fixCanvas.width = data.width; fixCanvas.height = data.height;
+      fixImg.src = "/api/snapshot.jpg?id=" + data.id;
+    } catch (e) { toast("Tisch nicht erreichbar", true); }
+  }
+  fixImg.onload = drawFix;
+
+  fixCanvas.addEventListener("click", (e) => {
+    if (!snap) return;
+    const rc = fixCanvas.getBoundingClientRect();
+    const x = (e.clientX - rc.left) * fixCanvas.width / rc.width;
+    const y = (e.clientY - rc.top) * fixCanvas.height / rc.height;
+    let best = -1, bd = Infinity;
+    snap.balls.forEach((b, i) => { const d = Math.hypot(b.x - x, b.y - y); if (d < bd) { bd = d; best = i; } });
+    if (best >= 0 && bd <= snap.radius * 1.8) {
+      selected = best;
+    } else {
+      snap.balls.push({ x: Math.round(x), y: Math.round(y), kind: "solid", color: "", changed: true });
+      selected = snap.balls.length - 1;
+    }
+    afterEdit();
+  });
+  $("fixReload").addEventListener("click", loadSnapshot);
+  $("fixBallsDetails").addEventListener("toggle", (e) => { if (e.target.open) loadSnapshot(); });
+  $("fixSave").addEventListener("click", async () => {
+    const res = await post("train_correction", { id: snap.id, apply: $("applyFix").checked, balls: snap.balls });
+    if (res) loadSnapshot();
+  });
+
   async function poll() {
     try {
       const r = await fetch("/api/state", { cache: "no-store" });
@@ -387,7 +675,8 @@ details > div { margin-top: 12px; }
     } catch (e) {
       $("status").textContent = "Tisch nicht erreichbar";
     }
-    setTimeout(poll, 1500);
+    const live = state && state.assist && state.cue && state.cue.connected;
+    setTimeout(poll, live ? 600 : 1500);
   }
 
   // ---------------- Knöpfe ----------------
@@ -396,6 +685,7 @@ details > div { margin-top: 12px; }
       const d = btn.dataset;
       const cmd = d.cmd;
       if (cmd === "abort" && !confirm("Spiel wirklich abbrechen? Der Spielstand geht verloren.")) return;
+      if (cmd === "undo_shot" && !confirm("Letzten erkannten Stoß verwerfen? Der Spielstand springt auf vor diesem Stoß zurück.")) return;
       const payload = {};
       if (d.team !== undefined) payload.team = Number(d.team);
       if (d.group) payload.group = d.group;

@@ -290,6 +290,7 @@ class ShotMonitor:
         self.min_frames = min_frames
         self.window = window
         self.clock = clock
+        self.ref_id = 0             # zaehlt neue Ausgangszustaende (fuer die Grafik)
         self.reset()
 
     def reset(self):
@@ -327,6 +328,7 @@ class ShotMonitor:
             self.reference = TableState(stabilize(self.frames, self.radius), now)
             self.state = "ruhig"
             self._since_refresh = 0
+            self.ref_id += 1
             return "reference"
         if self._dirty:
             self._dirty = False
@@ -336,6 +338,7 @@ class ShotMonitor:
             stable = TableState(stabilize(self.frames, self.radius), now)
             inherit_votes(before, stable, self.radius)
             self.reference = stable
+            self.ref_id += 1
             if shot_happened(before, stable, self.radius, allow_growth=self._fresh):
                 self._fresh = False
                 return ShotEvent(before, stable)

@@ -11,9 +11,17 @@ DEFAULTS = {
     "corners": None,            # 4 Ecken der Spielflaeche im Kamerabild
     "table_size": "8ft",
     "record_dataset": False,    # Trainingsbilder fuer das Coral-Modell sammeln
+    "assist": False,            # KI-Schlagverbesserung (Stossvorschlag + Queue-Lage)
+    "cue_offset": 0.0,          # Gyroskop: Rohwinkel, wenn der Queue an der Bande liegt
+    "cue_flip": False,          # Gyroskop: Drehrichtung umkehren
+    "cue_tolerance": 2.0,       # Gyroskop: ab dieser Abweichung (Grad) gibt es den gruenen Haken
 }
 
 _lock = threading.Lock()
+
+
+class UserError(ValueError):
+    """Fehler mit verstaendlicher Meldung fuer das Portal."""
 
 
 def load():

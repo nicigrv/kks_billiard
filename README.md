@@ -1,15 +1,20 @@
 # Billard-System: Kamera → Kugelerkennung → 8-Ball-Scoreboard
 
 ```
-ESP32-CAM ──WLAN──▶ Raspberry Pi (Docker: "billard") ──HDMI──▶ Beamer (Scoreboard)
-                                │
-                                └── Admin-Portal  http://<pi-ip>:8080  (Handy)
+ESP32-CAM ──WLAN──▶ Raspberry Pi (Docker: "billard") ──HDMI──▶ Beamer
+Queue-Gyroskop ─WLAN (UDP 5005)─▶ │
+                                  └── Admin-Portal  http://<pi-ip>:8080  (iPad / Handy)
 ```
+
+**Beamer:** links das Live-Kamerabild mit Kreisen um die Kugeln, rechts eine gezeichnete
+Grafik des Tisches (neu nach jedem Stoß, mit Stoßvorschlag), unten die **Game-Bar**:
+Mannschaften, Frames, Punkte und alle 15 Kugeln – versenkte sind durchgestrichen.
 
 | Ordner | Inhalt |
 |---|---|
 | `app/` | **Hauptprogramm**: Erkennung, 8-Ball-Regeln, Scoreboard, Admin-Portal |
 | `app/sim/` | Simulator + Tests (laufen ohne Tisch) |
+| `cue_sensor/` | Firmware für das Gyroskop im Queue (ESP32 + MPU6050, PlatformIO) |
 | `coral/` | Hardwaretest für den Coral USB Accelerator |
 | `esp32cam_stream/` | Firmware der Kamera |
 | `firmware/` | fertige Kamera-Firmware (`.bin`) |
@@ -57,6 +62,42 @@ Erst wenn der Tisch frei und ruhig ist. Ein Queue, das quer auf dem Tuch liegt, 
 
 Geht etwas schief: **„Rückgängig“** macht die letzte Änderung rückgängig, unter „Weitere Korrekturen“ lassen sich Gruppen, Restkugeln und Sieger von Hand setzen.
 
+## 3a. iPad als Admin-Portal
+
+`http://<pi-ip>:8080` in Safari öffnen, „Zum Home-Bildschirm“ hinzufügen. Im Querformat:
+links die **aktuelle Grafik vom Pi** (wie auf dem Beamer, aktualisiert sich selbst), rechts die Bedienung.
+
+- **Spiel starten / Neues Rack / Abbrechen**
+- **Letzten erkannten Stoß verwerfen**: wenn das System einen Stoß gezählt hat, der keiner war.
+  Der Spielstand springt auf vor diesem Stoß zurück.
+- **Kugeln korrigieren (KI-Training)**: Kugel antippen → Weiße / 8 / Volle / Halbe / keine Kugel
+  und Farbe wählen; fehlende Kugel: auf die freie Stelle tippen. Gespeichert wird Bild + richtige
+  Beschriftung in `data/dataset/korrigiert/` (fürs Training), auf Wunsch auch sofort im laufenden Spiel.
+- **KI-Schlagverbesserung an/aus** (siehe 3b)
+- **Spielaufzeichnung** (siehe 3c)
+
+## 3b. KI-Schlagverbesserung + Gyroskop im Queue
+
+Ist sie an, rechnet der Pi nach jedem Stoß den **einfachsten direkten Stoß** für die Mannschaft
+am Zug aus (Zielkugel, Tasche, Schnittwinkel) und zeichnet ihn in die Grafik:
+**dunkler Queue = optimale Lage**. Mit dem Gyroskop im Queue (`cue_sensor/README.md`) kommt der
+**helle Queue = echte Lage** dazu. Liegt der Queue innerhalb der Toleranz (Standard ±2°),
+erscheint auf dem Beamer ein **großer grüner Haken**.
+
+Ehrlich: Der Vorschlag ist Geometrie (Geisterkugel-Methode, freie Wege, Schnittwinkel), kein
+trainiertes Netz, und ohne Stellungsspiel. Das Gyroskop misst nur den **Winkel**, nicht wo der
+Queue liegt – der helle Queue wird immer hinter die Weiße gezeichnet.
+
+Einrichten: Portal → „Queue mit Gyroskop“ → Queue an die lange Bande legen, Spitze zeigt in der
+Grafik nach rechts → „Queue kalibrieren“. Dreht er sich falsch herum: „Drehrichtung umkehren“.
+
+## 3c. Spielaufzeichnung
+
+Portal → „Runde aufzeichnen“. Bei jedem Zug wird die **grafische Ansicht** gespeichert
+(keine Kamerabilder). Ist das Rack vorbei (oder „Aufzeichnung beenden“), baut der Pi daraus ein
+kurzes Video, in dem die Kugeln von Zug zu Zug rollen. Videos: im Portal ansehen/laden, Dateien in
+`data/recordings/`.
+
 ## 4. Ohne Tisch testen (Simulator)
 
 ```bash
@@ -65,6 +106,8 @@ docker compose --profile sim up -d fake-table                     # simulierte K
 docker compose up -d
 ```
 Ecken für den Simulator: einfach die vier Ecken des grünen Bereichs antippen. Das Spiel läuft in Schleife.
+
+Simuliertes Queue-Gyroskop: `docker compose --profile sim up -d fake-cue` (Schlagverbesserung im Portal einschalten).
 
 ## 5. Coral-Stick testen
 
@@ -99,6 +142,7 @@ Tests selbst laufen lassen (im Ordner `app/`):
 python3 -m sim.test_detector      # Erkennungsqualität
 python3 -m sim.test_game          # Regeln + simuliertes Spiel
 python3 -m sim.benchmark_shots    # Trefferquote pro Stoß
+python3 -m sim.test_features      # Stoßvorschlag, Gyroskop, Game-Bar, Aufzeichnung
 ```
 
 ## 7. Kamera-Firmware aktualisieren

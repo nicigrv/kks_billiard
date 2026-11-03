@@ -8,8 +8,12 @@ Lesen (Spielstand, Bilder) ist ohne PIN erlaubt, z. B. fuer ein Handy am Tisch.
 
 import json
 import os
+import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, unquote, urlsplit
+
+from config import UserError
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -33,13 +37,76 @@ def make_handler(app, pin):
             self.end_headers()
             self.wfile.write(body)
 
+        def _send_file(self, path, ctype):
+            """Datei mit Range-Unterstuetzung (Safari auf iPad/iPhone spielt Videos nur so ab)."""
+            size = os.path.getsize(path)
+            start, end = 0, size - 1
+            m = re.fullmatch(r"bytes=(\d*)-(\d*)", self.headers.get("Range", "").strip())
+            partial = bool(m) and (m.group(1) or m.group(2))
+            if partial:
+                if m.group(1):
+                    start = int(m.group(1))
+                    end = int(m.group(2)) if m.group(2) else size - 1
+                else:
+                    start = max(0, size - int(m.group(2)))
+                end = min(end, size - 1)
+                if start > end:
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{size}")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+            self.send_response(206 if partial else 200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Length", str(end - start + 1))
+            if partial:
+                self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+            self.end_headers()
+            with open(path, "rb") as f:
+                f.seek(start)
+                left = end - start + 1
+                while left > 0:
+                    chunk = f.read(min(1 << 16, left))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    left -= len(chunk)
+
         def do_GET(self):
-            path = self.path.split("?")[0]
+            url = urlsplit(self.path)
+            path, query = url.path, parse_qs(url.query)
             if path in ("/", "/index.html"):
                 with open(os.path.join(HERE, "admin.html"), "rb") as f:
                     return self._send(200, f.read(), "text/html; charset=utf-8")
             if path == "/api/state":
                 return self._send(200, app.state_dict())
+            if path == "/api/graphic.jpg":
+                jpg = app.graphic_jpeg()
+                if jpg is None:
+                    return self._send(503, {"error": "Grafik nicht verfügbar"})
+                return self._send(200, jpg, "image/jpeg")
+            if path == "/api/snapshot":
+                snap = app.snapshot()
+                if snap is None:
+                    return self._send(503, {"error": "Noch kein Bild - ist der Tisch eingerichtet?"})
+                return self._send(200, snap)
+            if path == "/api/snapshot.jpg":
+                try:
+                    jpg = app.snapshot_jpeg(int(query.get("id", ["0"])[0]))
+                except ValueError:
+                    jpg = None
+                if jpg is None:
+                    return self._send(404, {"error": "Bild nicht mehr vorhanden"})
+                return self._send(200, jpg, "image/jpeg")
+            if path.startswith("/videos/"):
+                fpath = app.rounds.video_path(unquote(path[len("/videos/"):]))
+                if fpath is None:
+                    return self._send(404, {"error": "Video nicht gefunden"})
+                try:
+                    return self._send_file(fpath, "video/mp4")
+                except (BrokenPipeError, ConnectionResetError):
+                    return None
             if path in ("/api/frame.jpg", "/api/view.jpg", "/api/warped.jpg"):
                 jpg = app.jpeg(path.rsplit("/", 1)[1].split(".")[0])
                 if jpg is None:
@@ -58,6 +125,8 @@ def make_handler(app, pin):
             name = self.path.split("?")[0].removeprefix("/api/")
             try:
                 result = app.command(name, payload)
+            except UserError as e:
+                return self._send(400, {"error": str(e)})
             except (KeyError, ValueError, TypeError) as e:
                 return self._send(400, {"error": f"Ungültiger Befehl: {e}"})
             if result is None:
