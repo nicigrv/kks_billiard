@@ -10,6 +10,7 @@ PATH = os.path.join(DATA_DIR, "config.json")
 DEFAULTS = {
     "corners": None,            # 4 Ecken der Spielflaeche im Kamerabild
     "table_size": "8ft",
+    "cloth": "blau",            # Tuchfarbe fuer die Grafik (blau | gruen)
     "record_dataset": False,    # Trainingsbilder fuer das Coral-Modell sammeln
     "assist": False,            # KI-Schlagverbesserung (Stossvorschlag + Queue-Lage)
     "cue_offset": 0.0,          # Gyroskop: Rohwinkel, wenn der Queue an der Bande liegt

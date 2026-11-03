@@ -147,7 +147,8 @@ class App:
         info = f"Kamera {self.reader.fps:4.1f} fps"
         if self.admin_url:
             info = f"Admin: {self.admin_url}   " + info
-        return {"balls": sb, "radius": radius, "game": game, "bar": bar_balls(game, visible, seen),
+        return {"balls": sb, "radius": radius, "cloth": self.cfg.get("cloth", "blau"),
+                "game": game, "bar": bar_balls(game, visible, seen),
                 "suggestion": sug, "cue": cue, "status": status, "info": info, "version": self.scene_version}
 
     def graphic_jpeg(self, size=(1280, 720)):
@@ -242,6 +243,7 @@ class App:
             "calibrated": table.calibrated,
             "corners": table.corners,
             "table_size": self.cfg.get("table_size"),
+            "cloth": self.cfg.get("cloth", "blau"),
             "record": self.recorder.enabled,
             "dataset_count": self.recorder.count,
             "corrected_count": self.recorder.corrected,
@@ -354,8 +356,11 @@ class App:
                 if not corners or len(corners) != 4:
                     raise ValueError("Es werden genau 4 Ecken gebraucht")
                 corners = [[float(x), float(y)] for x, y in corners]
+                cloth = p.get("cloth", self.cfg.get("cloth", "blau"))
+                if cloth not in ("blau", "gruen"):
+                    raise ValueError("Tuchfarbe")
                 table = Table(corners, TABLE_SIZES[size])
-                self.cfg.update(corners=table.corners, table_size=size)
+                self.cfg.update(corners=table.corners, table_size=size, cloth=cloth)
                 config.save(self.cfg)
                 self.pipe.set_table(table)
                 return "Tisch gespeichert. Die Erkennung startet neu."

@@ -42,6 +42,7 @@ Dann am Handy `http://<pi-ip>:8080` öffnen. Die Adresse steht auch unten rechts
 Im Portal **„Tisch einrichten“** öffnen:
 1. Die **vier Ecken der Spielfläche** antippen, dort wo das Tuch auf die Bande trifft, einmal rundherum.
 2. **Tischgröße** wählen (7, 8 oder 9 Fuß). Davon hängt die erwartete Kugelgröße ab.
+   **Tuchfarbe** (blau/grün) bestimmt nur die Farbe der Grafik; die Erkennung findet das Tuch selbst.
 3. Speichern.
 
 Danach unter **„Was die Kamera sieht“** prüfen: Jede Kugel sollte einen Ring haben.
@@ -134,7 +135,9 @@ Beschriftungen prüfen, dann trainieren (nächster Schritt).
 | Rechenzeit pro Bild | ~31 ms auf x86, auf dem Pi 4 geschätzt 100–130 ms |
 
 **Auf deinem echten Tisch wird es schlechter sein.** Licht, Spiegelungen, Kameraqualität und Tuchfarbe
-bildet kein Simulator vollständig ab. Grüne Kugeln auf grünem Tuch sind am schwierigsten.
+bildet kein Simulator vollständig ab. Am schwierigsten sind Kugeln in Tuchfarbe – auf blauem Tuch
+also die 2 und 10 (blau) und 4 und 12 (violett). Im Simulator mit blauem Tuch: Kugeln 100 % gefunden,
+voll/halb 96–97 % richtig, Kugelnummer (Farbe) 98 % richtig – je Einzelbild.
 Deshalb: erste Abende mit dem Portal in der Hand spielen und Fehler korrigieren.
 
 Tests selbst laufen lassen (im Ordner `app/`):

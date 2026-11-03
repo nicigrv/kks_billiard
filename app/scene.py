@@ -11,6 +11,7 @@ Darstellung nutzen:
 Eingabe ist ein "Szene"-dict (App.scene() in main.py):
     balls       [{x, y, kind, color, number}]  Draufsicht-Koordinaten (geometry.WARP_W x WARP_H)
     radius      Kugelradius in Draufsicht-Pixeln
+    cloth       Tuchfarbe "blau" oder "gruen"
     game        Game.to_dict()
     bar         {Nummer: True wenn noch auf dem Tisch} fuer 1..15
     suggestion  Stossvorschlag (planner.py) oder None
@@ -38,8 +39,11 @@ MUTED = (150, 160, 175)
 ACCENT = (80, 220, 120)
 WARN = (255, 170, 60)
 FOUL = (220, 70, 60)
-FELT = (18, 98, 72)
-FELT_LINE = (40, 125, 96)
+# Tuchfarbe der Grafik (Fuellung, Linien) - passend zum echten Tisch, Einstellung im Portal
+CLOTHS = {
+    "blau": ((28, 84, 150), (58, 112, 178)),
+    "gruen": ((18, 98, 72), (40, 125, 96)),
+}
 RAIL = (92, 54, 32)
 RAIL_EDGE = (128, 80, 48)
 POCKET = (6, 8, 8)
@@ -193,10 +197,11 @@ class SceneRenderer:
 
         pygame.draw.rect(surf, RAIL, outer, border_radius=max(4, rw // 2))
         pygame.draw.rect(surf, RAIL_EDGE, outer, 2, border_radius=max(4, rw // 2))
-        pygame.draw.rect(surf, FELT, felt)
+        felt_col, felt_line = CLOTHS.get(scene.get("cloth"), CLOTHS["blau"])
+        pygame.draw.rect(surf, felt_col, felt)
         # Kopflinie + Fusspunkt
-        pygame.draw.line(surf, FELT_LINE, P(WARP_W * 0.25, 0), P(WARP_W * 0.25, WARP_H), 1)
-        pygame.draw.circle(surf, FELT_LINE, P(WARP_W * 0.75, WARP_H / 2), 3)
+        pygame.draw.line(surf, felt_line, P(WARP_W * 0.25, 0), P(WARP_W * 0.25, WARP_H), 1)
+        pygame.draw.circle(surf, felt_line, P(WARP_W * 0.75, WARP_H / 2), 3)
         # Diamanten
         for k in range(1, 8):
             if k == 4:

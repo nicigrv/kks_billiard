@@ -336,9 +336,16 @@ details > div { margin-top: 12px; }
           <option value="9ft">9 Fuß (Spielfläche ca. 2,54 m)</option>
         </select>
       </div>
+      <div class="field">
+        <label for="clothColor">Tuchfarbe (für die Grafik)</label>
+        <select id="clothColor">
+          <option value="blau">Blau</option>
+          <option value="gruen">Grün</option>
+        </select>
+      </div>
       <div class="grid two">
         <button class="quiet" id="calibReset" type="button">Neu markieren</button>
-        <button class="primary" id="calibSave" type="button" disabled>Ecken speichern</button>
+        <button class="primary" id="calibSave" type="button" disabled>Speichern</button>
       </div>
     </div>
   </details>
@@ -468,6 +475,7 @@ details > div { margin-top: 12px; }
     $("datasetInfo").textContent = s.dataset_count + " Bilder gesammelt" + (s.record ? ", Sammeln läuft." : ".");
     $("recordBtn").textContent = s.record ? "Sammeln stoppen" : "Sammeln starten";
     if (!calibDirty && s.table_size) $("tableSize").value = s.table_size;
+    if (!calibDirty && s.cloth) $("clothColor").value = s.cloth;
   }
 
   // ---------------- Grafik, Schlagverbesserung, Aufzeichnung ----------------
@@ -764,10 +772,12 @@ details > div { margin-top: 12px; }
     $("calibSave").disabled = points.length !== 4;
     drawCalib();
   });
-  $("tableSize").addEventListener("change", () => {
-    calibDirty = true;
-    $("calibSave").disabled = !(points.length === 4 || (state && state.corners));
-  });
+  for (const id of ["tableSize", "clothColor"]) {
+    $(id).addEventListener("change", () => {
+      calibDirty = true;
+      $("calibSave").disabled = !(points.length === 4 || (state && state.corners));
+    });
+  }
   $("calibReset").addEventListener("click", () => {
     points = [];
     $("calibSave").disabled = true;
@@ -775,7 +785,7 @@ details > div { margin-top: 12px; }
   });
   $("calibSave").addEventListener("click", async () => {
     const corners = points.length === 4 ? points : state.corners;
-    const res = await post("calibrate", { corners, table_size: $("tableSize").value });
+    const res = await post("calibrate", { corners, table_size: $("tableSize").value, cloth: $("clothColor").value });
     if (res) { points = []; calibDirty = false; $("calibSave").disabled = true; drawCalib(); }
   });
 
