@@ -35,11 +35,17 @@ class Scenario(threading.Thread):
         self.jpeg = None
         self.lock = threading.Lock()
         self.caption = ""
+        self._stop = threading.Event()
+
+    def stop(self):
+        self._stop.set()
 
     def _emit(self, balls, seconds, caption, occluder=None):
         self.caption = caption
         end = time.monotonic() + seconds
         while time.monotonic() < end:
+            if self._stop.is_set():
+                raise SystemExit      # beendet nur diesen Thread (Demo-Quelle gewechselt)
             cam = to_camera(render_topdown(balls, L, W, CLOTH, self.rng, occluder), DEFAULT_CORNERS)
             cv2.putText(cam, caption, (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             ok, jpg = cv2.imencode(".jpg", cam, [cv2.IMWRITE_JPEG_QUALITY, 80])

@@ -63,6 +63,7 @@ main { max-width: 560px; margin: 0 auto; }
 .chip.sel { border-color: var(--ivory); box-shadow: 0 0 0 2px var(--felt-dark) inset; }
 .badge { display: inline-block; min-width: 26px; padding: 2px 8px; margin-left: 6px; border-radius: 13px; background: var(--chalk); color: var(--felt-dark); font: 700 16px/1.3 var(--body); text-align: center; vertical-align: middle; }
 .btnlink { display: flex; align-items: center; justify-content: center; min-height: 52px; padding: 14px 12px; border-radius: var(--radius-btn); background: var(--rail); color: var(--ivory); font-weight: 700; text-decoration: none; text-align: center; }
+a.link { color: var(--chalk); font-weight: 700; }
 .btnlink.off { opacity: .45; pointer-events: none; }
 .check { display: flex; align-items: center; gap: 10px; margin: 12px 0; font-size: 15px; color: var(--ivory); }
 .check input { width: 24px; height: 24px; }
@@ -180,6 +181,7 @@ details > div { margin-top: 12px; }
  <div class="col-left">
 
   <img class="graphic" id="graphic" alt="Grafische Ansicht des Tisches wie auf dem Beamer">
+  <p class="hint" style="margin:-6px 0 14px"><a class="link" href="/beamer" target="_blank" rel="noopener">Beamer-Ansicht im Browser öffnen</a> – das komplette Beamerbild live, z. B. für einen Fernseher oder ein zweites Tablet.</p>
 
   <div class="board" aria-live="polite">
     <div class="cueball hidden" id="cueball" aria-hidden="true"></div>
@@ -360,6 +362,36 @@ details > div { margin-top: 12px; }
     </div>
   </details>
 
+  <details id="cameraDetails">
+    <summary>Kamera</summary>
+    <div>
+      <p class="statusline" id="cameraStatus">-</p>
+      <div class="field">
+        <label for="camSource">Kameraquelle</label>
+        <select id="camSource">
+          <option value="esp32">ESP32-CAM (WLAN)</option>
+          <option value="usb">USB-Kamera am Pi</option>
+          <option value="picam">Pi-Kameramodul (Flachbandkabel)</option>
+          <option value="demo">Demo (Bild aus dem Internet / Simulation)</option>
+        </select>
+      </div>
+      <div class="field cam-opt" data-src="esp32">
+        <label for="camUrl">Adresse des Kamera-Streams</label>
+        <input type="text" id="camUrl" inputmode="url" autocomplete="off" placeholder="http://192.168.88.200:81/stream">
+      </div>
+      <div class="field cam-opt" data-src="usb">
+        <label for="camDevice">Gerät</label>
+        <input type="text" id="camDevice" autocomplete="off" placeholder="/dev/video0">
+      </div>
+      <div class="field cam-opt" data-src="demo">
+        <label for="demoUrl">Bildadresse (Foto eines Pooltisches von oben, JPEG/PNG)</label>
+        <input type="text" id="demoUrl" inputmode="url" autocomplete="off" placeholder="leer = eingebautes simuliertes Spiel">
+        <p class="hint" style="margin-top:6px">Das Bild wird einmal geladen und auf dem Pi gespeichert (läuft danach auch offline). Danach unter „Tisch einrichten“ die vier Ecken des Tuchs antippen. Ohne Adresse läuft ein simuliertes Spiel, das schon eingerichtet ist.</p>
+      </div>
+      <button class="primary" type="button" id="camApply" style="width:100%">Kamera übernehmen</button>
+    </div>
+  </details>
+
   <details id="calibDetails">
     <summary>Tisch einrichten</summary>
     <div>
@@ -502,6 +534,7 @@ details > div { margin-top: 12px; }
     }
 
     renderTraining(s);
+    renderCamera(s);
     if (!calibDirty && s.table_size) $("tableSize").value = s.table_size;
     if (!calibDirty && s.cloth) $("clothColor").value = s.cloth;
   }
@@ -736,6 +769,45 @@ details > div { margin-top: 12px; }
   });
   $("reviewSkip").addEventListener("click", () => { if (snap) loadReview(snap.name); });
   $("collectToggle").addEventListener("change", () => post("collect", { enabled: $("collectToggle").checked }));
+
+  // ---------------- Kamera ----------------
+  let camDirty = false;
+  function showCamOpts() {
+    const src = $("camSource").value;
+    document.querySelectorAll(".cam-opt").forEach((el) => { el.hidden = el.dataset.src !== src; });
+  }
+  function renderCamera(s) {
+    const c = s.camera || {};
+    const st = $("cameraStatus");
+    st.innerHTML = "";
+    const b = document.createElement("b");
+    b.textContent = (c.name || "-") + (c.connected ? " – verbunden" : " – keine Bilder");
+    b.className = c.connected ? "good" : "bad";
+    st.appendChild(document.createTextNode("Aktiv: "));
+    st.appendChild(b);
+    const extra = [c.info, c.error].filter(Boolean).join(" · ");
+    if (extra) { st.appendChild(document.createElement("br")); st.appendChild(document.createTextNode(extra)); }
+    if (!camDirty) {
+      $("camSource").value = c.source || "esp32";
+      $("camUrl").value = c.url || "";
+      $("camDevice").value = c.device || "";
+      $("demoUrl").value = c.demo_url || "";
+      showCamOpts();
+    }
+  }
+  for (const id of ["camSource", "camUrl", "camDevice", "demoUrl"]) {
+    $(id).addEventListener("input", () => { camDirty = true; showCamOpts(); });
+  }
+  $("camApply").addEventListener("click", async () => {
+    const btn = $("camApply");
+    btn.disabled = true;
+    btn.textContent = "Kamera wird umgestellt ...";
+    const res = await post("camera", { source: $("camSource").value, url: $("camUrl").value,
+                                       device: $("camDevice").value, demo_url: $("demoUrl").value });
+    btn.disabled = false;
+    btn.textContent = "Kamera übernehmen";
+    if (res) camDirty = false;
+  });
 
   // ---------------- KI-Modell ----------------
   function renderTraining(s) {

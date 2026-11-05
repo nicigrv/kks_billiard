@@ -73,10 +73,20 @@ class Recorder:
     def verified(self):
         return self._count(self.ok_img, ".jpg")
 
-    @staticmethod
-    def _new_name():
+    def _new_name(self):
+        """Zeitstempel als Name; ist er schon vergeben (gleiche Millisekunde), eins weiter."""
         now = time.time()
-        return time.strftime("%Y%m%d-%H%M%S", time.localtime(now)) + f"-{int(now * 1000) % 1000:03d}"
+        stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(now))
+        ms = int(now * 1000) % 1000
+        while True:
+            name = f"{stamp}-{ms:03d}"
+            if not any(os.path.exists(os.path.join(d, name + ext)) for d, ext in
+                       ((self.pending_dir, ".jpg"), (self.ok_img, ".jpg"))):
+                return name
+            ms += 1
+            if ms > 999:
+                time.sleep(0.001)
+                return self._new_name()
 
     # ------------------------------------------------------ 1. automatisch sammeln
     def save_pending(self, warped, balls, radius, numbers=None):

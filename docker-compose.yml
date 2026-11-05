@@ -2,7 +2,8 @@
 #
 # Starten (im Ordner ~/billard):   docker compose up -d --build
 # Logs:                             docker logs -f billard
-# Admin-Portal:                     http://<pi-ip>:8080
+# Admin-Portal:                     http://<pi-ip>:8080        (Port: x-web-port unten)
+# Beamerbild im Browser:            http://<pi-ip>:8080/beamer
 #
 # Einmalige Werkzeuge (laufen nur auf Befehl):
 #   docker compose stop coral && docker compose run --rm coral-check && docker compose start coral
@@ -11,9 +12,15 @@
 #   docker compose --profile sim up -d fake-cue         simuliertes Queue-Gyroskop
 #   docker compose run --rm updater                     Kamera-Firmware aktualisieren
 
+# Port des Admin-Portals (und der Beamer-Ansicht /beamer). Nur hier aendern, z. B. "8090".
+x-web-port: &web_port "8080"
+
 services:
   billard:
-    build: ./app
+    build:
+      context: ./app
+      args:
+        PI_CAMERA: "1"                             # Pi-Kameramodul-Software mitbauen (0 = weglassen)
     image: billard-app:latest
     container_name: billard
     restart: unless-stopped
@@ -22,12 +29,18 @@ services:
     environment:
       CAM_URL: http://192.168.88.200:81/stream    # <- IP der Kamera anpassen
       ADMIN_PIN: ""                                # <- z. B. "4711", leer = ohne PIN
+      WEB_PORT: *web_port                          # Port: ganz oben bei x-web-port einstellen
+      # Demo-Modus: Foto eines Pooltisches von oben (JPEG/PNG). Leer = simuliertes Spiel.
+      # Gilt nur als Vorgabe, im Portal unter "Kamera" aenderbar.
+      DEMO_IMAGE_URL: ""
       CUE_PORT: "5005"                             # UDP-Port fuer das Gyroskop im Queue
       CORAL_PORT: "8765"                           # Coral-Container (Dienst "coral")
-    devices:
-      - /dev/dri:/dev/dri                          # HDMI-Ausgabe
+    # Zugriff auf HDMI-Ausgabe (/dev/dri), USB-Kamera (/dev/video*) und Pi-Kameramodul
+    # (/dev/media*, /dev/dma_heap). Einfachste sichere Variante fuer ein Geraet im Heimnetz.
+    privileged: true
     volumes:
       - ./data:/data                               # Kalibrierung, Trainingsbilder, Videos
+      - /run/udev:/run/udev:ro                     # Pi-Kameramodul (libcamera findet die Kamera)
     logging:
       driver: json-file
       options: { max-size: "5m", max-file: "2" }
@@ -37,6 +50,8 @@ services:
     profiles: ["sim"]
     network_mode: host
     command: ["python3", "-m", "sim.fake_cue"]
+    environment:
+      WEB_PORT: *web_port
 
   # Fuehrt das trainierte Kugelmodell auf dem Coral-Stick aus (Python 3.9, Googles Pakete).
   # Ohne Modell oder ohne Stick nutzt das Hauptprogramm automatisch die klassische Erkennung.

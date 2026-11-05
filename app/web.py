@@ -18,6 +18,7 @@ from config import UserError
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MAX_MODEL_BYTES = 64 * 1024 * 1024
+BEAMER_SIZES = {"sd": (960, 540), "hd": (1280, 720), "fhd": (1920, 1080)}
 
 
 def make_handler(app, pin):
@@ -77,6 +78,24 @@ def make_handler(app, pin):
                     self.wfile.write(chunk)
                     left -= len(chunk)
 
+        def _stream_beamer(self, size, fps):
+            """Beamerbild als laufender MJPEG-Strom (Browser zeigt ihn wie ein Video)."""
+            boundary = "beamerbild"
+            self.send_response(200)
+            self.send_header("Content-Type", f"multipart/x-mixed-replace; boundary={boundary}")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            try:
+                while True:
+                    t0 = time.monotonic()
+                    jpg = app.beamer_jpeg(size)
+                    self.wfile.write(f"--{boundary}\r\nContent-Type: image/jpeg\r\n"
+                                     f"Content-Length: {len(jpg)}\r\n\r\n".encode() + jpg + b"\r\n")
+                    self.wfile.flush()
+                    time.sleep(max(0.0, 1 / fps - (time.monotonic() - t0)))
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                return None
+
         def do_GET(self):
             url = urlsplit(self.path)
             path, query = url.path, parse_qs(url.query)
@@ -85,6 +104,18 @@ def make_handler(app, pin):
                     return self._send(200, f.read(), "text/html; charset=utf-8")
             if path == "/api/state":
                 return self._send(200, app.state_dict())
+            if path == "/beamer":
+                with open(os.path.join(HERE, "beamer.html"), "rb") as f:
+                    return self._send(200, f.read(), "text/html; charset=utf-8")
+            if path in ("/api/beamer.jpg", "/api/beamer.mjpg"):
+                size = BEAMER_SIZES.get(query.get("q", ["hd"])[0], BEAMER_SIZES["hd"])
+                if path.endswith(".jpg"):
+                    return self._send(200, app.beamer_jpeg(size), "image/jpeg")
+                try:
+                    fps = min(10.0, max(1.0, float(query.get("fps", ["5"])[0])))
+                except ValueError:
+                    fps = 5.0
+                return self._stream_beamer(size, fps)
             if path == "/api/graphic.jpg":
                 jpg = app.graphic_jpeg()
                 if jpg is None:

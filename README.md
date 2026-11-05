@@ -2,6 +2,7 @@
 
 ```
 ESP32-CAM ──WLAN──▶ Raspberry Pi (Docker: "billard") ──HDMI──▶ Beamer
+ (oder USB-Kamera / Pi-Kameramodul am Pi, oder Demo)   └── Beamerbild im Browser: http://<pi-ip>:8080/beamer
 Queue-Gyroskop ─WLAN (UDP 5005)─▶ │
                                   └── Admin-Portal  http://<pi-ip>:8080  (iPad / Handy)
 ```
@@ -37,6 +38,29 @@ docker logs -f billard
 ```
 
 Dann am Handy `http://<pi-ip>:8080` öffnen. Die Adresse steht auch unten rechts auf dem Beamer.
+
+**Anderer Port als 8080:** in `docker-compose.yml` ganz oben `x-web-port: &web_port "8090"` setzen,
+dann `docker compose up -d`. Portal und Beamer-Ansicht laufen dann auf diesem Port.
+
+## 1a. Kamera wählen
+
+Portal → **„Kamera“**. Die Tisch-Ecken werden je Kamera gespeichert, ein Wechsel zerstört die Einrichtung nicht.
+
+| Quelle | Was nötig ist |
+|---|---|
+| **ESP32-CAM (WLAN)** | Adresse des Streams, z. B. `http://192.168.88.200:81/stream` |
+| **USB-Kamera am Pi** | einstecken, Gerät meist `/dev/video0` |
+| **Pi-Kameramodul** (Flachbandkabel) | Kamera am CSI-Anschluss; das Programm bringt `picamera2` mit (Bau-Option `PI_CAMERA: "1"`). Läuft auf dem Pi nebenher eine andere Kamera-Anwendung, ist die Kamera belegt. |
+| **Demo** | Adresse eines Fotos (JPEG/PNG) eines Pooltisches **von oben**, z. B. von Wikimedia Commons. Danach unter „Tisch einrichten“ die vier Ecken antippen. Ohne Adresse (oder wenn das Bild nicht ladbar ist) läuft ein eingebautes **simuliertes Spiel**, das schon eingerichtet ist. |
+
+Der Container läuft dafür mit `privileged: true` (Zugriff auf HDMI, USB- und Pi-Kamera).
+
+## 1b. Beamerbild im Browser
+
+`http://<pi-ip>:8080/beamer` zeigt das komplette Beamerbild live (Kamera, Grafik, Game-Bar) –
+z. B. auf einem Fernseher, Laptop oder zweiten Tablet. Antippen = Vollbild.
+Qualität: `/beamer?q=fhd&fps=8` (`q` = `sd`, `hd`, `fhd`; `fps` 1–10). Jede offene Ansicht kostet
+den Pi etwas Rechenzeit; mehrere Zuschauer teilen sich aber dasselbe Bild.
 
 ## 2. Einmalig: Tisch einrichten
 
