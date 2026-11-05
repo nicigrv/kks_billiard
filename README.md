@@ -25,22 +25,159 @@ Mannschaften, Frames, Punkte und alle 15 Kugeln – versenkte sind durchgestrich
 
 ---
 
-## 1. Installieren / Aktualisieren auf dem Pi
+## 1. Installation (Schritt für Schritt)
+
+Dauer: ca. 1 Stunde, davon 15–30 Minuten Warten beim ersten Bauen.
+
+### 1.1 Was ihr braucht
+
+| Teil | Hinweis |
+|---|---|
+| **Raspberry Pi 4 oder 5** (4 GB+) | mit Netzteil (Pi 4: 3 A, Pi 5: 5 A) und Kühlung |
+| **microSD-Karte** 32 GB+ | oder SSD am USB-3-Port |
+| **Beamer/Bildschirm** am HDMI-Ausgang | Pi 4/5: der Anschluss **HDMI 0** (neben dem Strom) |
+| **Kamera** über dem Tisch, eine davon: | |
+| – ESP32-CAM (AI-Thinker) | per WLAN, Firmware in `esp32cam_stream/` |
+| – USB-Kamera | am Pi, möglichst 1280×720 mit MJPG |
+| – Pi-Kameramodul | Flachbandkabel; Pi 5 braucht ein Pi-5-Kamerakabel. Weitwinkel (Camera Module 3 **Wide**) hilft, damit der ganze Tisch ins Bild passt |
+| iPad oder Handy | für das Admin-Portal, im selben WLAN |
+| *optional* Coral USB Accelerator | für das KI-Modell (Abschnitt 5) |
+| *optional* Gyroskop im Queue | ESP32 + MPU6050, siehe `cue_sensor/README.md` |
+
+Ohne Kamera geht es auch: Im **Demo-Modus** läuft ein simuliertes Spiel (Abschnitt 1a).
+
+### 1.2 Raspberry Pi OS auf die Karte
+
+1. Am PC den **Raspberry Pi Imager** installieren: https://www.raspberrypi.com/software/
+2. Gerät wählen, Betriebssystem: **Raspberry Pi OS Lite (64-bit)** (unter „Raspberry Pi OS (other)“).
+   *Lite* = ohne Desktop. Wichtig: Ein laufender Desktop belegt den HDMI-Ausgang, dann bleibt der Beamer schwarz.
+3. Bei „Einstellungen bearbeiten“ eintragen:
+   - Hostname, z. B. `billard`
+   - Benutzername und Passwort
+   - WLAN (Name, Passwort, Land `DE`) – oder später ein LAN-Kabel stecken
+   - Reiter „Dienste“: **SSH aktivieren**
+4. Schreiben, Karte in den Pi, Beamer und (falls genutzt) Kamera/Coral anschließen, einschalten.
+   Der erste Start dauert 1–2 Minuten.
+
+**Tipp:** Im Router dem Pi eine **feste IP-Adresse** geben (DHCP-Reservierung). Dann ändert sich
+die Adresse des Portals nie. Dasselbe für die ESP32-CAM.
+
+### 1.3 Am Pi anmelden und Docker installieren
+
+Vom PC aus (Windows: PowerShell, Mac/Linux: Terminal), `nicolas` durch euren Benutzer ersetzen:
 
 ```bash
-# Ordner "billard" auf den Pi kopieren (vom PC):  scp billard.zip nicolas@nicolas10:~
-cd ~ && unzip -o billard.zip && cd billard
-
-docker rm -f billard-viewer        # alter Viewer aus Schritt 1 muss weg (belegt sonst HDMI)
-nano docker-compose.yml            # CAM_URL = IP der Kamera, ADMIN_PIN setzen
-docker compose up -d --build --remove-orphans
-docker logs -f billard
+ssh nicolas@billard.local
 ```
 
-Dann am Handy `http://<pi-ip>:8080` öffnen. Die Adresse steht auch unten rechts auf dem Beamer.
+Auf dem Pi:
 
-**Anderer Port als 8080:** in `docker-compose.yml` ganz oben `x-web-port: &web_port "8090"` setzen,
-dann `docker compose up -d`. Portal und Beamer-Ansicht laufen dann auf diesem Port.
+```bash
+sudo apt update && sudo apt full-upgrade -y
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+sudo reboot
+```
+
+Nach dem Neustart wieder per `ssh` anmelden und prüfen:
+
+```bash
+docker run --rm hello-world
+```
+
+Erscheint „Hello from Docker!“, passt alles.
+
+### 1.4 Programm auf den Pi holen
+
+```bash
+sudo apt install -y git
+git clone https://github.com/nicigrv/kks_billiard.git ~/billard
+cd ~/billard
+```
+
+Ist das Repository privat, fragt `git` nach Benutzername und Passwort: als Passwort ein
+GitHub-Token (GitHub → Settings → Developer settings → Personal access tokens) eingeben.
+Alternativ auf GitHub „Code → Download ZIP“, die ZIP auf den Pi kopieren
+(`scp kks_billiard-main.zip nicolas@billard.local:~`) und dort `unzip kks_billiard-main.zip && mv kks_billiard-main billard`.
+
+### 1.5 Einstellungen in `docker-compose.yml`
+
+```bash
+nano docker-compose.yml
+```
+
+| Eintrag | Bedeutung |
+|---|---|
+| `x-web-port: &web_port "8080"` (ganz oben) | Port des Portals. Ist 8080 schon belegt, z. B. `"8090"` |
+| `ADMIN_PIN: ""` | PIN für alle Änderungen im Portal, z. B. `"4711"`. Leer = jeder im WLAN darf bedienen |
+| `CAM_URL` | Nur die **erste** Vorgabe für die ESP32-CAM. Später im Portal unter „Kamera“ änderbar |
+| `PI_CAMERA: "1"` | Software fürs Pi-Kameramodul mitbauen. Ohne Kameramodul `"0"` = schnellerer Bau |
+
+Speichern: `Strg+O`, `Enter`, `Strg+X`.
+
+### 1.6 Starten
+
+```bash
+docker compose up -d --build
+```
+
+Das erste Bauen dauert **15–30 Minuten** (lädt und installiert alles). Danach:
+
+```bash
+docker compose ps          # "billard" und "billard-coral" sollten "running" sein
+docker logs -f billard     # Ausgaben ansehen, beenden mit Strg+C
+```
+
+In den Ausgaben steht die Adresse, z. B. `Admin http://192.168.88.10:8080`. Die steht auch unten
+rechts auf dem Beamer.
+
+**Autostart:** Nichts weiter zu tun. Docker startet mit dem Pi, die Container starten von selbst
+(`restart: unless-stopped`). Pi einfach mit dem Beamer zusammen einschalten.
+
+### 1.7 Einrichten im Portal
+
+Am iPad `http://<pi-ip>:8080` in Safari öffnen (über „Teilen → Zum Home-Bildschirm“ wie eine App).
+
+1. **Kamera** wählen (Abschnitt 1a). Für die ESP32-CAM: siehe unten.
+2. **Tisch einrichten**: vier Ecken antippen, Tischgröße und Tuchfarbe wählen (Abschnitt 2).
+3. Unter „Was die Kamera sieht“ prüfen, ob jede Kugel einen Ring hat.
+4. Fertig – **Spiel starten** (Abschnitt 3).
+
+### 1.8 ESP32-CAM einrichten (nur wenn ihr sie nutzt)
+
+1. **Erstes Aufspielen** der Firmware per USB (ESP32-CAM-MB-Adapter) mit der Arduino IDE:
+   Sketch `esp32cam_stream/esp32cam_stream.ino`, Board „AI Thinker ESP32-CAM“, PSRAM an,
+   Partition „Default 4MB with spiffs“. Spätere Updates gehen übers WLAN (Abschnitt 7).
+2. Kamera einschalten. Sie öffnet den WLAN-Hotspot **„Billard-Cam-Setup“**. Mit dem Handy
+   verbinden, die Einrichtungsseite öffnet sich (sonst `http://192.168.4.1`), euer WLAN eintragen.
+3. Die Kamera startet neu und ist im WLAN. Ihre Adresse steht im Router.
+4. Im Portal unter „Kamera“: **ESP32-CAM**, Adresse `http://<kamera-ip>:81/stream`, „Kamera übernehmen“.
+
+### 1.9 Aktualisieren
+
+```bash
+cd ~/billard
+git pull
+docker compose up -d --build --remove-orphans
+```
+
+Einstellungen, Tisch-Ecken, Trainingsbilder, Modelle und Videos liegen in `~/billard/data/`
+und bleiben erhalten. **Sichern:** diesen Ordner kopieren, z. B.
+`scp -r nicolas@billard.local:billard/data ./billard-sicherung`.
+
+Wer noch den alten Viewer aus Schritt 1 laufen hat: einmal `docker rm -f billard-viewer`
+(belegt sonst den HDMI-Ausgang).
+
+### 1.10 Wenn etwas nicht geht
+
+| Problem | Lösung |
+|---|---|
+| Beamer bleibt schwarz | Raspberry Pi OS **Lite** nutzen (oder mit `sudo raspi-config` → System Options → Boot → **Console** umstellen). Beamer an **HDMI 0**. Logs: `docker logs billard` |
+| Portal nicht erreichbar | Richtige IP/Port? `docker compose ps`. Läuft auf dem Port schon etwas anderes → Port ändern (1.5) |
+| „Warte auf Kamera …“ | Portal → „Kamera“: Status/Fehlermeldung lesen. ESP32: Adresse im Browser öffnen. USB: `ls /dev/video*` zeigt die Kamera? |
+| Pi-Kameramodul „belegt“ | Läuft eine andere Kamera-Anwendung auf dem Pi? Kabel richtig herum? Test auf dem Pi: `rpicam-hello --list-cameras` |
+| Coral wird nicht gefunden | Stick am **blauen USB-3-Port**, Test in Abschnitt 5. Ohne Coral läuft alles mit OpenCV weiter |
+| Container startet immer neu | `docker logs billard` zeigt den Fehler |
 
 ## 1a. Kamera wählen
 
@@ -128,12 +265,15 @@ kurzes Video, in dem die Kugeln von Zug zu Zug rollen. Videos: im Portal ansehen
 
 ## 4. Ohne Tisch testen (Simulator)
 
+Am einfachsten: Portal → „Kamera“ → **Demo** ohne Bildadresse. Dann läuft ein simuliertes
+Spiel in Schleife, der Tisch ist schon eingerichtet.
+
+Alternativ als eigene simulierte Kamera (wie eine ESP32-CAM):
 ```bash
 docker compose --profile sim up -d fake-table                     # simulierte Kamera auf Port 8081
-# in docker-compose.yml:  CAM_URL: http://127.0.0.1:8081/stream
-docker compose up -d
 ```
-Ecken für den Simulator: einfach die vier Ecken des grünen Bereichs antippen. Das Spiel läuft in Schleife.
+Im Portal unter „Kamera“: ESP32-CAM, Adresse `http://127.0.0.1:8081/stream`. Ecken: die vier Ecken
+des Tuchs antippen.
 
 Simuliertes Queue-Gyroskop: `docker compose --profile sim up -d fake-cue` (Schlagverbesserung im Portal einschalten).
 
