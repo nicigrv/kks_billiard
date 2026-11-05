@@ -197,7 +197,18 @@ class CoralDetector:
             x, y = (cx - dx) / scale, (cy - dy) / scale
             if not (-self.r <= x <= W + self.r and -self.r <= y <= H + self.r):
                 continue
-            cands.append([score, float(np.clip(x, 0, W - 1)), float(np.clip(y, 0, H - 1)), k, all_scores])
+            # Das Modell rechnet in groben Stufen (int8, ~3 px). Mitte auf die Kugelflaeche
+            # nachziehen - wie bei der klassischen Erkennung.
+            x, y = self.cv._refine(mask, float(np.clip(x, 0, W - 1)), float(np.clip(y, 0, H - 1)))
+            cands.append([score, x, y, k, all_scores])
+
+        # Doppelte Treffer derselben Kugel entfernen: zwei echte Kugeln liegen nie naeher
+        # als einen Durchmesser beieinander (gleiche Grenze wie die klassische Erkennung).
+        kept, min_d2 = [], (1.45 * self.r) ** 2
+        for c in sorted(cands, key=lambda c: -c[0]):
+            if all((c[1] - o[1]) ** 2 + (c[2] - o[2]) ** 2 >= min_d2 for o in kept):
+                kept.append(c)
+        cands = kept
 
         # Es gibt nur eine Weisse und eine 8: die sicherste behaelt den Typ,
         # die anderen bekommen ihre zweitbeste Klasse (voll/halb).
@@ -208,9 +219,6 @@ class CoralDetector:
 
         balls = []
         for score, x, y, k, _ in cands:
-            # Das Modell rechnet in groben Stufen (int8, ~3 px). Mitte auf die Kugelflaeche
-            # nachziehen - wie bei der klassischen Erkennung.
-            x, y = self.cv._refine(mask, x, y)
             fw, fb, fc, color = self.cv._color_stats(hsv, x, y)
             kind = CLASSES[k]
             if kind == "eight":

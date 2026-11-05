@@ -47,7 +47,11 @@ python train_coral.py billard-training-20261110.zip --no-export
 
 ## Was im Modell steckt
 
-- YOLOv8n (klein), Eingabe 640×640, Klassen: Weiße, 8, Volle, Halbe.
+- YOLOv8n (klein), Eingabe 640×640, Klassen: Weiße, 8, Volle, Halbe. Datei ca. 4 MB.
+- Auf dem Coral laufen 216 von 257 Rechenschritten (alle aufwendigen); nur die letzte
+  Auswertung des Netzes läuft auf dem Pi – das ist bei YOLO auf dem Coral normal.
+- Getestet: Training → Umwandlung → Upload → Erkennung über den Coral-Container
+  (mit Simulator-Bildern; der Coral selbst wurde dabei durch den Prozessor ersetzt).
 - Die Kugel**nummer** (Farbe) und die genaue Mitte bestimmt auf dem Pi weiter die klassische
   Bildverarbeitung; ebenso, ob jemand über dem Tisch hängt.
 - Ohne Modell, ohne Stick oder bei einem Fehler nimmt der Pi automatisch die klassische
