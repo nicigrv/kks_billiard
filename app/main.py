@@ -6,7 +6,7 @@ Billard-System: Kamera -> Kugelerkennung -> 8-Ball-Regeln -> Scoreboard (HDMI) +
     python3 main.py --url ... --no-display     # nur Portal, keine HDMI-Ausgabe
 
 Threads:
-  Kamera     liest den MJPEG-Stream (stream_reader.py), haelt nur das neueste Bild
+  Kamera     liest die Kamera (ESP32-CAM, USB, Pi-Kamera oder Demo; cameras.py), nur das neueste Bild
   Erkennung  verarbeitet jedes neue Bild (pipeline.py)
   Queue      empfaengt die Lage des Queues vom Gyroskop (cue_sensor.py)
   Web        Admin-Portal auf Port 8080 (web.py)
@@ -26,6 +26,7 @@ import cv2
 import config
 import web
 from ballnum import ball_number
+from coral_detector import AutoDetector, CoralClient
 from cue_sensor import AlignChecker, CueSensor
 from geometry import Table, TABLE_SIZES
 from pipeline import Pipeline
@@ -33,7 +34,7 @@ from planner import plan_shot
 from recorder import Recorder
 from replay import RoundRecorder
 from scene import SceneRenderer, bar_balls, surface_to_bgr
-from stream_reader import MjpegReader
+from cameras import SOURCE_NAMES, SOURCES, make_reader
 
 KINDS = ("cue", "eight", "solid", "stripe")
 COLORS = ("gelb", "blau", "rot", "violett", "orange", "gruen", "weinrot", "schwarz", "")
@@ -54,13 +55,16 @@ def host_ip():
 
 
 class App:
-    def __init__(self, url, cue_port=5005):
+    def __init__(self, url, cue_port=5005, coral_port=8765):
         self.cfg = config.load()
-        self.reader = MjpegReader(url).start()
+        self._migrate_config(url)
+        self.reader = make_reader(self.cfg["camera"], config.DATA_DIR).start()
         self.recorder = Recorder(os.path.join(config.DATA_DIR, "dataset"))
-        self.recorder.enabled = bool(self.cfg.get("record_dataset"))
-        table = Table(self.cfg.get("corners"), TABLE_SIZES.get(self.cfg.get("table_size"), TABLE_SIZES["8ft"]))
-        self.pipe = Pipeline(table, recorder=self.recorder)
+        self.recorder.enabled = bool(self.cfg.get("collect_training", True))
+        self.coral = CoralClient(port=coral_port)
+        table = self._table_for(self.reader)
+        self.pipe = Pipeline(table, recorder=self.recorder, detector_factory=lambda r: AutoDetector(
+            r, self.coral, lambda: self.cfg.get("detector", "auto")))
         self.cue = CueSensor(cue_port, self.cfg.get("cue_offset", 0.0), self.cfg.get("cue_flip", False)).start()
         self.align = AlignChecker(self.cfg.get("cue_tolerance", 2.0))
         self.rounds = RoundRecorder(os.path.join(config.DATA_DIR, "recordings"))
@@ -74,10 +78,72 @@ class App:
         self._ref_id = -1
         self._web_renderer = SceneRenderer()
         self._graphic = (None, None)        # (Schluessel, JPEG)
+        self._beamer = {"t": 0.0, "jpg": None, "size": None, "cam": {}, "renderer": None}
+        self._beamer_lock = threading.Lock()
         self._snapshots = {}
         self._snap_id = 0
         self._stop = threading.Event()
         threading.Thread(target=self._process_loop, name="erkennung", daemon=True).start()
+
+    # ---------------------------------------------------------------- Kamera
+    def _migrate_config(self, url):
+        """Aeltere config.json: eine Kamera, Ecken direkt in 'corners'."""
+        cam = self.cfg.get("camera") or {}
+        cam.setdefault("source", "esp32")
+        cam.setdefault("url", url)
+        cam.setdefault("device", "/dev/video0")
+        cam.setdefault("demo_url", os.environ.get("DEMO_IMAGE_URL", ""))
+        self.cfg["camera"] = cam
+        by = self.cfg.get("corners_by_source") or {}
+        if self.cfg.get("corners") and "esp32" not in by:
+            by["esp32"] = self.cfg["corners"]
+        self.cfg["corners_by_source"] = by
+
+    def _table_for(self, reader):
+        """Tisch-Ecken der aktiven Kameraquelle (die Demo bringt ihre eigenen mit)."""
+        corners = self.cfg["corners_by_source"].get(reader.calib_key) or reader.default_corners
+        return Table(corners, TABLE_SIZES.get(self.cfg.get("table_size"), TABLE_SIZES["8ft"]))
+
+    def _set_camera(self, p):
+        cam = dict(self.cfg["camera"])
+        src = p.get("source", cam["source"])
+        if src not in SOURCES:
+            raise ValueError("Kameraquelle")
+        cam["source"] = src
+        if "url" in p:
+            url = str(p["url"]).strip()
+            if src == "esp32" and not url.startswith("http"):
+                raise config.UserError("Adresse der ESP32-CAM muss mit http beginnen")
+            cam["url"] = url or cam["url"]
+        if "device" in p:
+            dev = str(p["device"]).strip() or "/dev/video0"
+            if not (dev.isdigit() or dev.startswith("/dev/video")):
+                raise config.UserError("Gerät wie /dev/video0 angeben")
+            cam["device"] = dev
+        if "demo_url" in p:
+            du = str(p["demo_url"]).strip()
+            if du and not du.startswith(("http://", "https://")):
+                raise config.UserError("Bildadresse muss mit http:// oder https:// beginnen")
+            cam["demo_url"] = du
+        new = make_reader(cam, config.DATA_DIR)    # Demo laedt hier ggf. das Bild (bis 15 s)
+        old, self.reader = self.reader, new.start()
+        old.stop()
+        self.cfg["camera"] = cam
+        config.save(self.cfg)
+        self.pipe.set_table(self._table_for(new))
+        with self.scene_lock:
+            self.seen_numbers = set()
+        msg = f"Kamera: {SOURCE_NAMES[src]}"
+        if getattr(new, "info", ""):
+            msg += f" - {new.info}"
+        if not self.pipe.table.calibrated:
+            msg += ". Jetzt unter „Tisch einrichten“ die Ecken antippen."
+        return msg
+
+    def camera_state(self):
+        r = self.reader
+        return dict(self.cfg["camera"], name=SOURCE_NAMES.get(self.cfg["camera"]["source"]),
+                    info=getattr(r, "info", ""), connected=bool(r.connected), error=r.last_error)
 
     # ------------------------------------------------------------ Erkennung
     def _process_loop(self):
@@ -147,7 +213,8 @@ class App:
         info = f"Kamera {self.reader.fps:4.1f} fps"
         if self.admin_url:
             info = f"Admin: {self.admin_url}   " + info
-        return {"balls": sb, "radius": radius, "game": game, "bar": bar_balls(game, visible, seen),
+        return {"balls": sb, "radius": radius, "cloth": self.cfg.get("cloth", "blau"),
+                "game": game, "bar": bar_balls(game, visible, seen),
                 "suggestion": sug, "cue": cue, "status": status, "info": info, "version": self.scene_version}
 
     def graphic_jpeg(self, size=(1280, 720)):
@@ -163,6 +230,30 @@ class App:
         if ok:
             self._graphic = (key, jpg.tobytes())
         return self._graphic[1]
+
+    def beamer_jpeg(self, size=(1280, 720), max_age=0.15):
+        """Das komplette Beamerbild (Kamera + Grafik + Game-Bar) fuer den Browser.
+        Mehrere Zuschauer teilen sich ein Bild; neu gezeichnet hoechstens alle max_age s."""
+        import pygame
+        from display import draw_beamer
+        from scene import RENDER_LOCK
+        with self._beamer_lock:
+            b = self._beamer
+            now = time.monotonic()
+            if b["jpg"] is not None and b["size"] == size and now - b["t"] < max_age:
+                return b["jpg"]
+            if b["renderer"] is None:
+                b["renderer"] = SceneRenderer()
+            frame, fid, _ = self.reader.latest()
+            sc = self.scene()
+            with RENDER_LOCK:
+                surf = pygame.Surface(size)
+                draw_beamer(surf, b["renderer"], b["cam"], frame, fid, self.pipe, self.reader, sc)
+                img = surface_to_bgr(surf)
+            ok, jpg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            if ok:
+                b.update(t=now, jpg=jpg.tobytes(), size=size)
+            return b["jpg"]
 
     def _record_step(self):
         if not self.rounds.active:
@@ -218,13 +309,46 @@ class App:
                 continue
             balls.append(Ball(x, y, r, kind, color))
             numbers.append(ball_number(kind, color))
-        self.recorder.save_labeled(warped, balls, numbers)
+        self.recorder.save_verified(warped, balls, r, numbers)
         applied = 0
         if p.get("apply") and corrections:
             with self.pipe.lock:
                 applied = self.pipe.correct_balls(corrections)
-        return (f"Gespeichert ({self.recorder.corrected} korrigierte Bilder)"
+        return (f"Gespeichert ({self.recorder.verified} geprüfte Bilder)"
                 + (f", {applied} Kugel(n) im Spiel übernommen" if applied else ""))
+
+    def _review_save(self, p):
+        """Ein gesammeltes Trainingsbild wurde auf dem iPad geprueft."""
+        balls = []
+        for d in p.get("balls", []):
+            kind, color = d["kind"], d.get("color", "") or ""
+            if kind not in KINDS + ("none",) or color not in COLORS:
+                raise ValueError("Kugeltyp/Farbe")
+            balls.append({"x": float(d["x"]), "y": float(d["y"]), "kind": kind, "color": color,
+                          "number": ball_number(kind, color), "changed": bool(d.get("changed"))})
+        try:
+            res = self.recorder.review(str(p["name"]), balls, bool(p.get("discard")))
+        except FileNotFoundError as e:
+            raise config.UserError(str(e))
+        return f"Bild {res}. Noch {self.recorder.pending} zu prüfen, {self.recorder.verified} geprüft."
+
+    def save_model(self, data: bytes):
+        """Hochgeladenes Coral-Modell speichern. Der Coral-Container laedt es von selbst."""
+        if len(data) < 1000 or data[4:8] != b"TFL3":
+            raise config.UserError("Das ist keine TFLite-Modelldatei (.tflite)")
+        if b"edgetpu-custom-op" not in data:
+            raise config.UserError("Modell ist nicht für den Coral kompiliert "
+                                   "(die Datei *_edgetpu.tflite aus dem Training nehmen)")
+        folder = os.path.join(config.DATA_DIR, "models")
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, "billard_edgetpu.tflite")
+        tmp = path + ".tmp"
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)
+        # Der Coral-Container merkt die neue Datei selbst; das Hauptprogramm holt sich
+        # das neue Ein-/Ausgabeformat beim naechsten Abgleich (spaetestens nach 10 s).
+        return f"Modell gespeichert ({len(data) / 1e6:.1f} MB). Der Coral lädt es in wenigen Sekunden."
 
     # ------------------------------------------------------------- Portal-API
     def state_dict(self):
@@ -241,10 +365,14 @@ class App:
             "counts": counts,
             "calibrated": table.calibrated,
             "corners": table.corners,
+            "camera": self.camera_state(),
             "table_size": self.cfg.get("table_size"),
-            "record": self.recorder.enabled,
-            "dataset_count": self.recorder.count,
-            "corrected_count": self.recorder.corrected,
+            "cloth": self.cfg.get("cloth", "blau"),
+            "training": {"collect": self.recorder.enabled, "pending": self.recorder.pending,
+                         "verified": self.recorder.verified},
+            "detector": {"mode": self.cfg.get("detector", "auto"),
+                         "active": getattr(self.pipe.detector, "name", "opencv"),
+                         "coral": self.coral.status()},
             "assist": bool(self.cfg.get("assist")),
             "suggestion": (self.suggestion or {}).get("text"),
             "scene_version": self.scene_version,
@@ -291,6 +419,8 @@ class App:
 
     def _command(self, name, p):
         g = self.pipe.game
+        if name == "camera":
+            return self._set_camera(p)
         if name == "train_correction":
             return self._train_correction(p)
         if name == "record_round":
@@ -354,16 +484,30 @@ class App:
                 if not corners or len(corners) != 4:
                     raise ValueError("Es werden genau 4 Ecken gebraucht")
                 corners = [[float(x), float(y)] for x, y in corners]
+                cloth = p.get("cloth", self.cfg.get("cloth", "blau"))
+                if cloth not in ("blau", "gruen"):
+                    raise ValueError("Tuchfarbe")
                 table = Table(corners, TABLE_SIZES[size])
-                self.cfg.update(corners=table.corners, table_size=size)
+                self.cfg["corners_by_source"][self.reader.calib_key] = table.corners
+                self.cfg.update(table_size=size, cloth=cloth)
                 config.save(self.cfg)
                 self.pipe.set_table(table)
                 return "Tisch gespeichert. Die Erkennung startet neu."
-            elif name == "record":
+            elif name == "collect":
                 self.recorder.enabled = bool(p.get("enabled"))
-                self.cfg["record_dataset"] = self.recorder.enabled
+                self.cfg["collect_training"] = self.recorder.enabled
                 config.save(self.cfg)
-                return "Sammeln gestartet" if self.recorder.enabled else "Sammeln gestoppt"
+                return ("Nach jedem Spielzug wird ein Bild gesammelt" if self.recorder.enabled
+                        else "Sammeln gestoppt")
+            elif name == "review_save":
+                return self._review_save(p)
+            elif name == "detector_mode":
+                if p.get("mode") not in ("auto", "opencv"):
+                    raise ValueError("Modus")
+                self.cfg["detector"] = p["mode"]
+                config.save(self.cfg)
+                return ("Erkennung: Coral, sobald ein Modell da ist" if p["mode"] == "auto"
+                        else "Erkennung: nur OpenCV")
             else:
                 return None
             return g.message
@@ -379,16 +523,19 @@ def main():
     ap.add_argument("--url", default=os.environ.get("CAM_URL", "http://192.168.88.200:81/stream"))
     ap.add_argument("--port", type=int, default=int(os.environ.get("WEB_PORT", "8080")))
     ap.add_argument("--cue-port", type=int, default=int(os.environ.get("CUE_PORT", "5005")))
+    ap.add_argument("--coral-port", type=int, default=int(os.environ.get("CORAL_PORT", "8765")))
     ap.add_argument("--windowed", action="store_true")
     ap.add_argument("--no-display", action="store_true")
     args = ap.parse_args()
 
-    app = App(args.url, args.cue_port)
+    app = App(args.url, args.cue_port, args.coral_port)
     web.start(app, args.port)
     ip = host_ip()
     admin_url = f"http://{ip}:{args.port}" if ip else ""
     app.admin_url = admin_url
-    print(f"[start] Kamera {args.url}, Admin {admin_url or '(IP unbekannt)'}", flush=True)
+    cam = app.cfg["camera"]
+    print(f"[start] Kamera {SOURCE_NAMES[cam['source']]} ({app.reader.info or cam.get('url')}), "
+          f"Admin {admin_url or '(IP unbekannt)'}", flush=True)
 
     if args.no_display:
         try:

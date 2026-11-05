@@ -12,6 +12,7 @@ schwenkt wieder weg. Ohne Vorschlag pendelt er einfach hin und her.
 import argparse
 import json
 import math
+import os
 import random
 import socket
 import time
@@ -30,7 +31,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=5005)
-    ap.add_argument("--portal", default="http://127.0.0.1:8080")
+    ap.add_argument("--portal", default=f"http://127.0.0.1:{os.environ.get('WEB_PORT', '8080')}")
     args = ap.parse_args()
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

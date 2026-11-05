@@ -9,6 +9,7 @@ import threading
 import time
 from collections import Counter
 
+from ballnum import ball_number
 from detector import Ball, ClassicDetector
 from game import Game
 from geometry import Table
@@ -18,17 +19,21 @@ OCCLUSION_LIMIT = 0.006   # Anteil Tischflaeche, ab dem "etwas haengt über dem 
 
 
 class Pipeline:
-    def __init__(self, table: Table, game: Game = None, clock=time.monotonic, recorder=None):
+    def __init__(self, table: Table, game: Game = None, clock=time.monotonic, recorder=None,
+                 detector_factory=None):
         self.lock = threading.RLock()
         self.clock = clock
         self.game = game or Game()
         self.recorder = recorder
+        # Erzeugt den Kugeldetektor fuer einen Kugelradius (Standard: OpenCV,
+        # main.py setzt den automatischen Wechsel Coral/OpenCV ein)
+        self.detector_factory = detector_factory or ClassicDetector
         self.set_table(table)
 
     def set_table(self, table: Table):
         with self.lock:
             self.table = table
-            self.detector = ClassicDetector(table.ball_radius_px) if table.calibrated else None
+            self.detector = self.detector_factory(table.ball_radius_px) if table.calibrated else None
             self.motion = MotionMeter()
             self.monitor = ShotMonitor(table.ball_radius_px, clock=self.clock)
             self.balls = []
@@ -54,12 +59,17 @@ class Pipeline:
                 diff = ev.diff(self.table.ball_radius_px)
                 msg = self.game.apply_shot(ev.before.counts(), ev.after.counts(),
                                            diff.cue_before, diff.cue_after, diff=diff)
-                if self.recorder:
-                    self.recorder.save(warped, ev.after.balls)
+                self._collect(warped, ev.after.balls)
                 return ("shot", msg, ev)
-            if ev == "reference" and self.recorder:
-                self.recorder.save(warped, self.monitor.reference.balls)
+            if ev == "reference":
+                self._collect(warped, self.monitor.reference.balls)
             return ev
+
+    def _collect(self, warped, balls):
+        """Trainingsbild nach einem Spielzug (Tisch ruhig) mit der automatischen Zuordnung."""
+        if self.recorder:
+            self.recorder.save_pending(warped, balls, self.table.ball_radius_px,
+                                       [ball_number(b.kind, b.color) for b in balls])
 
     def restart_tracking(self):
         """Nach Spielstart / neuem Rack: der naechste ruhige Tisch ist der neue Ausgangszustand,

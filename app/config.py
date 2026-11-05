@@ -8,9 +8,13 @@ DATA_DIR = os.environ.get("DATA_DIR", "/data")
 PATH = os.path.join(DATA_DIR, "config.json")
 
 DEFAULTS = {
-    "corners": None,            # 4 Ecken der Spielflaeche im Kamerabild
+    "camera": None,             # Kameraquelle (esp32 | usb | picam | demo), siehe cameras.py
+    "corners_by_source": None,  # 4 Ecken der Spielflaeche je Kameraquelle
+    "corners": None,            # alt (vor mehreren Kameraquellen), wird uebernommen
     "table_size": "8ft",
-    "record_dataset": False,    # Trainingsbilder fuer das Coral-Modell sammeln
+    "cloth": "blau",            # Tuchfarbe fuer die Grafik (blau | gruen)
+    "collect_training": True,   # nach jedem Spielzug ein Trainingsbild zum Pruefen sammeln
+    "detector": "auto",         # Kugelerkennung: auto (Coral, wenn Modell da) | opencv
     "assist": False,            # KI-Schlagverbesserung (Stossvorschlag + Queue-Lage)
     "cue_offset": 0.0,          # Gyroskop: Rohwinkel, wenn der Queue an der Bande liegt
     "cue_flip": False,          # Gyroskop: Drehrichtung umkehren

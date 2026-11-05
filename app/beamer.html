@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Beamer">
+<title>Billard Beamer</title>
+<style>
+:root { --bg: #000; --ink: #EFE6D2; --dim: rgba(239, 230, 210, .7); }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); overflow: hidden;
+  font: 16px/1.4 system-ui, sans-serif; }
+#view { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+#hint { position: fixed; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%);
+  background: rgba(0, 0, 0, .65); color: var(--dim); padding: 8px 14px; border-radius: 10px; font-size: 14px;
+  transition: opacity .6s; text-align: center; max-width: calc(100% - 32px); }
+#hint.hide { opacity: 0; }
+#hint a { color: var(--ink); }
+#err { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 16px;
+  text-align: center; color: var(--dim); }
+#err.show { display: flex; }
+</style>
+</head>
+<body>
+<img id="view" alt="Live-Bild des Beamers: Kamerabild, Tischgrafik und Spielstand">
+<div id="err" role="status">Verbindung zum Tisch unterbrochen, verbinde neu ...</div>
+<div id="hint">Antippen für Vollbild · <a href="/">Admin-Portal</a></div>
+<script>
+(function () {
+  "use strict";
+  const view = document.getElementById("view");
+  const err = document.getElementById("err");
+  const params = new URLSearchParams(location.search);
+  const q = params.get("q") || "hd";              // sd | hd | fhd
+  const fps = params.get("fps") || "5";
+  let mode = "stream", timer = null, retry = null;
+
+  function startStream() {
+    mode = "stream";
+    view.src = "/api/beamer.mjpg?q=" + q + "&fps=" + fps + "&t=" + Date.now();
+  }
+  // Rueckfall fuer Browser ohne MJPEG-Unterstuetzung: Einzelbilder nachladen
+  function startPolling() {
+    mode = "poll";
+    clearInterval(timer);
+    const next = () => {
+      const im = new Image();
+      im.onload = () => { view.src = im.src; err.classList.remove("show"); };
+      im.onerror = () => err.classList.add("show");
+      im.src = "/api/beamer.jpg?q=" + q + "&t=" + Date.now();
+    };
+    next();
+    timer = setInterval(next, Math.max(150, 1000 / Number(fps)));
+  }
+  view.addEventListener("load", () => err.classList.remove("show"));
+  view.addEventListener("error", () => {
+    err.classList.add("show");
+    clearTimeout(retry);
+    if (mode === "stream") retry = setTimeout(() => startPolling(), 1500);
+  });
+
+  document.addEventListener("click", (e) => {
+    if (e.target.tagName === "A") return;
+    const el = document.documentElement;
+    if (!document.fullscreenElement && el.requestFullscreen) el.requestFullscreen().catch(() => {});
+    else if (document.exitFullscreen && document.fullscreenElement) document.exitFullscreen();
+  });
+  setTimeout(() => document.getElementById("hint").classList.add("hide"), 4000);
+  try { navigator.wakeLock && navigator.wakeLock.request("screen").catch(() => {}); } catch (e) { /* egal */ }
+  startStream();
+})();
+</script>
+</body>
+</html>

@@ -10,12 +10,15 @@ import json
 import os
 import re
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from config import UserError
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+MAX_MODEL_BYTES = 64 * 1024 * 1024
+BEAMER_SIZES = {"sd": (960, 540), "hd": (1280, 720), "fhd": (1920, 1080)}
 
 
 def make_handler(app, pin):
@@ -37,7 +40,7 @@ def make_handler(app, pin):
             self.end_headers()
             self.wfile.write(body)
 
-        def _send_file(self, path, ctype):
+        def _send_file(self, path, ctype, filename=None):
             """Datei mit Range-Unterstuetzung (Safari auf iPad/iPhone spielt Videos nur so ab)."""
             size = os.path.getsize(path)
             start, end = 0, size - 1
@@ -59,6 +62,8 @@ def make_handler(app, pin):
             self.send_response(206 if partial else 200)
             self.send_header("Content-Type", ctype)
             self.send_header("Accept-Ranges", "bytes")
+            if filename:
+                self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
             self.send_header("Content-Length", str(end - start + 1))
             if partial:
                 self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
@@ -73,6 +78,24 @@ def make_handler(app, pin):
                     self.wfile.write(chunk)
                     left -= len(chunk)
 
+        def _stream_beamer(self, size, fps):
+            """Beamerbild als laufender MJPEG-Strom (Browser zeigt ihn wie ein Video)."""
+            boundary = "beamerbild"
+            self.send_response(200)
+            self.send_header("Content-Type", f"multipart/x-mixed-replace; boundary={boundary}")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            try:
+                while True:
+                    t0 = time.monotonic()
+                    jpg = app.beamer_jpeg(size)
+                    self.wfile.write(f"--{boundary}\r\nContent-Type: image/jpeg\r\n"
+                                     f"Content-Length: {len(jpg)}\r\n\r\n".encode() + jpg + b"\r\n")
+                    self.wfile.flush()
+                    time.sleep(max(0.0, 1 / fps - (time.monotonic() - t0)))
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                return None
+
         def do_GET(self):
             url = urlsplit(self.path)
             path, query = url.path, parse_qs(url.query)
@@ -81,6 +104,18 @@ def make_handler(app, pin):
                     return self._send(200, f.read(), "text/html; charset=utf-8")
             if path == "/api/state":
                 return self._send(200, app.state_dict())
+            if path == "/beamer":
+                with open(os.path.join(HERE, "beamer.html"), "rb") as f:
+                    return self._send(200, f.read(), "text/html; charset=utf-8")
+            if path in ("/api/beamer.jpg", "/api/beamer.mjpg"):
+                size = BEAMER_SIZES.get(query.get("q", ["hd"])[0], BEAMER_SIZES["hd"])
+                if path.endswith(".jpg"):
+                    return self._send(200, app.beamer_jpeg(size), "image/jpeg")
+                try:
+                    fps = min(10.0, max(1.0, float(query.get("fps", ["5"])[0])))
+                except ValueError:
+                    fps = 5.0
+                return self._stream_beamer(size, fps)
             if path == "/api/graphic.jpg":
                 jpg = app.graphic_jpeg()
                 if jpg is None:
@@ -99,6 +134,30 @@ def make_handler(app, pin):
                 if jpg is None:
                     return self._send(404, {"error": "Bild nicht mehr vorhanden"})
                 return self._send(200, jpg, "image/jpeg")
+            if path == "/api/review/next":
+                item = app.recorder.next_pending(query.get("after", [None])[0])
+                if item is None:
+                    return self._send(404, {"error": "Keine Bilder zu prüfen"})
+                return self._send(200, item)
+            if path == "/api/review/image":
+                fpath = app.recorder.pending_image(query.get("name", [""])[0])
+                if fpath is None:
+                    return self._send(404, {"error": "Bild nicht gefunden"})
+                return self._send_file(fpath, "image/jpeg")
+            if path == "/api/dataset.zip":
+                # Trainingsdaten herunterladen (fuer training/train_coral.py)
+                tmp = os.path.join(os.path.dirname(app.recorder.base_dir), f"trainingsdaten-{threading.get_ident()}.zip")
+                try:
+                    n = app.recorder.export_zip(tmp)
+                    if n == 0:
+                        return self._send(404, {"error": "Noch keine geprüften Bilder"})
+                    return self._send_file(tmp, "application/zip",
+                                           filename=time.strftime("billard-training-%Y%m%d.zip"))
+                except (BrokenPipeError, ConnectionResetError):
+                    return None
+                finally:
+                    if os.path.exists(tmp):
+                        os.remove(tmp)
             if path.startswith("/videos/"):
                 fpath = app.rounds.video_path(unquote(path[len("/videos/"):]))
                 if fpath is None:
@@ -117,6 +176,17 @@ def make_handler(app, pin):
         def do_POST(self):
             if pin and self.headers.get("X-Admin-Pin", "") != pin:
                 return self._send(403, {"error": "Falsche PIN"})
+            if self.path.split("?")[0] == "/api/model":
+                # Coral-Modell hochladen (Datei roh im Body)
+                n = int(self.headers.get("Content-Length", "0"))
+                if not 0 < n <= MAX_MODEL_BYTES:
+                    return self._send(400, {"error": "Datei fehlt oder ist zu groß"})
+                data = self.rfile.read(n)
+                try:
+                    msg = app.save_model(data)
+                except UserError as e:
+                    return self._send(400, {"error": str(e)})
+                return self._send(200, {"ok": True, "message": msg, "state": app.state_dict()})
             try:
                 n = int(self.headers.get("Content-Length", "0"))
                 payload = json.loads(self.rfile.read(n) or b"{}") if n else {}
