@@ -24,7 +24,7 @@ Der letzte Schritt (Edge-TPU-Compiler) läuft nur unter Linux – Colab ist Linu
 3. In eine Zelle schreiben und ausführen (Dateiname anpassen):
 
 ```
-!pip install -q ultralytics
+!pip install -q "ultralytics>=8.3,<8.5"
 !python train_coral.py billard-training-20261110.zip --epochs 120 --device 0
 ```
 
@@ -35,7 +35,7 @@ Am Ende steht die Genauigkeit auf den Prüfbildern (`mAP50`). Unter 0.9: mehr Bi
 ## Variante B: eigener PC
 
 ```
-pip install ultralytics
+pip install "ultralytics>=8.3,<8.5"
 python train_coral.py billard-training-20261110.zip --no-export
 ```
 

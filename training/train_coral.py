@@ -1,7 +1,7 @@
 """
 Trainiert das Kugelmodell fuer den Coral-Stick und wandelt es fuer den Coral um.
 
-    pip install ultralytics
+    pip install "ultralytics>=8.3,<8.5"   (getestet mit 8.4)
     python train_coral.py billard-training-20261110.zip
     -> ausgabe/billard_edgetpu.tflite      im Admin-Portal unter "KI-Modell (Coral)" hochladen
 
