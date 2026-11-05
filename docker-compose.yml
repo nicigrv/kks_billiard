@@ -6,6 +6,7 @@
 # Beamerbild im Browser:            http://<pi-ip>:8080/beamer
 #
 # Einmalige Werkzeuge (laufen nur auf Befehl):
+#   docker compose --profile coral up -d --build         Coral-Container (KI-Modell) mitstarten
 #   docker compose stop coral && docker compose run --rm coral-check && docker compose start coral
 #                                                       Coral-Stick testen
 #   docker compose --profile sim up -d fake-table       simulierte Kamera (Test ohne Tisch)
@@ -34,7 +35,7 @@ services:
       # Gilt nur als Vorgabe, im Portal unter "Kamera" aenderbar.
       DEMO_IMAGE_URL: ""
       CUE_PORT: "5005"                             # UDP-Port fuer das Gyroskop im Queue
-      CORAL_PORT: "8765"                           # Coral-Container (Dienst "coral")
+      CORAL_PORT: "8765"                           # Coral-Container (Dienst "coral", optional)
     # Zugriff auf HDMI-Ausgabe (/dev/dri), USB-Kamera (/dev/video*) und Pi-Kameramodul
     # (/dev/media*, /dev/dma_heap). Einfachste sichere Variante fuer ein Geraet im Heimnetz.
     privileged: true
@@ -54,11 +55,14 @@ services:
       WEB_PORT: *web_port
 
   # Fuehrt das trainierte Kugelmodell auf dem Coral-Stick aus (Python 3.9, Googles Pakete).
-  # Ohne Modell oder ohne Stick nutzt das Hauptprogramm automatisch die klassische Erkennung.
+  # OPTIONAL - startet nur mit:   docker compose --profile coral up -d --build
+  # So kann ein Fehler beim Bauen (z. B. Paketserver) nie das Hauptprogramm blockieren.
+  # Ohne diesen Dienst nutzt das Hauptprogramm automatisch die klassische Erkennung.
   coral:
     build: ./coral
     image: billard-coral:latest
     container_name: billard-coral
+    profiles: ["coral"]
     restart: unless-stopped
     network_mode: host                             # Hauptprogramm erreicht ihn auf 127.0.0.1:8765
     # Der Stick meldet sich nach dem Firmware-Laden mit neuer USB-ID neu an,
@@ -74,6 +78,7 @@ services:
 
   # Hardware-Test. Vorher "docker compose stop coral", der Stick kann nur einen Benutzer haben.
   coral-check:
+    build: ./coral
     image: billard-coral:latest
     profiles: ["tools"]
     command: ["python3", "check_coral.py"]

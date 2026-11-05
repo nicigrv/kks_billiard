@@ -41,7 +41,7 @@ Dauer: ca. 1 Stunde, davon 15–30 Minuten Warten beim ersten Bauen.
 | – USB-Kamera | am Pi, möglichst 1280×720 mit MJPG |
 | – Pi-Kameramodul | Flachbandkabel; Pi 5 braucht ein Pi-5-Kamerakabel. Weitwinkel (Camera Module 3 **Wide**) hilft, damit der ganze Tisch ins Bild passt |
 | iPad oder Handy | für das Admin-Portal, im selben WLAN |
-| *optional* Coral USB Accelerator | für das KI-Modell (Abschnitt 5) |
+| *optional* Coral USB Accelerator | für das KI-Modell, eigener Container (Abschnitt 5) |
 | *optional* Gyroskop im Queue | ESP32 + MPU6050, siehe `cue_sensor/README.md` |
 
 Ohne Kamera geht es auch: Im **Demo-Modus** läuft ein simuliertes Spiel (Abschnitt 1a).
@@ -124,7 +124,7 @@ docker compose up -d --build
 Das erste Bauen dauert **15–30 Minuten** (lädt und installiert alles). Danach:
 
 ```bash
-docker compose ps          # "billard" und "billard-coral" sollten "running" sein
+docker compose ps          # "billard" sollte "running" sein
 docker logs -f billard     # Ausgaben ansehen, beenden mit Strg+C
 ```
 
@@ -176,7 +176,8 @@ Wer noch den alten Viewer aus Schritt 1 laufen hat: einmal `docker rm -f billard
 | Portal nicht erreichbar | Richtige IP/Port? `docker compose ps`. Läuft auf dem Port schon etwas anderes → Port ändern (1.5) |
 | „Warte auf Kamera …“ | Portal → „Kamera“: Status/Fehlermeldung lesen. ESP32: Adresse im Browser öffnen. USB: `ls /dev/video*` zeigt die Kamera? |
 | Pi-Kameramodul „belegt“ | Läuft eine andere Kamera-Anwendung auf dem Pi? Kabel richtig herum? Test auf dem Pi: `rpicam-hello --list-cameras` |
-| Coral wird nicht gefunden | Stick am **blauen USB-3-Port**, Test in Abschnitt 5. Ohne Coral läuft alles mit OpenCV weiter |
+| Coral wird nicht gefunden | Coral-Container gestartet (`docker compose --profile coral up -d --build`)? Stick am **blauen USB-3-Port**, Test in Abschnitt 5. Ohne Coral läuft alles mit OpenCV weiter |
+| Bauen bricht ab bei `coral` | Coral ist optional: `docker compose up -d --build` baut nur das Hauptprogramm. Grund steht in den Zeilen vor `Dockerfile:...` (Abschnitt 5) |
 | Container startet immer neu | `docker logs billard` zeigt den Fehler |
 
 ## 1a. Kamera wählen
@@ -279,8 +280,20 @@ Simuliertes Queue-Gyroskop: `docker compose --profile sim up -d fake-cue` (Schla
 
 ## 5. KI-Modell für den Coral-Stick
 
-Der Coral läuft im eigenen Container `billard-coral` (startet mit `docker compose up -d`).
-Solange kein Modell da ist, erkennt der Pi die Kugeln mit klassischer Bildverarbeitung (OpenCV).
+Der Coral läuft im eigenen Container `billard-coral`. Er ist **optional** und wird extra gestartet
+(einmalig, danach startet er mit dem Pi von selbst):
+
+```bash
+docker compose --profile coral up -d --build
+```
+
+Solange der Container nicht läuft oder kein Modell da ist, erkennt der Pi die Kugeln mit
+klassischer Bildverarbeitung (OpenCV) – das Spiel läuft also immer.
+
+**Bricht das Bauen des Coral-Containers ab** (`exit code: 100`): Das liegt an den Paketservern
+(Debian 11 bzw. Googles Coral-Pakete), nicht am Pi. Das Hauptprogramm ist davon nicht betroffen.
+Die Zeilen **vor** der Meldung `Dockerfile:...` zeigen den Grund (z. B. `404 Not Found` oder
+`NO_PUBKEY`).
 Das Portal zeigt unter **„KI-Modell (Coral)“**, womit gerade erkannt wird.
 
 1. **Sammeln:** Nach jedem Spielzug macht der Pi ein Bild und ordnet alle Kugeln zu (abschaltbar).
