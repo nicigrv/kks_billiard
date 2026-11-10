@@ -287,6 +287,12 @@ details > div { margin-top: 12px; }
       <summary>Queue mit Gyroskop</summary>
       <div>
         <p class="statusline" id="cueStatus">-</p>
+        <p class="hint">Koppeln: Queue einschalten, am Handy mit dem WLAN <b>„Billard-Queue-…“</b> verbinden. Auf der Seite, die sich öffnet, euer WLAN wählen. Der Queue zeigt dann seinen <b>Castcode</b> – hier eintragen, dort den Haken setzen und „Verbinden“.</p>
+        <form class="addrow" id="cuePairForm" autocomplete="off">
+          <input type="text" id="cueCode" maxlength="9" placeholder="Castcode, z. B. K7P2QM" aria-label="Castcode des Queues" autocapitalize="characters" spellcheck="false" style="text-transform:uppercase;letter-spacing:3px">
+          <button type="submit" class="primary">Koppeln</button>
+        </form>
+        <button class="quiet" type="button" id="cueUnpair" style="width:100%;margin:8px 0 14px" hidden>Queue entkoppeln</button>
         <p class="hint">Kalibrieren: Queue flach an die lange Bande legen, die Spitze zeigt in der Grafik nach <b>rechts</b>. Dann drücken und den Queue kurz ruhig lassen.</p>
         <button class="primary" type="button" id="cueCalib" style="width:100%">Queue kalibrieren</button>
         <div class="grid two" style="margin-top:12px">
@@ -617,7 +623,12 @@ details > div { margin-top: 12px; }
       if (cs.childNodes.length) cs.appendChild(document.createTextNode("  ·  "));
       cs.appendChild(document.createTextNode(label)); cs.appendChild(b);
     };
-    add("Queue: ", c.connected ? "verbunden" : "nicht verbunden", c.connected ? "good" : "bad");
+    if (c.castcode) add("Castcode: ", c.castcode);
+    add("Queue: ", c.connected ? "verbunden" + (c.address ? " (" + c.address + ")" : "") : (c.state || "nicht verbunden"),
+        c.connected ? "good" : "bad");
+    if (!c.connected && c.error && c.castcode) add("", c.error);
+    $("cueUnpair").hidden = !c.castcode;
+    if (document.activeElement !== $("cueCode") && !$("cueCode").value) $("cueCode").placeholder = c.castcode ? "anderer Castcode" : "Castcode, z. B. K7P2QM";
     if (c.connected) {
       add("Winkel: ", fmtNum(c.angle, 1) + "°");
       if (c.err !== null && c.err !== undefined) add("Abweichung: ", fmtNum(c.err, 1) + "°", c.ok ? "good" : "");
@@ -669,6 +680,11 @@ details > div { margin-top: 12px; }
 
   $("assistBtn").addEventListener("click", () => post("assist", { enabled: !(state && state.assist) }));
   $("cueCalib").addEventListener("click", () => post("cue_calibrate", {}));
+  $("cuePairForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (await post("cue_pair", { castcode: $("cueCode").value })) $("cueCode").value = "";
+  });
+  $("cueUnpair").addEventListener("click", () => { if (confirm("Queue entkoppeln?")) post("cue_unpair", {}); });
   $("cueFlip").addEventListener("click", () => post("cue_settings", { flip: !(state && state.cue && state.cue.flip) }));
   $("cueTol").addEventListener("change", () => post("cue_settings", { tolerance: Number($("cueTol").value) }));
   $("roundBtn").addEventListener("click", () => {
