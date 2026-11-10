@@ -406,8 +406,10 @@ class App:
             raise config.UserError("Kein Kamerabild (Kamera und Tisch eingerichtet?)")
         st = self.coral.status() if balls else {}
         model = f"{st['model']} vom {st['model_time']}" if st.get("model") else None
-        r = self.reviews.start(warped, balls, radius, model, participants)
-        return f"Bild {r['no']} an {len(participants)} Prüfer geschickt: {', '.join(participants)}"
+        r = self.reviews.start(warped, balls, radius, model, participants,
+                               show_ai=bool(self.cfg.get("review_show_ai", False)))
+        ki = (" - KI-Vorschlag liegt vor" + ("" if r["show_ai"] else " (Prüfer sehen ihn nicht)")) if model else ""
+        return f"Bild {r['no']} an {len(participants)} Prüfer geschickt: {', '.join(participants)}{ki}"
 
     def state_dict(self):
         online = set(self.reviews.online([r["name"] for r in self.reviewer_list()]))
@@ -440,6 +442,7 @@ class App:
             "videos": self.rounds.videos(),
             "reviewers": [dict(r, online=r["name"] in online) for r in self.reviewer_list()],
             "review": self.reviews.status(),
+            "review_show_ai": bool(self.cfg.get("review_show_ai", False)),
             "sound": {"device": self.sound.device, "error": self.sound.error},
         }
 
@@ -494,6 +497,11 @@ class App:
                 return "Prüfrunde abgebrochen"
         except ValueError as e:
             raise config.UserError(str(e))
+        if name == "review_show_ai":
+            self.cfg["review_show_ai"] = bool(p.get("enabled"))
+            config.save(self.cfg)
+            return ("Prüfer sehen den KI-Vorschlag" if self.cfg["review_show_ai"]
+                    else "Prüfer legen fest, ohne den KI-Vorschlag zu sehen")
         if name == "sound_test":
             err = self.sound.ding(wait=True)
             if err:

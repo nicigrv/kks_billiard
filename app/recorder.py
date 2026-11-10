@@ -184,7 +184,9 @@ class Recorder:
             self._score(meta, balls)
             os.makedirs(self.ok_img, exist_ok=True)
             os.makedirs(self.ok_lbl, exist_ok=True)
-            self._write_verified(name, balls, meta["radius"], meta["width"], meta["height"], changed)
+            # Herkunft aus einer Pruefrunde (Einzelergebnisse, KI-Abgleich) mit aufheben
+            extra = {k: meta[k] for k in ("reviewers", "agreement", "round", "ai", "disputed", "ai_diffs") if k in meta}
+            self._write_verified(name, balls, meta["radius"], meta["width"], meta["height"], changed, extra)
             shutil.move(jpg, os.path.join(self.ok_img, name + ".jpg"))
             os.remove(js)
         return "übernommen"
@@ -208,6 +210,7 @@ class Recorder:
                  "extra": len(sugg) - len(used)}
         stats = self._load_stats()
         stats.append(entry)
+        os.makedirs(self.base_dir, exist_ok=True)
         with open(os.path.join(self.base_dir, "modell-statistik.json"), "w") as f:
             json.dump(stats[-200:], f)
 

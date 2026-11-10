@@ -17,6 +17,16 @@ Zusammenfuehren (consensus):
     strittigen Kugeln sind mit "?" markiert, der Admin entscheidet.
   * Sind sich alle einig, geht das Bild direkt in die Trainingsdaten.
 
+KI-Abgleich (sobald ein Modell geladen ist):
+  * Der KI-Chip macht zu jedem Bild einen Vorschlag. Die Pruefer legen die Kugeln trotzdem
+    selbst fest - standardmaessig OHNE den Vorschlag zu sehen (ehrlicher Vergleich;
+    im Portal umschaltbar).
+  * Danach wird das Ergebnis der Pruefer mit dem Vorschlag verglichen. Wo die KI falsch lag
+    (andere Nummer, Kugel uebersehen, Kugel gesehen, wo keine ist), kommt ein "?" mit Notiz
+    ("KI: 3 · Pruefer: 11"). Das Bild geht dann zum Admin, der die "?" bestaetigt.
+  * Lag die KI ueberall richtig (und die Pruefer sind sich einig), geht das Bild direkt in
+    die Trainingsdaten. Die Trefferquote der KI zaehlt immer gegen das Pruefer-Ergebnis.
+
 Ablage: data/runden/<id>.jpg + <id>.json (alle Einzelergebnisse bleiben erhalten).
 """
 
@@ -78,6 +88,42 @@ def consensus(submissions, radius):
     return final, disputed, agreement
 
 
+def _label(n):
+    return "W" if n == 0 else ("-" if n is None else str(n))
+
+
+def compare_ai(final, suggestions, radius):
+    """Pruefer-Ergebnis gegen KI-Vorschlag. -> (abweichungen, richtig, gesamt).
+    Jede Abweichung: {"x", "y", "ai": Nummer|None, "human": Nummer|None, "note": Text}."""
+    sugg = [dict(b, number=ball_num(b)) for b in suggestions]
+    used, diffs, correct = set(), [], 0
+    max_d2 = (0.8 * radius) ** 2
+    for b in final:
+        best, bd = None, max_d2
+        for i, s in enumerate(sugg):
+            if i in used:
+                continue
+            d2 = (s["x"] - b["x"]) ** 2 + (s["y"] - b["y"]) ** 2
+            if d2 <= bd:
+                best, bd = i, d2
+        if best is None:
+            diffs.append({"x": b["x"], "y": b["y"], "ai": None, "human": b["number"],
+                          "note": f"KI: übersehen · Prüfer: {_label(b['number'])}"})
+            continue
+        used.add(best)
+        if sugg[best]["number"] == b["number"]:
+            correct += 1
+        else:
+            diffs.append({"x": b["x"], "y": b["y"], "ai": sugg[best]["number"], "human": b["number"],
+                          "note": f"KI: {_label(sugg[best]['number'])} · Prüfer: {_label(b['number'])}"})
+    for i, s in enumerate(sugg):
+        if i not in used:
+            diffs.append({"x": s["x"], "y": s["y"], "ai": s["number"], "human": None,
+                          "note": f"KI: {_label(s['number'])} · Prüfer: keine Kugel"})
+    total = len(final) + sum(1 for d in diffs if d["human"] is None)
+    return diffs, correct, total
+
+
 class RoundManager:
     def __init__(self, recorder, data_dir, sound=None, online_s=20.0, clock=time.time):
         self.recorder = recorder
@@ -102,7 +148,7 @@ class RoundManager:
             return [n for n in names if now - self.seen.get(n, -1e9) <= self.online_s]
 
     # ---------------------------------------------------------------- Runde
-    def start(self, warped, suggestions, radius, model, participants):
+    def start(self, warped, suggestions, radius, model, participants, show_ai=False):
         import cv2
         with self.lock:
             if self.round is not None:
@@ -118,6 +164,7 @@ class RoundManager:
                 "id": rid, "no": self.count, "width": w, "height": h, "radius": float(radius),
                 "model": model, "suggestions": [_ball_dict(b) for b in suggestions],
                 "participants": list(participants), "submissions": {}, "started": self.clock(),
+                "show_ai": bool(show_ai),
             }
             self._save()
             return self.round
@@ -131,8 +178,10 @@ class RoundManager:
             mine = r["submissions"].get(name)
             return {"round": {
                 "id": r["id"], "no": r["no"], "width": r["width"], "height": r["height"], "radius": r["radius"],
-                "balls": mine if mine is not None else r["suggestions"], "submitted": mine is not None,
-                "model": r["model"], "status": self._status_list(r)}, "last": self.last}
+                "balls": mine if mine is not None else (r["suggestions"] if r["show_ai"] else []),
+                "submitted": mine is not None, "model": r["model"] if r["show_ai"] else None,
+                "blind": bool(r["model"]) and not r["show_ai"], "status": self._status_list(r)},
+                "last": self.last}
 
     def submit(self, name, round_id, balls):
         with self.lock:
@@ -177,23 +226,45 @@ class RoundManager:
         r.update(result=final, disputed=disputed, agreement=agreement, finished=self.clock())
         self._save()
         extra = {"reviewers": r["submissions"], "agreement": round(agreement, 3), "round": r["no"]}
-        meta = {"model": r["model"], "radius": r["radius"], "balls": r["suggestions"]}
-        if not disputed:
-            self.recorder.add_verified(r["id"], img, final, r["radius"], r["width"], r["height"],
-                                       extra, meta if r["model"] else None)
+
+        # KI-Abgleich: Vorschlag gegen das Ergebnis der Pruefer
+        ai = None
+        ai_diffs = []
+        if r["model"]:
+            ai_diffs, ai_ok, ai_total = compare_ai(final, r["suggestions"], r["radius"])
+            ai = {"correct": ai_ok, "total": ai_total, "wrong": len(ai_diffs)}
+            # Trefferquote zaehlt gegen das Pruefer-Ergebnis (nicht spaeter nochmal beim Admin)
+            self.recorder._score({"model": r["model"], "radius": r["radius"], "balls": r["suggestions"]}, final)
+            extra["ai"] = dict(ai, model=r["model"], suggestion=r["suggestions"])
+        r.update(ai=ai, ai_diffs=ai_diffs)
+        self._save()
+
+        if not disputed and not ai_diffs:
+            self.recorder.add_verified(r["id"], img, final, r["radius"], r["width"], r["height"], extra)
             how = "alle einig" if agreement >= 0.999 else f"Mehrheit hat entschieden ({round(agreement * 100)} % einstimmig)"
-            text = f"Bild {r['no']}: {how} - in den Trainingsdaten"
+            text = f"Bild {r['no']}: {how}" + (" · KI lag überall richtig" if ai else "") + " - in den Trainingsdaten"
         else:
-            balls = final + [{"x": d["x"], "y": d["y"], "kind": "solid", "color": "", "number": None}
-                             for d in disputed]
+            # "?" an allen Stellen, an denen die Pruefer uneinig sind oder die KI falsch lag
+            q = [{"x": d["x"], "y": d["y"], "kind": "solid", "color": "", "number": None,
+                  "note": "Prüfer uneinig: " + ", ".join(f"{k} {_label(v)}" for k, v in d["votes"].items())}
+                 for d in disputed]
+            # "human": was die Pruefer gesagt haben (None = keine Kugel) - fuer "Pruefer-Ergebnis uebernehmen"
+            q += [{"x": d["x"], "y": d["y"], "kind": "solid", "color": "", "number": None, "note": d["note"],
+                   "human": d["human"], "has_human": True} for d in ai_diffs]
+            wrong_xy = [(d["x"], d["y"]) for d in ai_diffs]
+            keep = [b for b in final if not any((b["x"] - x) ** 2 + (b["y"] - y) ** 2 < 1 for x, y in wrong_xy)]
             self.recorder.add_pending(r["id"], img, dict(
                 {"width": r["width"], "height": r["height"], "radius": r["radius"], "model": None,
-                 "balls": balls, "disputed": disputed}, **extra))
-            text = (f"Bild {r['no']}: {len(disputed)} Kugel(n) uneinig - liegt beim Admin "
-                    f"unter den offenen Bildern")
-        self.last = {"t": self.clock(), "ok": not disputed, "text": text, "no": r["no"],
+                 "balls": keep + q, "disputed": disputed, "ai_diffs": ai_diffs}, **extra))
+            parts = []
+            if disputed:
+                parts.append(f"{len(disputed)} × Prüfer uneinig")
+            if ai_diffs:
+                parts.append(f"{len(ai_diffs)} × KI falsch")
+            text = f"Bild {r['no']}: " + ", ".join(parts) + " - mit ? beim Admin unter den offenen Bildern"
+        self.last = {"t": self.clock(), "ok": not disputed and not ai_diffs, "text": text, "no": r["no"],
                      "agreement": round(agreement * 100), "disputed": len(disputed),
-                     "names": list(r["submissions"])}
+                     "names": list(r["submissions"]), "ai": ai}
         self.round = None
         if self.sound is not None:
             self.sound.ding()
