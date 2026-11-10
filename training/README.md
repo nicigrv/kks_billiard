@@ -2,7 +2,7 @@
 
 Ablauf in Kürze:
 
-1. **Bilder sammeln** – läuft von selbst: Nach jedem Spielzug speichert der Pi ein Bild.
+1. **Bilder aufnehmen** – per Knopf im Portal oder im Trainingsmodus (`/training`).
 2. **Kugeln festlegen (iPad)** – Portal → „KI-Training: Kugeln festlegen“: Kugel antippen, Nummer
    wählen (bzw. mit Modell: Vorschlag prüfen, „Passt alles“). Nur festgelegte Bilder kommen ins
    Training; jede Kugel braucht ihre Nummer.

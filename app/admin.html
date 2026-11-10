@@ -304,7 +304,7 @@ details > div { margin-top: 12px; }
   <details id="fixBallsDetails">
     <summary>KI-Training: Kugeln festlegen <span class="badge" id="reviewBadge" hidden></span></summary>
     <div>
-      <p class="hint">Nach jedem Spielzug macht der Pi ein Bild. Ihr legt die Kugeln fest: auf eine Kugel tippen, dann ihre Nummer. Fehlt eine Kugel, auf die freie Stelle tippen. Sobald der KI-Chip ein Modell hat, schlägt er die Kugeln schon vor – dann nur noch prüfen und „Passt alles“. Nur festgelegte Bilder werden zum Training benutzt.</p>
+      <p class="hint">Bilder entstehen nur, wenn ihr „Jetzt ein Bild aufnehmen“ drückt. Ihr legt die Kugeln fest: auf eine Kugel tippen, dann ihre Nummer. Fehlt eine Kugel, auf die freie Stelle tippen. Sobald der KI-Chip ein Modell hat, schlägt er die Kugeln schon vor – dann nur noch prüfen und „Passt alles“. Nur festgelegte Bilder werden zum Training benutzt.</p>
       <p class="statusline" id="qualityInfo"></p>
       <p class="statusline" id="trainInfo"></p>
       <a class="btnlink" href="/training" style="margin-bottom:14px">Trainingsmodus öffnen (großes Bild, Lupe)</a>
@@ -332,8 +332,10 @@ details > div { margin-top: 12px; }
           <button class="primary" type="button" id="fixSave" disabled>Korrektur speichern</button>
         </div>
       </div>
-      <button type="button" class="quiet" id="captureBtn" style="width:100%;margin-top:16px">Jetzt ein Bild aufnehmen</button>
-      <label class="check"><input type="checkbox" id="collectToggle"> Nach jedem Spielzug ein Bild aufnehmen</label>
+      <div class="grid two" style="margin-top:16px">
+        <button type="button" class="primary" id="captureBtn">Jetzt ein Bild aufnehmen</button>
+        <button type="button" class="danger" id="deleteAllBtn">Alle Bilder löschen</button>
+      </div>
     </div>
   </details>
 
@@ -749,7 +751,7 @@ details > div { margin-top: 12px; }
       if (r.status === 404) {
         fctx.clearRect(0, 0, fixCanvas.width, fixCanvas.height);
         fixCanvas.hidden = true;
-        $("editorTitle").textContent = "Keine Bilder offen. Nach dem nächsten Spielzug kommt ein neues dazu – oder „Jetzt ein Bild aufnehmen“.";
+        $("editorTitle").textContent = "Keine Bilder offen. Mit „Jetzt ein Bild aufnehmen“ kommt ein neues dazu.";
         return;
       }
       if (!r.ok) { toast(data.error || "Kein Bild", true); return; }
@@ -785,7 +787,13 @@ details > div { margin-top: 12px; }
     const res = await post("capture", {});
     if (res && fixMode === "review" && !snap) loadReview();
   });
-  $("collectToggle").addEventListener("change", () => post("collect", { enabled: $("collectToggle").checked }));
+  $("deleteAllBtn").addEventListener("click", async () => {
+    const t = (state && state.training) || {};
+    const n = (t.pending || 0) + (t.verified || 0) + (t.discarded || 0);
+    if (!n) { toast("Es gibt keine Bilder zum Löschen"); return; }
+    if (!confirm("ALLE " + n + " Trainingsbilder löschen (offene, festgelegte und verworfene)?\n\nDas kann nicht rückgängig gemacht werden. Das KI-Modell bleibt erhalten.")) return;
+    if (await post("delete_images", { confirm: true })) loadEditor();
+  });
 
   // ---------------- Kamera ----------------
   let camDirty = false;
@@ -838,7 +846,6 @@ details > div { margin-top: 12px; }
     $("qualityInfo").textContent = q ? "Der KI-Chip (" + q.model + ") lag bei " + q.percent + " % der Kugeln richtig (letzte " +
       q.images + " Bilder)." + (q.percent >= 95 ? " Das ist gut – Sammeln kann pausieren." : "") :
       "Noch keine Bewertung: Sobald ihr Vorschläge des KI-Chips prüft, steht hier, wie oft er richtig liegt.";
-    $("collectToggle").checked = !!t.collect;
     $("datasetLink").classList.toggle("off", !t.verified);
     const d = s.detector || {}, c = d.coral || {};
     const ms = $("modelStatus");

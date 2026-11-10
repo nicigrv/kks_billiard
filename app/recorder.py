@@ -2,15 +2,16 @@
 Trainingsbilder fuer das Coral-Modell.
 
 Ablauf:
-  1. Nach jedem Spielzug (Tisch wieder ruhig) wird die entzerrte Draufsicht gespeichert,
-     zusammen mit dem, was der Coral erkannt hat (Position und Kugelnummer).
+  1. Nur per Knopf "Bild aufnehmen" (nichts automatisch) wird die entzerrte Draufsicht
+     gespeichert, zusammen mit dem, was der KI-Chip erkannt hat (Position und Kugelnummer).
      -> dataset/pruefen/<name>.jpg + <name>.json
   2. Auf dem iPad wird jedes Bild angesehen: "passt alles" oder korrigieren (oder verwerfen).
      -> dataset/geprueft/images/<name>.jpg
         dataset/geprueft/labels/<name>.json   Kugeln mit Nummer (massgeblich)
         dataset/geprueft/labels/<name>.txt    YOLO-Format: Klasse x_mitte y_mitte breite hoehe (0..1)
      Verworfene Bilder werden NICHT geloescht, sondern landen in dataset/verworfen/.
-     Es wird kein Bild vom Pi geloescht; gesammelt wird, bis weniger als 1 GB frei ist.
+     Geloescht wird nur mit "Alle Bilder loeschen" (delete_all). Aufgenommen wird, solange
+     mehr als 1 GB frei ist.
   3. Nur geprueft/ wird zum Training benutzt (training/train_coral.py). Der Export baut die
      YOLO-Dateien aus den .json neu - so passen auch Bilder aus aelteren Versionen.
 
@@ -72,17 +73,14 @@ def write_yolo(path, balls, radius, w, h):
 
 
 class Recorder:
-    def __init__(self, base_dir, min_free_bytes=1_000_000_000, min_interval_s=2.0):
+    def __init__(self, base_dir, min_free_bytes=1_000_000_000):
         self.base_dir = base_dir
         self.pending_dir = os.path.join(base_dir, "pruefen")
         self.ok_img = os.path.join(base_dir, "geprueft", "images")
         self.ok_lbl = os.path.join(base_dir, "geprueft", "labels")
         self.discard_dir = os.path.join(base_dir, "verworfen")
         self.min_free_bytes = min_free_bytes
-        self.min_interval_s = min_interval_s
-        self.enabled = True
         self.lock = threading.Lock()
-        self._last = 0.0
 
     # ------------------------------------------------------------- Zaehler
     @staticmethod
@@ -115,17 +113,11 @@ class Recorder:
                 time.sleep(0.001)
                 return self._new_name()
 
-    # ------------------------------------------------------ 1. automatisch sammeln
-    def save_pending(self, warped, balls, radius, numbers=None, model=None, force=False):
-        """Nach einem Spielzug: Bild + Vorschlag des Coral (kann leer sein) in die Pruef-Liste."""
-        if not self.enabled and not force:
-            return None
-        now = time.time()
-        if now - self._last < self.min_interval_s and not force:
-            return None
+    # ------------------------------------------------------------ 1. aufnehmen
+    def save_pending(self, warped, balls, radius, numbers=None, model=None):
+        """Knopf "Bild aufnehmen": Bild + Vorschlag des KI-Chips (kann leer sein) zum Festlegen."""
         if not self.disk_ok():
             return None
-        self._last = now
         numbers = numbers or [None] * len(balls)
         with self.lock:
             os.makedirs(self.pending_dir, exist_ok=True)
@@ -256,6 +248,19 @@ class Recorder:
             cv2.imwrite(os.path.join(self.ok_img, name + ".jpg"), warped, [cv2.IMWRITE_JPEG_QUALITY, 92])
             self._write_verified(name, [_ball_dict(b, n) for b, n in zip(balls, numbers)], radius, w, h, True)
         return name
+
+    def delete_all(self):
+        """ALLE Trainingsbilder loeschen (offen, festgelegt, verworfen) und die Trefferquote
+        zuruecksetzen. Das hochgeladene Modell bleibt. Liefert die Anzahl geloeschter Bilder."""
+        with self.lock:
+            n = self.pending + self.verified + self.discarded
+            for folder in (self.pending_dir, os.path.dirname(self.ok_img), self.discard_dir):
+                shutil.rmtree(folder, ignore_errors=True)
+            try:
+                os.remove(os.path.join(self.base_dir, "modell-statistik.json"))
+            except OSError:
+                pass
+        return n
 
     def disk_ok(self):
         """Genug Platz auf der Speicherkarte? Darunter wird nichts mehr gesammelt."""
