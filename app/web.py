@@ -104,8 +104,8 @@ def make_handler(app, pin):
                     return self._send(200, f.read(), "text/html; charset=utf-8")
             if path == "/api/state":
                 return self._send(200, app.state_dict())
-            if path == "/beamer":
-                with open(os.path.join(HERE, "beamer.html"), "rb") as f:
+            if path in ("/beamer", "/training"):
+                with open(os.path.join(HERE, path[1:] + ".html"), "rb") as f:
                     return self._send(200, f.read(), "text/html; charset=utf-8")
             if path in ("/api/beamer.jpg", "/api/beamer.mjpg"):
                 size = BEAMER_SIZES.get(query.get("q", ["hd"])[0], BEAMER_SIZES["hd"])
