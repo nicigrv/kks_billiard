@@ -490,11 +490,16 @@ class SceneRenderer:
         else:
             return False
         w = int(rect.w * 0.8)
-        fs = max(18, int(rect.h * 0.075))
-        row = int(fs * 1.25)
-        cols = 2 if len(parts) > 4 else 1
+        cols = 1 if len(parts) <= 4 else (2 if len(parts) <= 10 else 3)
         rows = (len(parts) + cols - 1) // cols
-        h = int(fs * 1.4 + row * 1.1 + rows * row + fs * 0.9)
+        # Schrift so gross wie moeglich, aber die Karte muss in die Tischgrafik passen (auch bei 10+ Pruefern)
+        fs = max(18, int(rect.h * 0.075))
+        while True:
+            row = int(fs * 1.25)
+            h = int(fs * 1.4 + row * 1.1 + rows * row + fs * 0.9)
+            if h <= rect.h * 0.94 or fs <= 12:
+                break
+            fs -= 1
         card = pygame.Rect(0, 0, w, h)
         card.center = rect.center
         bg = pygame.Surface(card.size, pygame.SRCALPHA)
@@ -519,7 +524,13 @@ class SceneRenderer:
                                                     (mc[0] + mark_r * 0.55, mc[1] - mark_r * 0.4)], max(2, fs // 10))
             else:
                 pygame.draw.circle(surf, MUTED, mc, mark_r, max(2, fs // 12))
-            self.text(surf, ptc["name"], fs, (cx + 2 * mark_r + fs // 3, cy), TEXT if done else MUTED, bold=done)
+            name, room = ptc["name"], colw - 2 * mark_r - fs // 3 - fs // 2
+            f = self.font(fs, done)
+            if f.size(name)[0] > room:                      # lange Namen kuerzen statt ueberlappen
+                while name and f.size(name + "…")[0] > room:
+                    name = name[:-1]
+                name += "…"
+            self.text(surf, name, fs, (cx + 2 * mark_r + fs // 3, cy), TEXT if done else MUTED, bold=done)
         return True
 
     # ---------------------------------------------------- Komplettansicht (iPad/Video)

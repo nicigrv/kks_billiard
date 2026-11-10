@@ -281,11 +281,18 @@ def make_handler(app, auth: Auth):
     return Handler
 
 
+class PortalServer(ThreadingHTTPServer):
+    # Viele iPads gleichzeitig (z. B. 10 Pruefer + Admin + Beamer-Ansicht): Standard waeren nur
+    # 5 wartende Verbindungen, dann werden Anfragen abgewiesen.
+    request_queue_size = 128
+    daemon_threads = True
+
+
 def start(app, port=8080):
     pin = os.environ.get("ADMIN_PIN", "")
     auth = Auth(pin, os.environ.get("DATA_DIR", "/data"), app.reviewer_list)
     app.auth = auth
-    server = ThreadingHTTPServer(("0.0.0.0", port), make_handler(app, auth))
+    server = PortalServer(("0.0.0.0", port), make_handler(app, auth))
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, name="web", daemon=True).start()
     print(f"[web] Admin-Portal auf Port {port}" + (" (mit PIN)" if pin else " (OHNE PIN)"), flush=True)

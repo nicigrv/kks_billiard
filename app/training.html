@@ -49,7 +49,7 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 10px; mi
 #canvas { display: block; touch-action: manipulation; cursor: crosshair; }
 .empty { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
   text-align: center; padding: 24px; color: var(--dim); font-size: 18px; }
-.empty.show { display: flex; }
+.empty.show { display: flex; flex-direction: column; gap: 4px; }
 .caption { position: absolute; left: 10px; top: 8px; background: rgba(0,0,0,.6); padding: 4px 10px;
   border-radius: 8px; font-size: 14px; color: var(--dim); pointer-events: none; }
 
