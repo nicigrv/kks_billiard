@@ -37,7 +37,7 @@ services:
       # Demo-Modus: Foto eines Pooltisches von oben (JPEG/PNG). Leer = simuliertes Spiel.
       # Gilt nur als Vorgabe, im Portal unter "Kamera" aenderbar.
       DEMO_IMAGE_URL: ""
-      CUE_PORT: "5005"                             # UDP-Port fuer das Gyroskop im Queue
+      CUE_PORT: "5005"                             # UDP-Port, ueber den der Pi den Queue (Castcode) sucht
     # Zugriff auf HDMI-Ausgabe (/dev/dri), USB-Kamera (/dev/video*) und Pi-Kameramodul
     # (/dev/media*, /dev/dma_heap). Einfachste sichere Variante fuer ein Geraet im Heimnetz.
     privileged: true

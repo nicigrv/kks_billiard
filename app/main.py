@@ -28,7 +28,7 @@ import config
 import web
 from ballnum import ball_number
 from coral_detector import CoralDetector, CoralEngine
-from cue_sensor import AlignChecker, CueSensor
+from cue_sensor import AlignChecker, CueSensor, clean_castcode
 from geometry import Table, TABLE_SIZES
 from pipeline import Pipeline
 from planner import plan_shot
@@ -66,7 +66,9 @@ class App:
         self.coral = coral_engine or CoralEngine()          # Kugelerkennung nur ueber den KI-Chip
         table = self._table_for(self.reader)
         self.pipe = Pipeline(table, lambda r: CoralDetector(r, self.coral), recorder=self.recorder)
-        self.cue = CueSensor(cue_port, self.cfg.get("cue_offset", 0.0), self.cfg.get("cue_flip", False)).start()
+        self.cue = CueSensor(self.cfg.get("cue_castcode", ""), self.cfg.get("cue_offset", 0.0),
+                             self.cfg.get("cue_flip", False), discovery_port=cue_port,
+                             address=self.cfg.get("cue_address"), on_found=self._cue_found).start()
         self.align = AlignChecker(self.cfg.get("cue_tolerance", 2.0))
         self.rounds = RoundRecorder(os.path.join(config.DATA_DIR, "recordings"))
         self.sound = Sound()                                  # Ding ueber HDMI
@@ -357,6 +359,11 @@ class App:
         return f"Modell gespeichert ({len(data) / 1e6:.1f} MB). Der Coral lädt es in wenigen Sekunden."
 
     # ------------------------------------------------------------- Portal-API
+    def _cue_found(self, address):
+        """Queue im WLAN gefunden: Adresse merken (beim naechsten Start sofort da)."""
+        self.cfg["cue_address"] = list(address)
+        config.save(self.cfg)
+
     # ------------------------------------------------------------- Pruefer
     def reviewer_list(self):
         return list(self.cfg.get("reviewers") or [])
@@ -521,6 +528,17 @@ class App:
             self.cfg["assist"] = bool(p.get("enabled"))
             config.save(self.cfg)
             return "Schlagverbesserung an" if self.cfg["assist"] else "Schlagverbesserung aus"
+        if name == "cue_pair":
+            code = clean_castcode(p.get("castcode"))
+            self.cfg.update(cue_castcode=code, cue_address=None)
+            config.save(self.cfg)
+            self.cue.pair(code)
+            return f"Castcode {code} gespeichert - der Pi sucht jetzt den Queue im WLAN"
+        if name == "cue_unpair":
+            self.cfg.update(cue_castcode="", cue_address=None)
+            config.save(self.cfg)
+            self.cue.pair("")
+            return "Queue entkoppelt"
         if name == "cue_calibrate":
             self.cfg["cue_offset"] = self.cue.calibrate()
             config.save(self.cfg)

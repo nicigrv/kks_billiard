@@ -259,8 +259,12 @@ Ehrlich: Der Vorschlag ist Geometrie (Geisterkugel-Methode, freie Wege, Schnittw
 trainiertes Netz, und ohne Stellungsspiel. Das Gyroskop misst nur den **Winkel**, nicht wo der
 Queue liegt – der helle Queue wird immer hinter die Weiße gezeichnet.
 
-Einrichten: Portal → „Queue mit Gyroskop“ → Queue an die lange Bande legen, Spitze zeigt in der
-Grafik nach rechts → „Queue kalibrieren“. Dreht er sich falsch herum: „Drehrichtung umkehren“.
+Koppeln: Queue einschalten → am Handy WLAN **„Billard-Queue-…“** wählen → auf der Seite, die sich
+öffnet, euer WLAN wählen → der Queue zeigt seinen **Castcode** → im Portal unter „Queue mit Gyroskop“
+eintragen und „Koppeln“ → am Handy den Haken setzen und „Verbinden“. Der Pi findet den Queue dann
+selbst im WLAN und fragt seine Lage ab (Details: `cue_sensor/README.md`).
+Danach einmal kalibrieren: Queue an die lange Bande legen, Spitze zeigt in der Grafik nach rechts →
+„Queue kalibrieren“. Dreht er sich falsch herum: „Drehrichtung umkehren“.
 
 ## 3c. Spielaufzeichnung
 
@@ -281,7 +285,8 @@ docker compose --profile sim up -d fake-table                     # simulierte K
 Im Portal unter „Kamera“: ESP32-CAM, Adresse `http://127.0.0.1:8081/stream`. Ecken: die vier Ecken
 des Tuchs antippen.
 
-Simuliertes Queue-Gyroskop: `docker compose --profile sim up -d fake-cue` (Schlagverbesserung im Portal einschalten).
+Simuliertes Queue-Gyroskop: `docker compose --profile sim up -d fake-cue`, im Portal Castcode **SMQ234**
+eintragen und die Schlagverbesserung einschalten.
 
 ## 5. KI-Chip: Kugeln festlegen, trainieren, Modell aufspielen
 
@@ -368,6 +373,7 @@ python3 -m sim.test_game          # Regeln + simuliertes Spiel (Kugeln aus dem S
 python3 -m sim.test_features      # Stoßvorschlag, Gyroskop, Game-Bar, Aufzeichnung
 python3 -m sim.test_coral         # KI-Chip, Bilder aufnehmen/festlegen, Trefferquote
 python3 -m sim.test_review        # Prüfrunden (Mehrheit), Anmeldung, Ding-Ton
+python3 -m sim.test_cue_link      # Queue: Castcode, Suche im WLAN, Abfrage der Lage
 ```
 
 ## 7. Kamera-Firmware aktualisieren
