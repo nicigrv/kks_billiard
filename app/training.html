@@ -21,6 +21,7 @@
   --r: 12px;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
   font: 16px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; }
 body { display: grid; grid-template-rows: auto 1fr; height: 100dvh; overflow: hidden;
@@ -70,9 +71,23 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
   border-radius: 10px; max-width: calc(100% - 32px); z-index: 5; }
 .toast.show { transform: translate(-50%, 0); }
 .toast.err { background: var(--foul); color: var(--ink); }
-.pin { display: none; gap: 8px; }
-.pin.show { display: flex; }
-.pin input { font: inherit; padding: 8px; border-radius: 8px; border: 2px solid var(--line); background: var(--panel); color: var(--ink); width: 120px; }
+/* Anmeldung (Admin-PIN bzw. Pruefer-Code) */
+.login { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center;
+  background: rgba(5, 12, 9, .92); padding: 16px; }
+.login[hidden] { display: none; }
+.login form { width: min(380px, 100%); display: grid; gap: 12px; text-align: center; }
+.login h2 { margin: 0; font-size: 24px; color: var(--ink); }
+.login input { font: 700 32px/1 system-ui, sans-serif; letter-spacing: 8px; text-align: center; padding: 14px;
+  border-radius: var(--r); border: 2px solid var(--line); background: var(--bg); color: var(--ink); width: 100%; }
+.login button { min-height: 56px; font-size: 20px; }
+#who { color: var(--chalk); font-weight: 700; white-space: nowrap; }
+/* Pruefrunde: Stand der anderen ueber dem Bild */
+.banner { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); max-width: calc(100% - 20px);
+  background: rgba(10, 20, 15, .9); border: 2px solid var(--line); border-radius: var(--r); padding: 8px 14px;
+  font-size: 15px; text-align: center; pointer-events: none; }
+.banner[hidden] { display: none; }
+.banner .d { color: var(--ok); font-weight: 700; }
+.banner .w { color: var(--dim); }
 
 /* Hochformat / Handy: Bild oben, Bedienung darunter */
 @media (max-width: 820px), (orientation: portrait) {
@@ -88,24 +103,32 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
 </head>
 <body>
 <header>
-  <h1>Trainingsmodus</h1>
+  <h1 id="title">Trainingsmodus</h1>
+  <span id="who"></span>
   <div class="stats" id="stats" aria-live="polite">-</div>
-  <form class="pin" id="pinForm">
-    <input type="password" id="pinInput" inputmode="numeric" placeholder="Admin-PIN" aria-label="Admin-PIN">
-    <button class="primary" type="submit">OK</button>
-  </form>
   <div class="actions">
-    <button class="primary" type="button" id="captureBtn">Bild aufnehmen</button>
-    <button class="danger" type="button" id="deleteAllBtn">Alle löschen</button>
-    <a class="btn quiet" href="/">Portal</a>
+    <button class="primary" type="button" id="roundBtn" data-admin>An alle Prüfer</button>
+    <button class="quiet" type="button" id="captureBtn" data-admin>Bild aufnehmen</button>
+    <button class="danger" type="button" id="deleteAllBtn" data-admin>Alle löschen</button>
+    <a class="btn quiet" href="/" id="portalLink" data-admin>Portal</a>
+    <button class="quiet" type="button" id="logoutBtn">Abmelden</button>
   </div>
 </header>
+<div class="login" id="login" hidden>
+  <form id="loginForm" class="box" autocomplete="off">
+    <h2 id="loginTitle">Anmelden</h2>
+    <input type="password" id="loginInput" inputmode="numeric" maxlength="12" aria-label="PIN oder Code">
+    <button class="primary" type="submit">Anmelden</button>
+    <p class="hint" id="loginHint"></p>
+  </form>
+</div>
 
 <main>
   <div class="stage" id="stage">
     <canvas id="canvas" width="800" height="400" aria-label="Tischbild: Kugel antippen oder freie Stelle antippen, um eine Kugel hinzuzufügen"></canvas>
     <div class="caption" id="caption" hidden></div>
     <div class="empty" id="empty">Keine Bilder offen.<br>Oben „Bild aufnehmen“ drücken.</div>
+    <div class="banner" id="banner" aria-live="polite" hidden></div>
   </div>
 
   <aside>
@@ -121,8 +144,8 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
     <div class="box save">
       <button class="primary big" type="button" id="saveBtn" disabled>Passt alles</button>
       <button class="quiet" type="button" id="undoBtn" disabled>Rückgängig</button>
-      <button class="quiet" type="button" id="skipBtn" disabled>Später</button>
-      <button class="danger" type="button" id="discardBtn" disabled>Verwerfen</button>
+      <button class="quiet" type="button" id="skipBtn" disabled data-admin>Später</button>
+      <button class="danger" type="button" id="discardBtn" disabled data-admin>Verwerfen</button>
     </div>
   </aside>
 </main>
@@ -138,8 +161,10 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
   const COLORS = [["gelb", "#F5C314", 1], ["blau", "#2355CD", 2], ["rot", "#D72D28", 3], ["violett", "#7837A0", 4],
                   ["orange", "#F57D19", 5], ["gruen", "#198C41", 6], ["weinrot", "#871E2D", 7]];
   const ZOOM = 4;                      // Vergroesserung der Lupe
-  let pin = "";
-  try { pin = localStorage.getItem("billardPin") || ""; } catch (e) { /* egal */ }
+  // /training = Admin (PIN), /pruefen = Pruefer (eigener Code, Pruefrunden)
+  const PRUEFER = location.pathname.startsWith("/pruefen");
+  let me = { role: null, name: null };
+  let round = null;              // aktuelle Pruefrunde (nur Pruefer)
   let item = null, selected = -1, history = [];
 
   function toast(text, err) {
@@ -152,21 +177,43 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
 
   async function post(name, payload) {
     try {
-      const r = await fetch("/api/" + name, { method: "POST",
-        headers: { "Content-Type": "application/json", "X-Admin-Pin": pin }, body: JSON.stringify(payload || {}) });
+      const r = await fetch("/api/" + name, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload || {}) });
       const data = await r.json().catch(() => ({}));
-      if (r.status === 403) { $("pinForm").classList.add("show"); $("pinInput").focus(); toast("PIN fehlt oder ist falsch", true); return null; }
+      if (r.status === 401 || r.status === 403) { showLogin(data.error); return null; }
       if (!r.ok) { toast(data.error || "Fehler", true); return null; }
       if (data.message) toast(data.message);
       if (data.state) renderStats(data.state);
       return data;
     } catch (e) { toast("Tisch nicht erreichbar", true); return null; }
   }
-  $("pinForm").addEventListener("submit", (e) => {
+
+  // ---------------- Anmeldung ----------------
+  function showLogin(msg) {
+    $("loginTitle").textContent = PRUEFER ? "Prüfer: deinen Code eingeben" : "Admin-PIN eingeben";
+    $("loginHint").textContent = msg && msg !== "Bitte anmelden" ? msg :
+      (PRUEFER ? "Den 4-stelligen Code bekommst du vom Admin." : "");
+    $("login").hidden = false;
+    $("loginInput").value = "";
+    setTimeout(() => $("loginInput").focus(), 50);
+  }
+  $("loginForm").addEventListener("submit", async (e) => {
     e.preventDefault();
-    pin = $("pinInput").value.trim();
-    try { localStorage.setItem("billardPin", pin); } catch (err) { /* egal */ }
-    $("pinForm").classList.remove("show");
+    try {
+      const r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ secret: $("loginInput").value.trim() }) });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) { showLogin(data.error || "Anmeldung fehlgeschlagen"); return; }
+      if (PRUEFER && data.role !== "pruefer") { showLogin("Das ist der Admin-PIN - Admins nehmen /training"); return; }
+      if (!PRUEFER && data.role !== "admin") { showLogin("Das ist ein Prüfer-Code - Prüfer nehmen /pruefen"); return; }
+      $("login").hidden = true;
+      me = { role: data.role, name: data.name, pin_required: true };
+      start();
+    } catch (err) { showLogin("Tisch nicht erreichbar"); }
+  });
+  $("logoutBtn").addEventListener("click", async () => {
+    await fetch("/api/logout", { method: "POST" }).catch(() => {});
+    location.reload();
   });
 
   // ---------------- Kugeln ----------------
@@ -293,6 +340,7 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
     const changed = !!item && item.balls.some((b) => b.changed);
     $("saveBtn").disabled = !item || m > 0;
     $("saveBtn").textContent = !item ? "Passt alles" : m ? m + " Nummer(n) fehlen" :
+      PRUEFER ? (round && round.submitted ? "Nochmal speichern" : "Speichern") :
       !item.balls.length ? "Ohne Kugeln speichern" : changed ? "Speichern & weiter" : "Passt alles";
     $("skipBtn").disabled = !item;
     $("discardBtn").disabled = !item;
@@ -331,7 +379,15 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
   $("saveBtn").addEventListener("click", async () => {
     if (!item) return;
     if (!item.balls.length && !confirm("Liegen auf diesem Bild wirklich KEINE Kugeln?")) return;
+    if (PRUEFER) {
+      const res = await post("round/submit", { id: item.name, balls: item.balls });
+      if (res) showRound(res);
+      return;
+    }
     if (await post("review_save", { name: item.name, balls: item.balls })) load();
+  });
+  $("roundBtn").addEventListener("click", async () => {
+    await post("round_start", {});
   });
   $("discardBtn").addEventListener("click", async () => {
     if (item && await post("review_save", { name: item.name, discard: true })) load();
@@ -410,10 +466,79 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
     add("festgelegt", t.verified || 0);
     if (t.quality) add("richtig (KI-Chip)", t.quality.percent + " %", "q");
     if (t.disk_ok === false) add("", "Speicher fast voll!");
+    const rv = s.review || {};
+    const online = (s.reviewers || []).filter((r) => r.online).length;
+    if (rv.active) add("fertig (Prüfrunde Bild " + rv.no + ")", rv.done + "/" + rv.total);
+    else add("Prüfer online", online);
+    $("roundBtn").disabled = !!rv.active || !online;
+  }
+
+  // ---------------- Pruefer-Modus ----------------
+  function showRound(data) {
+    const r = data.round;
+    const banner = $("banner");
+    if (!r) {
+      round = null;
+      if (item) { item = null; selected = -1; history = []; update(); }
+      ctx.clearRect(0, 0, view.w, view.h);
+      $("caption").hidden = true;
+      const last = data.last;
+      $("empty").innerHTML = "";
+      const p1 = document.createElement("div");
+      p1.textContent = "Warte auf das nächste Bild vom Admin …";
+      $("empty").appendChild(p1);
+      if (last && last.text) {
+        const p2 = document.createElement("div");
+        p2.style.marginTop = "12px"; p2.style.fontSize = "15px";
+        p2.textContent = "Zuletzt: " + last.text;
+        $("empty").appendChild(p2);
+      }
+      $("empty").classList.add("show");
+      banner.hidden = true;
+      return;
+    }
+    $("empty").classList.remove("show");
+    if (!round || round.id !== r.id) {
+      // neues Bild: Vorschlag (bzw. eigenes Ergebnis) laden
+      item = { name: r.id, width: r.width, height: r.height, radius: r.radius,
+               balls: JSON.parse(JSON.stringify(r.balls || [])) };
+      selected = -1; history = [];
+      view.w = r.width; view.h = r.height;
+      fit();
+      img.src = "/api/round/image?id=" + encodeURIComponent(r.id);
+      $("caption").textContent = "Prüfrunde · Bild " + r.no + (r.model ? " · Vorschlag vom KI-Chip" : " · ohne Vorschlag");
+      $("caption").hidden = false;
+    }
+    round = r;
+    banner.innerHTML = "";
+    const head = document.createElement("div");
+    head.textContent = r.submitted ? "Gespeichert ✓ – warte auf die anderen" : "Kugeln festlegen, dann „Speichern“";
+    banner.appendChild(head);
+    const line = document.createElement("div");
+    r.status.forEach((p, i) => {
+      if (i) line.appendChild(document.createTextNode("   "));
+      const sp = document.createElement("span");
+      sp.className = p.done ? "d" : "w";
+      sp.textContent = (p.done ? "✓ " : "… ") + p.name;
+      line.appendChild(sp);
+    });
+    banner.appendChild(line);
+    banner.hidden = false;
+    update();
+  }
+
+  async function pollRound() {
+    try {
+      const r = await fetch("/api/round", { cache: "no-store" });
+      if (r.status === 401 || r.status === 403) { showLogin(); return; }
+      if (r.ok) showRound(await r.json());
+    } catch (e) { /* naechster Versuch */ }
+    setTimeout(pollRound, 1500);
   }
   async function poll() {
     try {
       const r = await fetch("/api/state", { cache: "no-store" });
+      if (r.status === 401 || r.status === 403) { showLogin(); return; }
       if (r.ok) {
         const s = await r.json();
         renderStats(s);
@@ -423,11 +548,31 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
     setTimeout(poll, 4000);
   }
 
+  let started = false;
+  function start() {
+    if (started) return;
+    started = true;
+    if (PRUEFER) {
+      document.querySelectorAll("[data-admin]").forEach((el) => { el.hidden = true; });
+      $("title").textContent = "Prüfen";
+      $("who").textContent = me.name || "";
+      $("stats").textContent = "";
+      pollRound();
+    } else {
+      $("logoutBtn").hidden = !me.pin_required;
+      load();
+      poll();
+    }
+  }
+
   try { navigator.wakeLock && navigator.wakeLock.request("screen").catch(() => {}); } catch (e) { /* egal */ }
   fit();
   update();
-  load();
-  poll();
+  fetch("/api/me", { cache: "no-store" }).then((r) => r.json()).then((d) => {
+    me = d;
+    const ok = PRUEFER ? d.role === "pruefer" : d.role === "admin";
+    if (ok) start(); else showLogin();
+  }).catch(() => showLogin("Tisch nicht erreichbar"));
 })();
 </script>
 </body>

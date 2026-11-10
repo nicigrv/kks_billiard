@@ -5,10 +5,11 @@
 #  - OpenCV als "headless"-Paket (nur Bildfunktionen). Das Debian-Paket python3-opencv zieht
 #    Qt, VTK, GDAL & Co. nach und laedt alles beim Start in den Speicher.
 #  - ffmpeg: Videos der Spielaufzeichnung (H.264, laeuft auf iPad/iPhone)
+#  - alsa-utils (aplay): Ding-Ton ueber HDMI
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3 python3-pygame python3-numpy python3-pip ffmpeg ca-certificates curl libusb-1.0-0 \
+        python3 python3-pygame python3-numpy python3-pip ffmpeg ca-certificates curl libusb-1.0-0 alsa-utils \
         libgl1-mesa-dri libegl1 libgles2 libgbm1 libdrm2 \
     && pip3 install --no-cache-dir --no-deps --break-system-packages opencv-python-headless==4.10.0.84 \
     && rm -rf /var/lib/apt/lists/*

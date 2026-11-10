@@ -102,6 +102,8 @@ def draw_beamer(surf, renderer, cam_cache, frame, frame_id, pipeline, reader, sc
     cue = scene.get("cue") or {}
     if cue.get("ok"):
         renderer.draw_check(surf, pygame.Rect(0, 0, sw, top_h))
+    # Pruefrunde (mehrere Pruefer legen dasselbe Bild fest): Stand ueber der Tischgrafik
+    renderer.draw_review(surf, pygame.Rect(half, 0, sw - half, top_h), scene.get("review"))
 
 
 def _draw_camera(surf, renderer, cache, rect, frame, frame_id, pipeline, reader):
