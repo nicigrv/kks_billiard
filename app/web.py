@@ -1,9 +1,10 @@
 """
-Admin-Portal (Port 8080): Spiel starten/abbrechen, Korrekturen, Kalibrierung.
+Admin-Portal (Port 8080): Spiel starten/abbrechen, Korrekturen, Kalibrierung, KI-Training.
 Nur Python-Standardbibliothek, keine Zusatzpakete.
 
-Schutz: Ist ADMIN_PIN gesetzt, brauchen alle aendernden Aufrufe den Header X-Admin-Pin.
-Lesen (Spielstand, Bilder) ist ohne PIN erlaubt, z. B. fuer ein Handy am Tisch.
+Schutz (auth.py): Ist ADMIN_PIN gesetzt, braucht alles ausser den Seiten selbst, der
+Beamer-Ansicht und der Anmeldung eine Anmeldung. Pruefer (eigener Code) duerfen nur ihre
+Pruefrunde sehen und speichern; alles andere nur der Admin (PIN).
 """
 
 import json
@@ -14,6 +15,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from auth import Auth, LoginError
 from config import UserError
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -21,14 +23,21 @@ MAX_MODEL_BYTES = 64 * 1024 * 1024
 BEAMER_SIZES = {"sd": (960, 540), "hd": (1280, 720), "fhd": (1920, 1080)}
 
 
-def make_handler(app, pin):
+PUBLIC_GET = {"/", "/index.html", "/beamer", "/training", "/pruefen", "/api/beamer.jpg", "/api/beamer.mjpg",
+              "/api/me"}
+PRUEFER_GET = {"/api/round", "/api/round/image"}
+PUBLIC_POST = {"/api/login", "/api/logout"}
+PRUEFER_POST = {"/api/round/submit"}
+
+
+def make_handler(app, auth: Auth):
     class Handler(BaseHTTPRequestHandler):
         server_version = "Billard/1.0"
 
         def log_message(self, fmt, *args):
             pass
 
-        def _send(self, code, body, ctype="application/json"):
+        def _send(self, code, body, ctype="application/json", headers=None):
             if isinstance(body, (dict, list)):
                 body = json.dumps(body).encode()
             elif isinstance(body, str):
@@ -37,6 +46,8 @@ def make_handler(app, pin):
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            for k, v in (headers or {}).items():
+                self.send_header(k, v)
             self.end_headers()
             self.wfile.write(body)
 
@@ -96,17 +107,47 @@ def make_handler(app, pin):
             except (BrokenPipeError, ConnectionResetError, OSError):
                 return None
 
+        def _who(self):
+            return auth.who(self.headers.get("Cookie", ""), self.headers.get("X-Admin-Pin", ""))
+
+        def _denied(self, who):
+            if who["role"] is None:
+                return self._send(401, {"error": "Bitte anmelden", "login": True})
+            return self._send(403, {"error": "Nur für den Admin", "login": True})
+
+        def _read_json(self):
+            n = int(self.headers.get("Content-Length", "0"))
+            return json.loads(self.rfile.read(n) or b"{}") if n else {}
+
         def do_GET(self):
             url = urlsplit(self.path)
             path, query = url.path, parse_qs(url.query)
+            who = self._who()
+            if path not in PUBLIC_GET and not (path in PRUEFER_GET and who["role"] == "pruefer") \
+                    and who["role"] != "admin":
+                return self._denied(who)
             if path in ("/", "/index.html"):
                 with open(os.path.join(HERE, "admin.html"), "rb") as f:
                     return self._send(200, f.read(), "text/html; charset=utf-8")
+            if path == "/api/me":
+                return self._send(200, {"role": who["role"], "name": who["name"], "pin_required": bool(auth.pin)})
             if path == "/api/state":
                 return self._send(200, app.state_dict())
-            if path in ("/beamer", "/training"):
-                with open(os.path.join(HERE, path[1:] + ".html"), "rb") as f:
+            if path in ("/beamer", "/training", "/pruefen"):
+                page = "training" if path == "/pruefen" else path[1:]     # Pruefer: gleiche Seite, eigene Rolle
+                with open(os.path.join(HERE, page + ".html"), "rb") as f:
                     return self._send(200, f.read(), "text/html; charset=utf-8")
+            if path == "/api/round":
+                if who["role"] == "pruefer":
+                    app.reviews.heartbeat(who["name"])
+                    return self._send(200, dict(app.reviews.view(who["name"]), me=who["name"]))
+                return self._send(200, {"status": app.reviews.status(), "me": who["name"]})
+            if path == "/api/round/image":
+                rid = query.get("id", [""])[0]
+                fpath = os.path.join(app.reviews.dir, rid + ".jpg")
+                if not re.fullmatch(r"[0-9]{8}-[0-9]{6}-[0-9]{3}", rid) or not os.path.isfile(fpath):
+                    return self._send(404, {"error": "Bild nicht gefunden"})
+                return self._send_file(fpath, "image/jpeg")
             if path in ("/api/beamer.jpg", "/api/beamer.mjpg"):
                 size = BEAMER_SIZES.get(query.get("q", ["hd"])[0], BEAMER_SIZES["hd"])
                 if path.endswith(".jpg"):
@@ -187,9 +228,30 @@ def make_handler(app, pin):
             return self._send(404, {"error": "Nicht gefunden"})
 
         def do_POST(self):
-            if pin and self.headers.get("X-Admin-Pin", "") != pin:
-                return self._send(403, {"error": "Falsche PIN"})
-            if self.path.split("?")[0] == "/api/model":
+            path = self.path.split("?")[0]
+            who = self._who()
+            if path == "/api/login":
+                try:
+                    data = self._read_json()
+                    sess, token = auth.login(data.get("secret"), self.client_address[0])
+                except (ValueError, LoginError) as e:
+                    return self._send(401, {"error": str(e)})
+                return self._send(200, {"ok": True, "role": sess["role"], "name": sess["name"]},
+                                  headers={"Set-Cookie": Auth.set_cookie(token)})
+            if path == "/api/logout":
+                auth.logout(Auth.token_from(self.headers.get("Cookie", "")))
+                return self._send(200, {"ok": True}, headers={"Set-Cookie": Auth.clear_cookie()})
+            if path in PRUEFER_POST and who["role"] == "pruefer":
+                try:
+                    data = self._read_json()
+                    res = app.reviews.submit(who["name"], str(data["id"]), list(data.get("balls", [])))
+                except (KeyError, ValueError, TypeError) as e:
+                    return self._send(400, {"error": str(e)})
+                msg = "Gespeichert - warte auf die anderen" if res is None else "Gespeichert - alle fertig!"
+                return self._send(200, dict(app.reviews.view(who["name"]), ok=True, message=msg, me=who["name"]))
+            if who["role"] != "admin":
+                return self._denied(who)
+            if path == "/api/model":
                 # Coral-Modell hochladen (Datei roh im Body)
                 n = int(self.headers.get("Content-Length", "0"))
                 if not 0 < n <= MAX_MODEL_BYTES:
@@ -221,7 +283,9 @@ def make_handler(app, pin):
 
 def start(app, port=8080):
     pin = os.environ.get("ADMIN_PIN", "")
-    server = ThreadingHTTPServer(("0.0.0.0", port), make_handler(app, pin))
+    auth = Auth(pin, os.environ.get("DATA_DIR", "/data"), app.reviewer_list)
+    app.auth = auth
+    server = ThreadingHTTPServer(("0.0.0.0", port), make_handler(app, auth))
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, name="web", daemon=True).start()
     print(f"[web] Admin-Portal auf Port {port}" + (" (mit PIN)" if pin else " (OHNE PIN)"), flush=True)

@@ -16,6 +16,7 @@ Threads:
 
 import argparse
 import os
+import secrets
 import socket
 import sys
 import threading
@@ -33,6 +34,8 @@ from pipeline import Pipeline
 from planner import plan_shot
 from recorder import Recorder
 from replay import RoundRecorder
+from review_rounds import RoundManager
+from sound import Sound
 from scene import SceneRenderer, bar_balls, surface_to_bgr
 from cameras import SOURCE_NAMES, SOURCES, make_reader
 
@@ -66,6 +69,9 @@ class App:
         self.cue = CueSensor(cue_port, self.cfg.get("cue_offset", 0.0), self.cfg.get("cue_flip", False)).start()
         self.align = AlignChecker(self.cfg.get("cue_tolerance", 2.0))
         self.rounds = RoundRecorder(os.path.join(config.DATA_DIR, "recordings"))
+        self.sound = Sound()                                  # Ding ueber HDMI
+        self.reviews = RoundManager(self.recorder, config.DATA_DIR, self.sound)   # Pruefrunden
+        self.auth = None                                      # setzt web.start()
         self.admin_url = ""
         self.proc_fps = 0.0
         # Grafik-Zustand
@@ -213,7 +219,8 @@ class App:
             info = f"Admin: {self.admin_url}   " + info
         return {"balls": sb, "radius": radius, "cloth": self.cfg.get("cloth", "blau"),
                 "game": game, "bar": bar_balls(game, visible, seen),
-                "suggestion": sug, "cue": cue, "status": status, "info": info, "version": self.scene_version}
+                "suggestion": sug, "cue": cue, "status": status, "info": info, "version": self.scene_version,
+                "review": self.reviews.status() if live else None}
 
     def graphic_jpeg(self, size=(1280, 720)):
         """Grafische Ansicht fuer das iPad. Nur neu zeichnen, wenn sich etwas geaendert hat."""
@@ -350,7 +357,60 @@ class App:
         return f"Modell gespeichert ({len(data) / 1e6:.1f} MB). Der Coral lädt es in wenigen Sekunden."
 
     # ------------------------------------------------------------- Portal-API
+    # ------------------------------------------------------------- Pruefer
+    def reviewer_list(self):
+        return list(self.cfg.get("reviewers") or [])
+
+    def _new_code(self):
+        used = {str(r["code"]) for r in self.reviewer_list()} | {os.environ.get("ADMIN_PIN", "")}
+        while True:
+            code = f"{secrets.randbelow(9000) + 1000}"
+            if code not in used:
+                return code
+
+    def _reviewer_cmd(self, name, p):
+        revs = self.reviewer_list()
+        who = str(p.get("name", "")).strip()[:20]
+        if name == "reviewer_add":
+            if not who:
+                raise config.UserError("Name fehlt")
+            if any(r["name"].lower() == who.lower() for r in revs):
+                raise config.UserError(f"{who} gibt es schon")
+            code = self._new_code()
+            revs.append({"name": who, "code": code})
+            msg = f"{who} angelegt - Code {code}"
+        elif name in ("reviewer_remove", "reviewer_newcode"):
+            r = next((r for r in revs if r["name"] == who), None)
+            if r is None:
+                raise config.UserError("Prüfer nicht gefunden")
+            if self.auth is not None:
+                self.auth.revoke(who)                         # alte Anmeldung gilt nicht mehr
+            if name == "reviewer_remove":
+                revs.remove(r)
+                msg = f"{who} entfernt"
+            else:
+                r["code"] = self._new_code()
+                msg = f"Neuer Code für {who}: {r['code']}"
+        self.cfg["reviewers"] = revs
+        config.save(self.cfg)
+        return msg
+
+    def _start_review(self):
+        names = [r["name"] for r in self.reviewer_list()]
+        participants = self.reviews.online(names)
+        with self.pipe.lock:
+            warped = self.pipe.last_warped
+            balls = list(self.pipe.balls)
+            radius = self.pipe.table.ball_radius_px
+        if warped is None:
+            raise config.UserError("Kein Kamerabild (Kamera und Tisch eingerichtet?)")
+        st = self.coral.status() if balls else {}
+        model = f"{st['model']} vom {st['model_time']}" if st.get("model") else None
+        r = self.reviews.start(warped, balls, radius, model, participants)
+        return f"Bild {r['no']} an {len(participants)} Prüfer geschickt: {', '.join(participants)}"
+
     def state_dict(self):
+        online = set(self.reviews.online([r["name"] for r in self.reviewer_list()]))
         with self.pipe.lock:
             g = self.pipe.game.to_dict()
             status = self.pipe.status_text()
@@ -378,6 +438,9 @@ class App:
                         ok=self.align.ok, err=None if self.align.err is None else round(self.align.err, 1)),
             "round": self.rounds.status(),
             "videos": self.rounds.videos(),
+            "reviewers": [dict(r, online=r["name"] in online) for r in self.reviewer_list()],
+            "review": self.reviews.status(),
+            "sound": {"device": self.sound.device, "error": self.sound.error},
         }
 
     def jpeg(self, kind):
@@ -419,6 +482,23 @@ class App:
         g = self.pipe.game
         if name == "camera":
             return self._set_camera(p)
+        if name in ("reviewer_add", "reviewer_remove", "reviewer_newcode"):
+            return self._reviewer_cmd(name, p)
+        try:
+            if name == "round_start":
+                return self._start_review()
+            if name == "round_finish":
+                return self.reviews.finish()["text"]
+            if name == "round_cancel":
+                self.reviews.cancel()
+                return "Prüfrunde abgebrochen"
+        except ValueError as e:
+            raise config.UserError(str(e))
+        if name == "sound_test":
+            err = self.sound.ding(wait=True)
+            if err:
+                raise config.UserError(err)
+            return f"Ding gespielt über {self.sound.device}"
         if name == "train_correction":
             return self._train_correction(p)
         if name == "record_round":

@@ -25,6 +25,7 @@
   --body: "Atkinson Hyperlegible", system-ui, sans-serif;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; background: var(--felt-dark); }
 body {
   margin: 0;
@@ -168,8 +169,21 @@ details > div { margin-top: 12px; }
 }
 .toast.show { transform: translate(-50%, 0); visibility: visible; }
 .toast.err { background: var(--foul); color: var(--ivory); }
-.pin { display: none; gap: 8px; margin-top: 12px; }
-.pin.show { display: flex; }
+/* Anmeldung (Admin-PIN) */
+.login { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center;
+  background: rgba(10, 47, 37, .97); padding: 16px; }
+.login[hidden] { display: none; }
+.login form { width: min(380px, 100%); display: grid; gap: 14px; text-align: center; }
+.login h2 { margin: 0; }
+.login input { font: 700 32px/1 var(--body); letter-spacing: 8px; text-align: center; }
+.reviewers { list-style: none; padding: 0; margin: 8px 0 12px; }
+.reviewers li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(239, 230, 210, .08); flex-wrap: wrap; }
+.reviewers .nm { font-weight: 700; flex: 1 1 120px; }
+.reviewers .code { font: 700 20px/1 var(--display); letter-spacing: 3px; color: var(--ivory); }
+.reviewers button { min-height: 40px; padding: 6px 10px; font-size: 14px; }
+.dot { width: 12px; height: 12px; border-radius: 50%; background: #55645C; display: inline-block; }
+.dot.on { background: #7FE0A0; }
+.addrow { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
@@ -203,10 +217,7 @@ details > div { margin-top: 12px; }
     <div class="sys"><span id="status">-</span><span id="fps"></span></div>
   </div>
 
-  <form class="pin" id="pinForm">
-    <input type="password" id="pinInput" inputmode="numeric" autocomplete="off" placeholder="Admin-PIN" aria-label="Admin-PIN">
-    <button class="primary" type="submit">Speichern</button>
-  </form>
+
  </div>
  <div class="col-right">
 
@@ -300,6 +311,27 @@ details > div { margin-top: 12px; }
     <ul class="videos" id="videos"></ul>
     <video class="player" id="player" controls playsinline preload="metadata"></video>
   </section>
+
+  <details id="roundDetails">
+    <summary>Prüfrunde (mehrere Prüfer) <span class="badge" id="roundBadge" hidden></span></summary>
+    <div>
+      <p class="hint">Jedes Bild wird von mehreren Prüfern gleichzeitig festgelegt. Prüfer öffnen am iPad <b id="pruefenUrl">/pruefen</b> und melden sich mit ihrem Code an. „Bild an alle Prüfer“ schickt das aktuelle Kamerabild an alle, die gerade angemeldet sind. Haben alle gespeichert, zeigt der Beamer „Alle fertig – weiter!“ und es klingt ein Ding. Mehrheit entscheidet; bei Uneinigkeit landet das Bild bei euch unter den offenen Bildern.</p>
+      <button class="primary" type="button" id="roundStartBtn" style="width:100%">Bild an alle Prüfer</button>
+      <p class="statusline" id="roundStatus"></p>
+      <div class="grid two" id="roundActions" hidden>
+        <button class="quiet" type="button" id="roundFinishBtn">Mit den bisherigen abschließen</button>
+        <button class="danger" type="button" id="roundCancelBtn">Runde abbrechen</button>
+      </div>
+      <h2 style="font-size:20px;margin:18px 0 4px">Prüfer</h2>
+      <ul class="reviewers" id="reviewerList"></ul>
+      <form class="addrow" id="addReviewer">
+        <input type="text" id="reviewerName" maxlength="20" placeholder="Name, z. B. Anna" aria-label="Name des Prüfers" autocomplete="off">
+        <button type="submit">Hinzufügen</button>
+      </form>
+      <p class="hint" style="margin-top:12px" id="soundInfo"></p>
+      <button class="quiet" type="button" id="soundTestBtn" style="width:100%">Ding testen (HDMI)</button>
+    </div>
+  </details>
 
   <details id="fixBallsDetails">
     <summary>KI-Training: Kugeln festlegen <span class="badge" id="reviewBadge" hidden></span></summary>
@@ -428,14 +460,21 @@ details > div { margin-top: 12px; }
  </div>
 </main>
 <div class="toast" id="toast" role="status"></div>
+<div class="login" id="login" hidden>
+  <form id="loginForm" autocomplete="off">
+    <h2>Admin-Portal</h2>
+    <p class="hint" id="loginHint" style="margin:0">Bitte den Admin-PIN eingeben.</p>
+    <input type="password" id="loginInput" inputmode="numeric" maxlength="12" aria-label="Admin-PIN">
+    <button class="primary" type="submit">Anmelden</button>
+    <p class="hint" style="margin:0">Prüfer melden sich unter <b>/pruefen</b> mit ihrem Code an.</p>
+  </form>
+</div>
 
 <script>
 (function () {
   "use strict";
   const $ = (id) => document.getElementById(id);
   let state = null;
-  let pin = "";
-  try { pin = localStorage.getItem("billardPin") || ""; } catch (e) { /* Speicher nicht verfuegbar */ }
 
   function toast(text, isErr) {
     const t = $("toast");
@@ -449,16 +488,11 @@ details > div { margin-top: 12px; }
     try {
       const r = await fetch("/api/" + name, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Admin-Pin": pin },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload || {}),
       });
       const data = await r.json().catch(() => ({}));
-      if (r.status === 403) {
-        $("pinForm").classList.add("show");
-        $("pinInput").focus();
-        toast("PIN fehlt oder ist falsch. Bitte oben eingeben.", true);
-        return null;
-      }
+      if (r.status === 401 || r.status === 403) { showLogin(); return null; }
       if (!r.ok) { toast(data.error || "Befehl fehlgeschlagen", true); return null; }
       if (data.state) render(data.state);
       if (data.message) toast(data.message);
@@ -469,12 +503,23 @@ details > div { margin-top: 12px; }
     }
   }
 
-  $("pinForm").addEventListener("submit", (e) => {
+  function showLogin(msg) {
+    $("loginHint").textContent = msg || "Bitte den Admin-PIN eingeben.";
+    $("login").hidden = false;
+    $("loginInput").value = "";
+    setTimeout(() => $("loginInput").focus(), 50);
+  }
+  $("loginForm").addEventListener("submit", async (e) => {
     e.preventDefault();
-    pin = $("pinInput").value.trim();
-    try { localStorage.setItem("billardPin", pin); } catch (err) { /* egal */ }
-    $("pinForm").classList.remove("show");
-    toast("PIN gespeichert");
+    try {
+      const r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ secret: $("loginInput").value.trim() }) });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) { showLogin(data.error || "Anmeldung fehlgeschlagen"); return; }
+      if (data.role !== "admin") { showLogin("Das ist ein Prüfer-Code. Prüfer nehmen die Seite /pruefen."); return; }
+      $("login").hidden = true;
+      poll();
+    } catch (err) { showLogin("Tisch nicht erreichbar"); }
   });
 
   // ---------------- Darstellung ----------------
@@ -535,6 +580,7 @@ details > div { margin-top: 12px; }
 
     renderTraining(s);
     renderCamera(s);
+    renderReview(s);
     if (!calibDirty && s.table_size) $("tableSize").value = s.table_size;
     if (!calibDirty && s.cloth) $("clothColor").value = s.cloth;
   }
@@ -795,6 +841,69 @@ details > div { margin-top: 12px; }
     if (await post("delete_images", { confirm: true })) loadEditor();
   });
 
+  // ---------------- Prüfrunde ----------------
+  function renderReview(s) {
+    const rv = s.review || {};
+    const revs = s.reviewers || [];
+    const online = revs.filter((r) => r.online).length;
+    $("pruefenUrl").textContent = location.host + "/pruefen";
+    const badge = $("roundBadge");
+    badge.hidden = !rv.active;
+    badge.textContent = rv.active ? rv.done + "/" + rv.total : "";
+    $("roundStartBtn").disabled = !!rv.active || !online;
+    $("roundStartBtn").textContent = rv.active ? "Prüfrunde läuft …" :
+      online ? "Bild an alle Prüfer (" + online + " online)" : "Bild an alle Prüfer (niemand online)";
+    $("roundActions").hidden = !rv.active;
+    const st = $("roundStatus");
+    st.innerHTML = "";
+    if (rv.active) {
+      st.appendChild(document.createTextNode("Bild " + rv.no + ": "));
+      rv.participants.forEach((p, i) => {
+        if (i) st.appendChild(document.createTextNode("  ·  "));
+        const b = document.createElement("b");
+        b.className = p.done ? "good" : "";
+        b.textContent = (p.done ? "✓ " : "… ") + p.name;
+        st.appendChild(b);
+      });
+    } else if (rv.last && rv.last.text) {
+      st.textContent = "Zuletzt: " + rv.last.text;
+    }
+    const key = JSON.stringify(revs);
+    if (key !== renderReview.key) {
+      renderReview.key = key;
+      const ul = $("reviewerList");
+      ul.innerHTML = "";
+      if (!revs.length) { const li = document.createElement("li"); li.textContent = "Noch keine Prüfer – unten anlegen."; ul.appendChild(li); }
+      for (const r of revs) {
+        const li = document.createElement("li");
+        const dot = document.createElement("span"); dot.className = "dot" + (r.online ? " on" : "");
+        dot.title = r.online ? "online" : "nicht angemeldet";
+        const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = r.name;
+        const code = document.createElement("span"); code.className = "code"; code.textContent = r.code;
+        const nc = document.createElement("button"); nc.type = "button"; nc.className = "quiet"; nc.textContent = "Neuer Code";
+        nc.addEventListener("click", () => post("reviewer_newcode", { name: r.name }));
+        const rm = document.createElement("button"); rm.type = "button"; rm.className = "quiet"; rm.textContent = "Entfernen";
+        rm.addEventListener("click", () => { if (confirm(r.name + " entfernen?")) post("reviewer_remove", { name: r.name }); });
+        li.append(dot, nm, code, nc, rm);
+        ul.appendChild(li);
+      }
+    }
+    const snd = s.sound || {};
+    $("soundInfo").textContent = "Ton über: " + (snd.device || "-") + (snd.error ? "  ·  Problem: " + snd.error : "");
+  }
+  $("roundStartBtn").addEventListener("click", () => post("round_start", {}));
+  $("roundFinishBtn").addEventListener("click", () => {
+    if (confirm("Runde mit den bisherigen Ergebnissen abschließen? Wer noch nicht gespeichert hat, zählt nicht.")) post("round_finish", {});
+  });
+  $("roundCancelBtn").addEventListener("click", () => { if (confirm("Prüfrunde abbrechen?")) post("round_cancel", {}); });
+  $("addReviewer").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = $("reviewerName").value.trim();
+    if (!name) return;
+    if (await post("reviewer_add", { name })) $("reviewerName").value = "";
+  });
+  $("soundTestBtn").addEventListener("click", () => post("sound_test", {}));
+
   // ---------------- Kamera ----------------
   let camDirty = false;
   function showCamOpts() {
@@ -870,9 +979,9 @@ details > div { margin-top: 12px; }
     if (!f) return;
     toast("Modell wird hochgeladen ...");
     try {
-      const r = await fetch("/api/model", { method: "POST", headers: { "Content-Type": "application/octet-stream", "X-Admin-Pin": pin }, body: f });
+      const r = await fetch("/api/model", { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: f });
       const data = await r.json().catch(() => ({}));
-      if (r.status === 403) { $("pinForm").classList.add("show"); toast("PIN fehlt oder ist falsch.", true); return; }
+      if (r.status === 401 || r.status === 403) { showLogin(); return; }
       if (!r.ok) { toast(data.error || "Hochladen fehlgeschlagen", true); return; }
       if (data.state) render(data.state);
       toast(data.message);
@@ -901,13 +1010,18 @@ details > div { margin-top: 12px; }
     if (res) loadSnapshot();
   });
 
+  let polling = false;
   async function poll() {
+    if (polling) return;
+    polling = true;
     try {
       const r = await fetch("/api/state", { cache: "no-store" });
+      if (r.status === 401 || r.status === 403) { polling = false; showLogin(); return; }
       if (r.ok) render(await r.json());
     } catch (e) {
       $("status").textContent = "Tisch nicht erreichbar";
     }
+    polling = false;
     const live = state && state.assist && state.cue && state.cue.connected;
     setTimeout(poll, live ? 600 : 1500);
   }

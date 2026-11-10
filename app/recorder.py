@@ -231,11 +231,32 @@ class Recorder:
         return {"model": model, "images": len(recent),
                 "percent": round(100 * sum(e["correct"] for e in recent) / total)}
 
-    def _write_verified(self, name, balls, radius, w, h, changed):
+    def _write_verified(self, name, balls, radius, w, h, changed, extra=None):
         write_yolo(os.path.join(self.ok_lbl, name + ".txt"), balls, radius, w, h)
         with open(os.path.join(self.ok_lbl, name + ".json"), "w") as f:
-            json.dump({"radius": radius, "width": w, "height": h, "corrected": bool(changed),
-                       "balls": balls}, f)
+            json.dump(dict({"radius": radius, "width": w, "height": h, "corrected": bool(changed),
+                            "balls": balls}, **(extra or {})), f)
+
+    # ------------------------------------------- Ergebnisse einer Pruefrunde
+    def add_verified(self, name, src_jpg, balls, radius, w, h, extra=None, suggestion_meta=None):
+        """Pruefrunde einig: Bild + gemeinsames Ergebnis direkt als festgelegt uebernehmen."""
+        with self.lock:
+            os.makedirs(self.ok_img, exist_ok=True)
+            os.makedirs(self.ok_lbl, exist_ok=True)
+            balls = [_ball_dict(b) for b in balls]
+            if suggestion_meta:
+                self._score(suggestion_meta, balls)
+            self._write_verified(name, balls, radius, w, h, True, extra)
+            shutil.copy(src_jpg, os.path.join(self.ok_img, name + ".jpg"))
+
+    def add_pending(self, name, src_jpg, data):
+        """Pruefrunde uneinig: Bild mit Vorschlag (Mehrheit + offene Stellen) in die offene Liste,
+        der Admin entscheidet."""
+        with self.lock:
+            os.makedirs(self.pending_dir, exist_ok=True)
+            shutil.copy(src_jpg, os.path.join(self.pending_dir, name + ".jpg"))
+            with open(os.path.join(self.pending_dir, name + ".json"), "w") as f:
+                json.dump(data, f)
 
     def save_verified(self, warped, balls, radius, numbers=None):
         """Live-Bild, das im Portal korrigiert wurde: direkt als geprueft speichern."""

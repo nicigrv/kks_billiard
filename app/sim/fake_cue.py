@@ -21,7 +21,8 @@ import urllib.request
 
 def get_state(url):
     try:
-        with urllib.request.urlopen(url + "/api/state", timeout=0.5) as r:
+        req = urllib.request.Request(url + "/api/state", headers={"X-Admin-Pin": os.environ.get("ADMIN_PIN", "")})
+        with urllib.request.urlopen(req, timeout=0.5) as r:
             return json.load(r)
     except (OSError, ValueError):
         return None

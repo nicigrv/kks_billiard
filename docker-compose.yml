@@ -14,6 +14,8 @@
 
 # Port des Admin-Portals (und der Beamer-Ansicht /beamer). Nur hier aendern, z. B. "8090".
 x-web-port: &web_port "8080"
+# PIN fuer das Admin-Portal. Pruefer bekommen eigene Codes (im Portal unter "Pruefrunde").
+x-admin-pin: &admin_pin "1902"
 
 services:
   billard:
@@ -29,7 +31,8 @@ services:
     network_mode: host
     environment:
       CAM_URL: http://192.168.88.200:81/stream    # <- IP der Kamera anpassen
-      ADMIN_PIN: ""                                # <- z. B. "4711", leer = ohne PIN
+      ADMIN_PIN: *admin_pin                        # PIN: ganz oben bei x-admin-pin einstellen
+      AUDIO_DEVICE: "hdmi:CARD=vc4hdmi0,DEV=0"     # Ding-Ton: HDMI 0 am Pi 4/5 (Liste: aplay -L)
       WEB_PORT: *web_port                          # Port: ganz oben bei x-web-port einstellen
       # Demo-Modus: Foto eines Pooltisches von oben (JPEG/PNG). Leer = simuliertes Spiel.
       # Gilt nur als Vorgabe, im Portal unter "Kamera" aenderbar.
@@ -55,6 +58,7 @@ services:
     command: ["python3", "-m", "sim.fake_cue"]
     environment:
       WEB_PORT: *web_port
+      ADMIN_PIN: *admin_pin
 
   fake-table:
     image: billard-app:latest

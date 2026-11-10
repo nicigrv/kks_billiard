@@ -372,11 +372,16 @@ class SceneRenderer:
         small = max(12, int(h * 0.036))
         fy = rect.bottom - pad - small
         status = scene.get("status") or ""
-        r = self.text(surf, status, small, (rect.x + pad, fy), ACCENT if status == "Bereit" else WARN)
         info = scene.get("info") or ""
-        if info:
-            self.text(surf, info, small, (rect.right - pad, fy), MUTED, anchor="topright")
-        return r
+        info_w = self.text(surf, info, small, (rect.right - pad, fy), MUTED, anchor="topright").w if info else 0
+        # Status links, ohne in die Info rechts zu laufen (lange Meldungen werden gekuerzt)
+        room = rect.w - 2 * pad - info_w - small
+        f = self.font(small)
+        if f.size(status)[0] > room:
+            while status and f.size(status + "…")[0] > room:
+                status = status[:-1]
+            status += "…"
+        return self.text(surf, status, small, (rect.x + pad, fy), ACCENT if status == "Bereit" else WARN)
 
     # --------------------------------------------------------------- Game-Bar
     def draw_bar(self, surf, rect, scene):
@@ -453,6 +458,65 @@ class SceneRenderer:
                   anchor="bottomleft")
         self.text(surf, f"{rname}: noch {on_r}", cap_fs, (mid.right - slot * 0.1, rect.bottom - pad), MUTED,
                   anchor="bottomright")
+
+    # ------------------------------------------------------------- Pruefrunde
+    def draw_review(self, surf, rect, review, now=None, show_done_s=8.0):
+        """Karte ueber der Tischgrafik: wer hat das Bild schon festgelegt? Danach kurz
+        'Alle fertig - weiter!'. Liefert True, wenn etwas gezeichnet wurde."""
+        import time as _t
+        if not review:
+            return False
+        now = _t.time() if now is None else now
+        last = review.get("last") or {}
+        if review.get("active"):
+            parts = review.get("participants") or []
+            title = f"Prüfrunde - Bild {review.get('no')}"
+            sub = f"{review.get('done', 0)} von {review.get('total', 0)} fertig"
+            col = WARN
+        elif last and now - last.get("t", 0) < show_done_s and last.get("names"):
+            parts = [{"name": n, "done": True} for n in last["names"]]
+            title = "Alle fertig - weiter!"
+            if not last.get("ok"):
+                sub = f"Bild {last.get('no')}: {last.get('disputed')} Kugel(n) uneinig - Admin entscheidet"
+            elif last.get("agreement", 100) >= 100:
+                sub = f"Bild {last.get('no')}: alle einig"
+            else:
+                sub = f"Bild {last.get('no')}: Mehrheit hat entschieden"
+            col = ACCENT
+        else:
+            return False
+        w = int(rect.w * 0.8)
+        fs = max(18, int(rect.h * 0.075))
+        row = int(fs * 1.25)
+        cols = 2 if len(parts) > 4 else 1
+        rows = (len(parts) + cols - 1) // cols
+        h = int(fs * 1.4 + row * 1.1 + rows * row + fs * 0.9)
+        card = pygame.Rect(0, 0, w, h)
+        card.center = rect.center
+        bg = pygame.Surface(card.size, pygame.SRCALPHA)
+        pygame.draw.rect(bg, (12, 16, 22, 235), bg.get_rect(), border_radius=18)
+        pygame.draw.rect(bg, col, bg.get_rect(), max(3, fs // 8), border_radius=18)
+        surf.blit(bg, card)
+        x0, y = card.x + fs, card.y + int(fs * 0.5)
+        self.text(surf, title, int(fs * 1.25), (x0, y), col, bold=True)
+        y += int(fs * 1.4)
+        self.text(surf, sub, int(fs * 0.8), (x0, y), MUTED)
+        y += int(row * 1.1)
+        colw = (card.w - 2 * fs) // cols
+        for i, ptc in enumerate(parts):
+            cx = x0 + (i // rows) * colw
+            cy = y + (i % rows) * row
+            done = ptc.get("done")
+            mark_r = int(fs * 0.38)
+            mc = (cx + mark_r, cy + fs // 2)
+            if done:
+                pygame.draw.circle(surf, ACCENT, mc, mark_r)
+                pygame.draw.lines(surf, BG, False, [(mc[0] - mark_r * 0.5, mc[1]), (mc[0] - mark_r * 0.1, mc[1] + mark_r * 0.45),
+                                                    (mc[0] + mark_r * 0.55, mc[1] - mark_r * 0.4)], max(2, fs // 10))
+            else:
+                pygame.draw.circle(surf, MUTED, mc, mark_r, max(2, fs // 12))
+            self.text(surf, ptc["name"], fs, (cx + 2 * mark_r + fs // 3, cy), TEXT if done else MUTED, bold=done)
+        return True
 
     # ---------------------------------------------------- Komplettansicht (iPad/Video)
     def render_view(self, scene, size=(1280, 720), show_live_cue=True):

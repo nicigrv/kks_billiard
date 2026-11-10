@@ -112,7 +112,8 @@ nano docker-compose.yml
 | Eintrag | Bedeutung |
 |---|---|
 | `x-web-port: &web_port "8080"` (ganz oben) | Port des Portals. Ist 8080 schon belegt, z. B. `"8090"` |
-| `ADMIN_PIN: ""` | PIN für alle Änderungen im Portal, z. B. `"4711"`. Leer = jeder im WLAN darf bedienen |
+| `x-admin-pin: &admin_pin "1902"` (ganz oben) | PIN fürs Admin-Portal. Leer (`""`) = ohne Anmeldung |
+| `AUDIO_DEVICE` | Lautsprecher für den Ding-Ton, Standard HDMI 0 am Pi 4/5 (`hdmi:CARD=vc4hdmi0,DEV=0`) |
 | `CAM_URL` | Nur die **erste** Vorgabe für die ESP32-CAM. Später im Portal unter „Kamera“ änderbar |
 | `PI_CAMERA: "1"` | Software fürs Pi-Kameramodul mitbauen. Ohne Kameramodul `"0"` = schnellerer Bau |
 
@@ -236,6 +237,10 @@ links die **aktuelle Grafik vom Pi** (wie auf dem Beamer, aktualisiert sich selb
 - **Spiel starten / Neues Rack / Abbrechen**
 - **Letzten erkannten Stoß verwerfen**: wenn das System einen Stoß gezählt hat, der keiner war.
   Der Spielstand springt auf vor diesem Stoß zurück.
+- **Anmeldung:** Das Portal fragt einmal nach dem Admin-PIN (Standard `1902`), danach bleibt das
+  iPad 30 Tage angemeldet. „Abmelden“ im Trainingsmodus.
+- **Prüfrunde (mehrere Prüfer)**: Prüfer anlegen (jeder bekommt einen Code), Bild an alle schicken
+  (siehe 5a)
 - **KI-Training: Kugeln festlegen**: Bilder aufnehmen (nur per Knopf), Kugeln festlegen, alle Bilder
   löschen (siehe 5). Großer **Trainingsmodus** unter `/training`
 - **KI-Modell (Coral)**: Status des KI-Chips, Trainingsdaten / alle Bilder laden, Modell hochladen
@@ -316,6 +321,30 @@ Technik: Googles Coral-Paketquelle gibt es nicht mehr. Der Treiber (`libedgetpu`
 `tflite_runtime` für Python 3.11 kommen von den gepflegten Builds unter github.com/feranick
 (beide gegen TensorFlow 2.17.1, im Dockerfile mit Prüfsummen festgelegt).
 
+## 5a. Prüfrunde: mehrere Prüfer legen dasselbe Bild fest
+
+Damit die Trainingsdaten stimmen, legt jedes Bild mehrere Leute unabhängig voneinander fest.
+
+1. **Prüfer anlegen (Admin):** Portal → „Prüfrunde“ → Name eingeben → „Hinzufügen“. Jeder bekommt
+   einen 4-stelligen **Code** („Neuer Code“ erzeugt einen anderen, „Entfernen“ meldet ab).
+2. **Prüfer anmelden:** Am eigenen iPad `http://<pi-ip>:8080/pruefen` öffnen, Code eingeben.
+   Im Portal leuchtet der Punkt neben dem Namen grün (online).
+3. **Bild an alle Prüfer (Admin):** Der Pi nimmt das aktuelle Kamerabild auf und schickt es an alle
+   angemeldeten Prüfer – mit dem Vorschlag des KI-Chips, falls es schon ein Modell gibt.
+4. **Jeder legt die Kugeln fest** (Kugel antippen → Nummer) und drückt **Speichern**. Auf dem Beamer
+   steht, wer fertig ist (✓) und wer noch arbeitet.
+5. **Alle fertig:** Der Beamer zeigt „Alle fertig – weiter!“ und über HDMI klingt ein **Ding**.
+
+**Zusammenführen:** Eine Kugel zählt, wenn die Mehrheit sie markiert hat; Position = Mittelwert,
+Nummer = Mehrheit. Sind sich alle einig oder entscheidet die Mehrheit, kommt das Bild direkt in die
+Trainingsdaten. Gibt es keine Mehrheit (z. B. bei 2 Prüfern: einer sagt 3, einer 11), landet das Bild
+beim Admin unter den offenen Bildern, die strittigen Kugeln sind mit „?“ markiert.
+Geht jemand weg: „Mit den bisherigen abschließen“ oder „Runde abbrechen“.
+
+**Ding-Ton:** „Ding testen (HDMI)“ im Portal. Kommt nichts: am Beamer Lautstärke prüfen; anderer
+Ausgang über `AUDIO_DEVICE` in `docker-compose.yml` (Liste: `docker compose exec billard aplay -L`,
+für HDMI 1 z. B. `hdmi:CARD=vc4hdmi1,DEV=0`).
+
 ## 6. Tests
 
 Wie gut die Erkennung ist, hängt jetzt vom trainierten Modell ab. Das Portal zeigt die Trefferquote
@@ -326,6 +355,7 @@ Tests selbst laufen lassen (im Ordner `app/`):
 python3 -m sim.test_game          # Regeln + simuliertes Spiel (Kugeln aus dem Simulator)
 python3 -m sim.test_features      # Stoßvorschlag, Gyroskop, Game-Bar, Aufzeichnung
 python3 -m sim.test_coral         # KI-Chip, Bilder aufnehmen/festlegen, Trefferquote
+python3 -m sim.test_review        # Prüfrunden (Mehrheit), Anmeldung, Ding-Ton
 ```
 
 ## 7. Kamera-Firmware aktualisieren
