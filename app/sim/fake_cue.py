@@ -5,7 +5,7 @@ Simulierter Queue (zum Testen ohne Hardware) - verhaelt sich wie die Firmware in
   * antwortet auf die Suche des Pi (UDP 5005, {"suche": "<castcode>"})
   * HTTP-API  GET /api/lage  (Kopfzeile X-Castcode)
 
-    python3 -m sim.fake_cue                         # dann im Portal Castcode SMQ234 eintragen
+    python3 -m sim.fake_cue                         # dann im Admin-Panel Castcode SMQ234 eintragen
 
 Ablauf der Bewegung in Schleife (14 s): Queue schwenkt herum, naehert sich dem Vorschlag
 des Pi (liest /api/state), bleibt ein paar Sekunden auf dem Ziel (gruener Haken),

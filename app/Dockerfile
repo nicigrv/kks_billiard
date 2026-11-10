@@ -1,4 +1,4 @@
-# Billard-System: Kugelerkennung (KI-Chip), Scoreboard (HDMI) + Admin-Portal
+# Billard-System: Kugelerkennung (KI-Chip), Beamer (HDMI), Spiel- und Admin-Panel
 #
 # Schlank fuer den Pi:
 #  - pygame/SDL2 aus Debian (KMS/DRM fuer den Beamer), numpy aus Debian
@@ -36,7 +36,7 @@ RUN if [ "$CORAL" = "1" ] && [ "$(dpkg --print-architecture)" = "arm64" ]; then 
 
 # Pi-Kameramodul (Flachbandkabel): picamera2/libcamera gibt es nur in der Paketquelle von
 # Raspberry Pi. Klappt das nicht (z. B. auf einem PC), wird der Bau trotzdem fertig - dann
-# gehen nur ESP32-CAM, USB-Kamera und Demo. Abschalten: PI_CAMERA=0 in docker-compose.yml.
+# gehen nur USB-Kamera und Demo. Abschalten: PI_CAMERA=0 in docker-compose.yml.
 ARG PI_CAMERA=1
 RUN if [ "$PI_CAMERA" = "1" ]; then ( \
         apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
@@ -50,7 +50,7 @@ RUN if [ "$PI_CAMERA" = "1" ]; then ( \
     fi; rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY *.py *.html ./
+COPY *.py *.html *.js ./
 COPY models/ ./models/
 COPY sim/ ./sim/
 

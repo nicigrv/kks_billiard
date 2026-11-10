@@ -20,7 +20,7 @@ Zusammenfuehren (consensus):
 KI-Abgleich (sobald ein Modell geladen ist):
   * Der KI-Chip macht zu jedem Bild einen Vorschlag. Die Pruefer legen die Kugeln trotzdem
     selbst fest - standardmaessig OHNE den Vorschlag zu sehen (ehrlicher Vergleich;
-    im Portal umschaltbar).
+    im Admin-Panel umschaltbar).
   * Danach wird das Ergebnis der Pruefer mit dem Vorschlag verglichen. Wo die KI falsch lag
     (andere Nummer, Kugel uebersehen, Kugel gesehen, wo keine ist), kommt ein "?" mit Notiz
     ("KI: 3 · Pruefer: 11"). Das Bild geht dann zum Admin, der die "?" bestaetigt.

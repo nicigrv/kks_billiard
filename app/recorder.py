@@ -262,7 +262,7 @@ class Recorder:
                 json.dump(data, f)
 
     def save_verified(self, warped, balls, radius, numbers=None):
-        """Live-Bild, das im Portal korrigiert wurde: direkt als geprueft speichern."""
+        """Live-Bild, das im Admin-Panel korrigiert wurde: direkt als geprueft speichern."""
         numbers = numbers or [None] * len(balls)
         with self.lock:
             os.makedirs(self.ok_img, exist_ok=True)

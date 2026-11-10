@@ -1,15 +1,15 @@
 """
-Billard-System: Kamera -> Kugelerkennung -> 8-Ball-Regeln -> Scoreboard (HDMI) + Admin-Portal.
+Billard-System: Kamera -> Kugelerkennung -> 8-Ball-Regeln -> Beamer (HDMI) + Spiel-/Admin-Panel.
 
-    python3 main.py --url http://192.168.88.200:81/stream
-    python3 main.py --url ... --windowed       # zum Testen im Fenster
-    python3 main.py --url ... --no-display     # nur Portal, keine HDMI-Ausgabe
+    python3 main.py                  # Beamer im Vollbild, Panels auf Port 8080
+    python3 main.py --windowed       # zum Testen im Fenster
+    python3 main.py --no-display     # nur Panels, keine HDMI-Ausgabe
 
 Threads:
-  Kamera     liest die Kamera (ESP32-CAM, USB, Pi-Kamera oder Demo; cameras.py), nur das neueste Bild
+  Kamera     liest die Kamera (Pi-Kameramodul, USB oder Demo; cameras.py), nur das neueste Bild
   Erkennung  verarbeitet jedes neue Bild (pipeline.py)
-  Queue      empfaengt die Lage des Queues vom Gyroskop (cue_sensor.py)
-  Web        Admin-Portal auf Port 8080 (web.py)
+  Queue      fragt die Lage des Queues ab, falls einer gekoppelt ist (cue_sensor.py)
+  Web        Spiel-Panel (/) und Admin-Panel (/admin) auf Port 8080 (web.py)
   Video      baut am Ende einer aufgezeichneten Runde das Video (replay.py)
   Haupt      Anzeige mit pygame (display.py)
 """
@@ -30,8 +30,10 @@ from ballnum import ball_number
 from coral_detector import CoralDetector, CoralEngine
 from cue_sensor import AlignChecker, CueSensor, clean_castcode
 from geometry import Table, TABLE_SIZES
+from notices import Notices
 from pipeline import Pipeline
 from planner import plan_shot
+from qr import MAX_LEN as QR_MAX_LEN, qr_matrix, qr_png
 from recorder import Recorder
 from replay import RoundRecorder
 from review_rounds import RoundManager
@@ -46,7 +48,7 @@ KIND_BGR = {"cue": (255, 255, 255), "eight": (130, 130, 130), "solid": (0, 190, 
 
 
 def host_ip():
-    """IP des Pi im Heimnetz (fuer die Anzeige 'Admin: http://...')."""
+    """IP des Pi im Heimnetz (fuer den QR-Code zum Spiel-Panel)."""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("10.255.255.255", 1))
@@ -58,9 +60,9 @@ def host_ip():
 
 
 class App:
-    def __init__(self, url, cue_port=5005, coral_engine=None):
+    def __init__(self, cue_port=5005, coral_engine=None):
         self.cfg = config.load()
-        self._migrate_config(url)
+        self._migrate_config()
         self.reader = make_reader(self.cfg["camera"], config.DATA_DIR).start()
         self.recorder = Recorder(os.path.join(config.DATA_DIR, "dataset"))
         self.coral = coral_engine or CoralEngine()          # Kugelerkennung nur ueber den KI-Chip
@@ -68,13 +70,17 @@ class App:
         self.pipe = Pipeline(table, lambda r: CoralDetector(r, self.coral), recorder=self.recorder)
         self.cue = CueSensor(self.cfg.get("cue_castcode", ""), self.cfg.get("cue_offset", 0.0),
                              self.cfg.get("cue_flip", False), discovery_port=cue_port,
-                             address=self.cfg.get("cue_address"), on_found=self._cue_found).start()
+                             address=self.cfg.get("cue_address"), on_found=self._cue_found,
+                             enabled=self.cfg.get("cue_enabled", True)).start()
         self.align = AlignChecker(self.cfg.get("cue_tolerance", 2.0))
         self.rounds = RoundRecorder(os.path.join(config.DATA_DIR, "recordings"))
         self.sound = Sound()                                  # Ding ueber HDMI
         self.reviews = RoundManager(self.recorder, config.DATA_DIR, self.sound)   # Pruefrunden
         self.auth = None                                      # setzt web.start()
-        self.admin_url = ""
+        self.panel_url = ""                                   # Adresse des Spiel-Panels (QR-Code)
+        self.notes = Notices()                                # Meldungen oben rechts
+        self._edges = {}
+        self._disk = (0.0, True)
         self.proc_fps = 0.0
         # Grafik-Zustand
         self.scene_lock = threading.RLock()
@@ -92,18 +98,22 @@ class App:
         threading.Thread(target=self._process_loop, name="erkennung", daemon=True).start()
 
     # ---------------------------------------------------------------- Kamera
-    def _migrate_config(self, url):
-        """Aeltere config.json: eine Kamera, Ecken direkt in 'corners'."""
+    def _migrate_config(self):
+        """Fehlende Werte ergaenzen. Die ESP32-CAM gibt es nicht mehr -> Pi-Kameramodul."""
         cam = self.cfg.get("camera") or {}
-        cam.setdefault("source", "esp32")
-        cam.setdefault("url", url)
+        if cam.get("source") not in SOURCES:
+            cam["source"] = "picam"
+        cam.pop("url", None)
         cam.setdefault("device", "/dev/video0")
         cam.setdefault("demo_url", os.environ.get("DEMO_IMAGE_URL", ""))
         self.cfg["camera"] = cam
+        self.cfg.pop("corners", None)
         by = self.cfg.get("corners_by_source") or {}
-        if self.cfg.get("corners") and "esp32" not in by:
-            by["esp32"] = self.cfg["corners"]
+        by.pop("esp32", None)
         self.cfg["corners_by_source"] = by
+        qr = dict(config.DEFAULTS["qr"])
+        qr.update(self.cfg.get("qr") or {})
+        self.cfg["qr"] = qr
 
     def _table_for(self, reader):
         """Tisch-Ecken der aktiven Kameraquelle (die Demo bringt ihre eigenen mit)."""
@@ -116,11 +126,6 @@ class App:
         if src not in SOURCES:
             raise ValueError("Kameraquelle")
         cam["source"] = src
-        if "url" in p:
-            url = str(p["url"]).strip()
-            if src == "esp32" and not url.startswith("http"):
-                raise config.UserError("Adresse der ESP32-CAM muss mit http beginnen")
-            cam["url"] = url or cam["url"]
         if "device" in p:
             dev = str(p["device"]).strip() or "/dev/video0"
             if not (dev.isdigit() or dev.startswith("/dev/video")):
@@ -202,11 +207,13 @@ class App:
             game = self.pipe.game.to_dict()
             radius = self.pipe.table.ball_radius_px
             status = self.pipe.status_text()
+        if self.pipe.detector is None or self.pipe.not_ready:
+            status = ""                 # steht als Meldung oben rechts
         with self.scene_lock:
             sug = self.suggestion
             seen = set(self.seen_numbers)
             cue = None
-            if live and self.cfg.get("assist"):
+            if live and self.cfg.get("assist") and self.cue.enabled and self.cue.castcode:
                 angle = self.cue.table_angle()
                 target = sug.get("angle") if sug else None
                 ok = self.align.update(angle, target)
@@ -216,13 +223,71 @@ class App:
             sb.append({"x": float(b.x), "y": float(b.y), "kind": b.kind, "color": b.color,
                        "number": ball_number(b.kind, b.color)})
         visible = {d["number"] for d in sb} - {None, 0}
-        info = f"Kamera {self.reader.fps:4.1f} fps"
-        if self.admin_url:
-            info = f"Admin: {self.admin_url}   " + info
+        info = f"Kamera {self.reader.fps:4.1f} fps" if self.reader.connected else ""
         return {"balls": sb, "radius": radius, "cloth": self.cfg.get("cloth", "blau"),
                 "game": game, "bar": bar_balls(game, visible, seen),
                 "suggestion": sug, "cue": cue, "status": status, "info": info, "version": self.scene_version,
-                "review": self.reviews.status() if live else None}
+                "review": self.reviews.status() if live else None,
+                "qr": self.qr_info() if live else None,
+                "notices": self.notices() if live else []}
+
+    # ------------------------------------------------------- QR-Code, Meldungen
+    def qr_text(self):
+        q = self.cfg.get("qr") or {}
+        return (q.get("text") or "").strip() or self.panel_url
+
+    def qr_info(self):
+        """QR-Code fuer die Beamer-Ecke (unten rechts) oder None."""
+        q = self.cfg.get("qr") or {}
+        text = self.qr_text()
+        if not q.get("enabled", True) or not text:
+            return None
+        m = qr_matrix(text)
+        return None if m is None else {"text": text, "matrix": m, "label": q.get("label", "")}
+
+    def _edge(self, key, ok, title, body=""):
+        """Kurze Erfolgsmeldung, wenn etwas, das vorher nicht ging, wieder geht."""
+        was = self._edges.get(key)
+        self._edges[key] = ok
+        if ok and was is False:
+            self.notes.push(title, body, "success", ttl=5.0, key=key)
+
+    def notices(self):
+        """Meldungen oben rechts (Beamer und Panels): was gerade nicht stimmt + Ereignisse."""
+        probs = []
+        r = self.reader
+        cam_ok = bool(r.connected)
+        if not cam_ok:
+            probs.append(("kamera", "error", "Keine Kamerabilder",
+                          r.last_error or "Warte auf die Kamera ...", 3.0))
+        self._edge("kamera", cam_ok, "Kamera verbunden", SOURCE_NAMES.get(self.cfg["camera"]["source"], ""))
+        with self.pipe.lock:
+            calibrated = self.pipe.detector is not None
+            not_ready = self.pipe.not_ready
+        if cam_ok and not calibrated:
+            probs.append(("tisch", "warning", "Tisch nicht eingerichtet",
+                          "Im Admin-Panel unter „Tisch einrichten“ die vier Ecken antippen.", 1.0))
+        if calibrated:
+            if not_ready:
+                probs.append(("ki", "error", "KI-Chip nicht bereit", not_ready, 2.0))
+            self._edge("ki", not not_ready, "KI-Chip bereit", "Kugelerkennung läuft")
+        c = self.cue
+        if self.cfg.get("assist") and c.enabled and c.castcode:
+            if not c.connected:
+                why = "Castcode passt nicht zum Queue." if c.last_error.startswith("Castcode") else \
+                    "Der Pi sucht ihn im WLAN – ist er eingeschaltet?"
+                probs.append(("queue", "warning", "Queue nicht verbunden", why, 5.0))
+            self._edge("queue", c.connected, "Queue verbunden", f"Castcode {c.castcode}")
+        t, ok = self._disk
+        if time.monotonic() - t > 30:
+            ok = self.recorder.disk_ok()
+            self._disk = (time.monotonic(), ok)
+        if not ok:
+            probs.append(("speicher", "warning", "Speicher fast voll",
+                          "Es werden keine Trainingsbilder mehr aufgenommen.", 0.0))
+        if self.rounds.status().get("error"):
+            probs.append(("video", "warning", "Spielaufzeichnung", self.rounds.status()["error"], 0.0))
+        return self.notes.current(probs)
 
     def graphic_jpeg(self, size=(1280, 720)):
         """Grafische Ansicht fuer das iPad. Nur neu zeichnen, wenn sich etwas geaendert hat."""
@@ -369,7 +434,8 @@ class App:
         return list(self.cfg.get("reviewers") or [])
 
     def _new_code(self):
-        used = {str(r["code"]) for r in self.reviewer_list()} | {os.environ.get("ADMIN_PIN", "")}
+        used = {str(r["code"]) for r in self.reviewer_list()} | {os.environ.get("ADMIN_PIN", ""),
+                                                                 os.environ.get("GAME_PIN", "")}
         while True:
             code = f"{secrets.randbelow(9000) + 1000}"
             if code not in used:
@@ -445,6 +511,8 @@ class App:
             "scene_version": self.scene_version,
             "cue": dict(self.cue.status(), tolerance=self.align.tolerance,
                         ok=self.align.ok, err=None if self.align.err is None else round(self.align.err, 1)),
+            "qr": dict(self.cfg.get("qr") or {}, url=self.qr_text(), panel_url=self.panel_url),
+            "notices": self.notices(),
             "round": self.rounds.status(),
             "videos": self.rounds.videos(),
             "reviewers": [dict(r, online=r["name"] in online) for r in self.reviewer_list()],
@@ -452,6 +520,32 @@ class App:
             "review_show_ai": bool(self.cfg.get("review_show_ai", False)),
             "sound": {"device": self.sound.device, "error": self.sound.error},
         }
+
+    def game_state(self):
+        """Was das Spiel-Panel braucht - ohne Pruefer-Codes und Admin-Einstellungen."""
+        with self.pipe.lock:
+            g = self.pipe.game.to_dict()
+            status = self.pipe.status_text()
+            if self.pipe.detector is None or self.pipe.not_ready:
+                status = ""             # steht als Meldung oben rechts
+        c = self.cue.status()
+        return {
+            "game": g,
+            "status": status,
+            "camera_fps": round(self.reader.fps, 1),
+            "assist": bool(self.cfg.get("assist")),
+            "suggestion": (self.suggestion or {}).get("text"),
+            "scene_version": self.scene_version,
+            "cue": {"paired": bool(c["castcode"]), "enabled": c["enabled"], "connected": c["connected"],
+                    "state": c["state"], "angle": c["angle"], "battery": c["battery"],
+                    "ok": self.align.ok, "err": None if self.align.err is None else round(self.align.err, 1)},
+            "round": self.rounds.status(),
+            "videos": self.rounds.videos(),
+            "notices": self.notices(),
+        }
+
+    def qr_preview(self):
+        return qr_png(self.qr_text())
 
     def jpeg(self, kind):
         frame, _, _ = self.reader.latest()
@@ -528,6 +622,30 @@ class App:
             self.cfg["assist"] = bool(p.get("enabled"))
             config.save(self.cfg)
             return "Schlagverbesserung an" if self.cfg["assist"] else "Schlagverbesserung aus"
+        if name == "cue_use":
+            on = bool(p.get("enabled"))
+            self.cfg["cue_enabled"] = on
+            config.save(self.cfg)
+            self.cue.set_enabled(on)
+            if on and not self.cue.castcode:
+                return "Queue an - im Admin-Panel muss noch ein Castcode eingetragen werden"
+            return "Queue an - der Pi sucht ihn im WLAN" if on else "Queue aus"
+        if name == "qr_settings":
+            q = dict(self.cfg.get("qr") or {})
+            if "enabled" in p:
+                q["enabled"] = bool(p["enabled"])
+            if "text" in p:
+                text = str(p["text"]).strip()
+                if len(text) > QR_MAX_LEN:
+                    raise config.UserError(f"QR-Code: höchstens {QR_MAX_LEN} Zeichen")
+                if text and qr_matrix(text) is None:
+                    raise config.UserError("Daraus lässt sich kein QR-Code machen")
+                q["text"] = text
+            if "label" in p:
+                q["label"] = str(p["label"]).strip()[:24]
+            self.cfg["qr"] = q
+            config.save(self.cfg)
+            return ("QR-Code gespeichert: " + self.qr_text()) if q.get("enabled") else "QR-Code ausgeblendet"
         if name == "cue_pair":
             code = clean_castcode(p.get("castcode"))
             self.cfg.update(cue_castcode=code, cue_address=None)
@@ -620,21 +738,21 @@ class App:
 
 def main():
     ap = argparse.ArgumentParser(description="Billard-Scoreboard")
-    ap.add_argument("--url", default=os.environ.get("CAM_URL", "http://192.168.88.200:81/stream"))
     ap.add_argument("--port", type=int, default=int(os.environ.get("WEB_PORT", "8080")))
     ap.add_argument("--cue-port", type=int, default=int(os.environ.get("CUE_PORT", "5005")))
     ap.add_argument("--windowed", action="store_true")
     ap.add_argument("--no-display", action="store_true")
     args = ap.parse_args()
 
-    app = App(args.url, args.cue_port)
+    app = App(args.cue_port)
     web.start(app, args.port)
     ip = host_ip()
-    admin_url = f"http://{ip}:{args.port}" if ip else ""
-    app.admin_url = admin_url
+    base = f"http://{ip}:{args.port}" if ip else ""
+    app.panel_url = base + "/" if base else ""
     cam = app.cfg["camera"]
-    print(f"[start] Kamera {SOURCE_NAMES[cam['source']]} ({app.reader.info or cam.get('url')}), "
-          f"Admin {admin_url or '(IP unbekannt)'}", flush=True)
+    print(f"[start] Kamera {SOURCE_NAMES[cam['source']]} ({app.reader.info or '-'}), "
+          f"Spiel-Panel {app.panel_url or '(IP unbekannt)'}  Admin-Panel {base + '/admin' if base else '-'}",
+          flush=True)
 
     if args.no_display:
         try:

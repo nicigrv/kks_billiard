@@ -1,5 +1,6 @@
 """Einstellungen dauerhaft in /data/config.json (Docker-Volume), ueberleben Neustarts."""
 
+import copy
 import json
 import os
 import threading
@@ -8,15 +9,17 @@ DATA_DIR = os.environ.get("DATA_DIR", "/data")
 PATH = os.path.join(DATA_DIR, "config.json")
 
 DEFAULTS = {
-    "camera": None,             # Kameraquelle (esp32 | usb | picam | demo), siehe cameras.py
+    "camera": None,             # Kameraquelle (picam | usb | demo), siehe cameras.py
     "corners_by_source": None,  # 4 Ecken der Spielflaeche je Kameraquelle
-    "corners": None,            # alt (vor mehreren Kameraquellen), wird uebernommen
     "table_size": "8ft",
     "cloth": "blau",            # Tuchfarbe fuer die Grafik (blau | gruen)
     "assist": False,            # KI-Schlagverbesserung (Stossvorschlag + Queue-Lage)
     "cue_offset": 0.0,          # Gyroskop: Rohwinkel, wenn der Queue an der Bande liegt
     "cue_flip": False,          # Gyroskop: Drehrichtung umkehren
     "cue_tolerance": 2.0,       # Gyroskop: ab dieser Abweichung (Grad) gibt es den gruenen Haken
+    "cue_enabled": True,        # Queue mit Gyroskop benutzen (optional, im Spiel-Panel schaltbar)
+    # QR-Code unten rechts auf dem Beamer. Leerer Text = Adresse des Spiel-Panels.
+    "qr": {"enabled": True, "text": "", "label": "Spiel-Panel"},
 }
 
 _lock = threading.Lock()
@@ -27,7 +30,7 @@ class UserError(ValueError):
 
 
 def load():
-    cfg = dict(DEFAULTS)
+    cfg = copy.deepcopy(DEFAULTS)
     try:
         with open(PATH) as f:
             cfg.update(json.load(f))

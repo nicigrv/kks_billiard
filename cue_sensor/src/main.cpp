@@ -9,7 +9,7 @@
  *      Hotspot "Billard-Queue-XXXX". Mit dem Handy verbinden - die Einrichtungsseite oeffnet
  *      sich von selbst (sonst http://192.168.4.1).
  *   2. WLAN waehlen, Passwort eingeben, "Weiter".
- *   3. Der Queue zeigt seinen CASTCODE (6 Zeichen). Diesen im Admin-Portal des Pi unter
+ *   3. Der Queue zeigt seinen CASTCODE (6 Zeichen). Diesen im Admin-Panel des Pi unter
  *      "Queue mit Gyroskop" eintragen.
  *   4. Haken setzen "Castcode ist eingetragen" -> "Verbinden": der Queue verbindet sich mit dem WLAN.
  *   Neu einrichten: Queue beim Einschalten SENKRECHT halten (Spitze nach oben) oder auf
@@ -243,10 +243,10 @@ static void portalWlan() {
   if (p.length() && p.length() < 8) { sendPage("<p class=bad>WLAN-Passwoerter haben mindestens 8 Zeichen.</p><p><a href='/'>Zurueck</a></p>"); return; }
   pendingSsid = s;
   pendingPass = p;
-  String h = "<h1>Castcode</h1><p>Diesen Code im <b>Admin-Portal</b> des Billard-Systems unter "
+  String h = "<h1>Castcode</h1><p>Diesen Code im <b>Admin-Panel</b> des Billard-Systems unter "
              "<b>„Queue mit Gyroskop“</b> eintragen:</p><div class=code>" + castcode + "</div>"
              "<form method=post action='/verbinden'><label class=chk><input type=checkbox name=ok id=ok "
-             "onchange=\"document.getElementById('b').disabled=!this.checked\"> Castcode ist im Admin-Portal eingetragen</label>"
+             "onchange=\"document.getElementById('b').disabled=!this.checked\"> Castcode ist im Admin-Panel eingetragen</label>"
              "<button id=b disabled>Mit „" + esc(s) + "“ verbinden</button></form>"
              "<p><a href='/'>WLAN aendern</a></p>";
   sendPage(h);
@@ -263,7 +263,7 @@ static void portalConnect() {
   saveWifi(ssid, pass);
   sendPage("<h1>Verbinde ...</h1><p>Der Queue verbindet sich jetzt mit <b>" + esc(ssid) + "</b>. "
            "Dieser Hotspot verschwindet; das Handy wieder mit dem normalen WLAN verbinden.</p>"
-           "<p>Im Admin-Portal steht gleich <b>Queue verbunden</b>.</p>"
+           "<p>Im Admin-Panel steht gleich <b>Queue verbunden</b>.</p>"
            "<p>Klappt die Verbindung nicht, erscheint nach ca. 30 s wieder der Hotspot.</p>");
   restartAt = millis() + 1500;
 }

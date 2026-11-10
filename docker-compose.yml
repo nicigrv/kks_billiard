@@ -2,20 +2,20 @@
 #
 # Starten (im Ordner ~/billard):   docker compose up -d --build
 # Logs:                             docker logs -f billard
-# Admin-Portal:                     http://<pi-ip>:8080        (Port: x-web-port unten)
+# Spiel-Panel (PIN unten):          http://<pi-ip>:8080            (Port: x-web-port unten)
+# Admin-Panel (PIN unten):          http://<pi-ip>:8080/admin
 # Beamerbild im Browser:            http://<pi-ip>:8080/beamer
 #
 # Einmalige Werkzeuge (laufen nur auf Befehl):
 #   docker compose exec billard python3 coral_check.py   KI-Chip (Coral-Stick) testen
-#                                                       Coral-Stick testen
-#   docker compose --profile sim up -d fake-table       simulierte Kamera (Test ohne Tisch)
-#   docker compose --profile sim up -d fake-cue         simuliertes Queue-Gyroskop
-#   docker compose run --rm updater                     Kamera-Firmware aktualisieren
+#   docker compose --profile sim up -d fake-cue         simulierter Queue (Castcode SMQ234)
 
-# Port des Admin-Portals (und der Beamer-Ansicht /beamer). Nur hier aendern, z. B. "8090".
+# Port der Panels (und der Beamer-Ansicht /beamer). Nur hier aendern, z. B. "8090".
 x-web-port: &web_port "8080"
-# PIN fuer das Admin-Portal. Pruefer bekommen eigene Codes (im Portal unter "Pruefrunde").
+# PIN fuer das Admin-Panel (/admin). Pruefer bekommen eigene Codes (im Admin-Panel unter "Pruefrunde").
 x-admin-pin: &admin_pin "1902"
+# PIN fuer das Spiel-Panel (Startseite): Spiel starten, Korrekturen, Schlagverbesserung, Queue an/aus.
+x-game-pin: &game_pin "1212"
 
 services:
   billard:
@@ -27,22 +27,22 @@ services:
     image: billard-app:latest
     container_name: billard
     restart: unless-stopped
-    # Host-Netzwerk: Portal direkt unter der IP des Pi, Pi-IP wird auf dem Beamer angezeigt
+    # Host-Netzwerk: Panels direkt unter der IP des Pi, Queue-Suche per UDP-Broadcast
     network_mode: host
     environment:
-      CAM_URL: http://192.168.88.200:81/stream    # <- IP der Kamera anpassen
-      ADMIN_PIN: *admin_pin                        # PIN: ganz oben bei x-admin-pin einstellen
-      AUDIO_DEVICE: "hdmi:CARD=vc4hdmi0,DEV=0"     # Ding-Ton: HDMI 0 am Pi 4/5 (Liste: aplay -L)
+      ADMIN_PIN: *admin_pin                        # PINs: ganz oben bei x-admin-pin / x-game-pin einstellen
+      GAME_PIN: *game_pin
       WEB_PORT: *web_port                          # Port: ganz oben bei x-web-port einstellen
+      AUDIO_DEVICE: "hdmi:CARD=vc4hdmi0,DEV=0"     # Ding-Ton: HDMI 0 am Pi 4/5 (Liste: aplay -L)
       # Demo-Modus: Foto eines Pooltisches von oben (JPEG/PNG). Leer = simuliertes Spiel.
-      # Gilt nur als Vorgabe, im Portal unter "Kamera" aenderbar.
+      # Gilt nur als Vorgabe, im Admin-Panel unter "Kamera" aenderbar.
       DEMO_IMAGE_URL: ""
       CUE_PORT: "5005"                             # UDP-Port, ueber den der Pi den Queue (Castcode) sucht
-    # Zugriff auf HDMI-Ausgabe (/dev/dri), USB-Kamera (/dev/video*) und Pi-Kameramodul
-    # (/dev/media*, /dev/dma_heap). Einfachste sichere Variante fuer ein Geraet im Heimnetz.
+    # Zugriff auf HDMI-Ausgabe (/dev/dri), Pi-Kameramodul (/dev/media*, /dev/dma_heap) und
+    # USB-Kamera (/dev/video*). Einfachste sichere Variante fuer ein Geraet im Heimnetz.
     privileged: true
     volumes:
-      - ./data:/data                               # Kalibrierung, Trainingsbilder, Videos
+      - ./data:/data                               # Einstellungen, Kalibrierung, Trainingsbilder, Videos
       - /run/udev:/run/udev:ro                     # Pi-Kameramodul (libcamera findet die Kamera)
       # KI-Chip: der Coral meldet sich nach dem ersten Laden mit neuer USB-Kennung neu an,
       # deshalb den ganzen USB-Bus durchreichen
@@ -59,21 +59,3 @@ services:
     environment:
       WEB_PORT: *web_port
       ADMIN_PIN: *admin_pin
-
-  fake-table:
-    image: billard-app:latest
-    profiles: ["sim"]
-    network_mode: host
-    command: ["python3", "-m", "sim.fake_table"]
-
-  updater:
-    build: ./tools
-    image: billard-updater:latest
-    profiles: ["tools"]
-    network_mode: host
-    environment:
-      CAM_HOST: 192.168.88.200                     # <- IP der Kamera
-    volumes:
-      - ./firmware:/firmware:ro
-    stdin_open: true
-    tty: true

@@ -97,7 +97,7 @@ class Pipeline:
     def status_text(self):
         """Kurzer Systemzustand fuer Anzeige und Portal."""
         if self.detector is None:
-            return "Tisch nicht kalibriert - Admin-Portal oeffnen"
+            return "Tisch nicht kalibriert - Admin-Panel oeffnen"
         if self.not_ready:
             return f"KI-Chip nicht bereit: {self.not_ready}"
         if self.occluded:

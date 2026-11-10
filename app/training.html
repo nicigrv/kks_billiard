@@ -67,11 +67,6 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
 .save button:not(.big) { padding: 8px 6px; font-size: 15px; }
 .save .big2 { grid-column: span 3; }
 
-.toast { position: fixed; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translate(-50%, 160%);
-  transition: transform .2s; background: var(--ink); color: #0A2F25; font-weight: 700; padding: 10px 16px;
-  border-radius: 10px; max-width: calc(100% - 32px); z-index: 5; }
-.toast.show { transform: translate(-50%, 0); }
-.toast.err { background: var(--foul); color: var(--ink); }
 /* Anmeldung (Admin-PIN bzw. Pruefer-Code) */
 .login { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center;
   background: rgba(5, 12, 9, .92); padding: 16px; }
@@ -99,7 +94,6 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
   .chips { grid-template-columns: repeat(8, 1fr); }
   .chip.wide { grid-column: span 8; }
 }
-@media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
 </style>
 </head>
 <body>
@@ -111,7 +105,7 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
     <button class="primary" type="button" id="roundBtn" data-admin>An alle Prüfer</button>
     <button class="quiet" type="button" id="captureBtn" data-admin>Bild aufnehmen</button>
     <button class="danger" type="button" id="deleteAllBtn" data-admin>Alle löschen</button>
-    <a class="btn quiet" href="/" id="portalLink" data-admin>Portal</a>
+    <a class="btn quiet" href="/admin" id="portalLink" data-admin>Admin</a>
     <button class="quiet" type="button" id="logoutBtn">Abmelden</button>
   </div>
 </header>
@@ -151,8 +145,7 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
     </div>
   </aside>
 </main>
-<div class="toast" id="toast" role="status"></div>
-
+<script src="/notify.js"></script>
 <script>
 (function () {
   "use strict";
@@ -169,13 +162,7 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
   let round = null;              // aktuelle Pruefrunde (nur Pruefer)
   let item = null, selected = -1, history = [];
 
-  function toast(text, err) {
-    const t = $("toast");
-    t.textContent = text;
-    t.className = "toast show" + (err ? " err" : "");
-    clearTimeout(toast.t);
-    toast.t = setTimeout(() => { t.className = "toast"; }, 2600);
-  }
+  function toast(text, err) { Notify.show(text, "", err ? "error" : "success"); }
 
   async function post(name, payload) {
     try {
@@ -206,8 +193,9 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
         body: JSON.stringify({ secret: $("loginInput").value.trim() }) });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) { showLogin(data.error || "Anmeldung fehlgeschlagen"); return; }
-      if (PRUEFER && data.role !== "pruefer") { showLogin("Das ist der Admin-PIN - Admins nehmen /training"); return; }
-      if (!PRUEFER && data.role !== "admin") { showLogin("Das ist ein Prüfer-Code - Prüfer nehmen /pruefen"); return; }
+      if (PRUEFER && data.role !== "pruefer") { showLogin("Das ist kein Prüfer-Code. Bitte euren Code vom Admin eingeben."); return; }
+      if (!PRUEFER && data.role === "pruefer") { showLogin("Das ist ein Prüfer-Code - Prüfer nehmen /pruefen"); return; }
+      if (!PRUEFER && data.role !== "admin") { showLogin("Hier braucht es die Admin-PIN."); return; }
       $("login").hidden = true;
       me = { role: data.role, name: data.name, pin_required: true };
       start();

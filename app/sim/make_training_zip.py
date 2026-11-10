@@ -1,6 +1,6 @@
 """
 Erzeugt Trainingsdaten aus dem Simulator - im selben Format wie "Trainingsdaten laden"
-im Admin-Portal. Nur zum Testen der Trainingskette (training/train_coral.py)!
+im Admin-Panel. Nur zum Testen der Trainingskette (training/train_coral.py)!
 Ein Modell nur aus Simulator-Bildern erkennt echte Kugeln schlecht.
 
     python3 -m sim.make_training_zip 200 sim-training.zip
@@ -24,7 +24,7 @@ def main(n=200, path="sim-training.zip", seed=7):
     table = Table(DEFAULT_CORNERS, L)
     r = table.ball_radius_px
     with zipfile.ZipFile(path, "w") as z:
-        # Klasse = Kugelnummer (0 = Weisse, 8 = schwarze 8), wie im Admin-Portal-Export
+        # Klasse = Kugelnummer (0 = Weisse, 8 = schwarze 8), wie im Admin-Panel-Export
         z.writestr("classes.txt", "\n".join(str(n) for n in range(16)) + "\n")
         for i in range(n):
             if i % 10 == 0:

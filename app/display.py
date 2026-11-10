@@ -6,10 +6,12 @@ Anzeige auf dem HDMI-Ausgang (Beamer/Bildschirm). Laeuft im Hauptthread (pygame 
     |  Kreisen um die Kugeln    |  Tisch, neu nach jedem    |
     |                           |  Stoss, Queue-Vorschlag   |
     +---------------------------+---------------------------+
-    |  Game-Bar: Teams, Frames, Punkte, alle 15 Kugeln      |
-    +-------------------------------------------------------+
+    |  Game-Bar: Teams, Frames, Punkte, alle 15 Kugeln | QR  |
+    +-------------------------------------------------+-----+
 
-Liegt der Queue richtig (Gyroskop), erscheint ein grosser gruener Haken.
+Oben rechts erscheinen Meldungen (Fehler, Hinweise) wie bei iPhone/Mac, unten rechts der
+QR-Code (im Admin-Panel einstellbar). Liegt der Queue richtig (Gyroskop), erscheint ein
+grosser gruener Haken.
 Dasselbe Bild gibt es im Browser unter http://<pi>:<port>/beamer (draw_beamer).
 """
 
@@ -20,7 +22,7 @@ import cv2
 import pygame
 
 from geometry import WARP_W
-from scene import ACCENT, BG, RENDER_LOCK, TEXT, WARN, SceneRenderer, wrap
+from scene import ACCENT, BG, MUTED, RENDER_LOCK, TEXT, SceneRenderer
 
 KIND_COLORS = {
     "cue": (255, 255, 255),
@@ -96,7 +98,11 @@ def draw_beamer(surf, renderer, cam_cache, frame, frame_id, pipeline, reader, sc
 
     _draw_camera(surf, renderer, cam_cache, pygame.Rect(0, 0, half, top_h), frame, frame_id, pipeline, reader)
     renderer.draw_side(surf, pygame.Rect(half, 0, sw - half, top_h), scene)
-    renderer.draw_bar(surf, pygame.Rect(0, top_h, sw, bar_h), scene)
+    qr = scene.get("qr")
+    qr_w = bar_h if qr else 0
+    renderer.draw_bar(surf, pygame.Rect(0, top_h, sw - qr_w, bar_h), scene)
+    if qr:
+        renderer.draw_qr(surf, pygame.Rect(sw - qr_w, top_h, qr_w, bar_h), qr)
     pygame.draw.line(surf, (40, 50, 64), (half, 0), (half, top_h), 2)
 
     cue = scene.get("cue") or {}
@@ -104,17 +110,14 @@ def draw_beamer(surf, renderer, cam_cache, frame, frame_id, pipeline, reader, sc
         renderer.draw_check(surf, pygame.Rect(0, 0, sw, top_h))
     # Pruefrunde (mehrere Pruefer legen dasselbe Bild fest): Stand ueber der Tischgrafik
     renderer.draw_review(surf, pygame.Rect(half, 0, sw - half, top_h), scene.get("review"))
+    renderer.draw_notices(surf, scene.get("notices"))
 
 
 def _draw_camera(surf, renderer, cache, rect, frame, frame_id, pipeline, reader):
     """Linke Haelfte: Live-Kamerabild mit Kreisen um die erkannten Kugeln."""
-    if frame is None:
-        msg = "Warte auf Kamera ..."
-        if reader.last_error:
-            msg += f" ({reader.last_error})"
+    if frame is None:                  # Grund steht als Meldung oben rechts
         fs = max(20, rect.h // 18)
-        for i, line in enumerate(wrap(renderer.font(fs), msg, rect.w - 60)):
-            renderer.text(surf, line, fs, (rect.x + 30, rect.centery - fs + i * fs), WARN)
+        renderer.text(surf, "Warte auf Kamera …", fs, rect.center, MUTED, anchor="center")
         return
     fh, fw = frame.shape[:2]
     ox, oy, w, h, scale = fit_rect(fw, fh, rect.w, rect.h)

@@ -3,6 +3,18 @@
 ESP32 + MPU6050 im Queue-Ende. Der Pi fragt darüber die **Richtung des Queues** ab und zeigt
 auf dem Beamer den hellen Queue (echte Lage) neben dem dunklen (optimale Lage) und den grünen Haken.
 
+**Optional:** Ohne Queue läuft alles andere genauso. Ist einer gekoppelt, lässt er sich im
+Spiel-Panel mit dem Schalter „Queue mit Gyroskop“ ein- und ausschalten (aus = der Pi sucht und fragt nichts ab).
+
+So reden Pi und Queue miteinander (alles im WLAN, erkannt am **Castcode**):
+
+| Wer | Was |
+|---|---|
+| Pi → alle | UDP-Broadcast an Port 5005: `{"suche": "K7P2QM"}` |
+| Queue → Pi | nur der Queue mit diesem Castcode antwortet: `{"castcode": "K7P2QM", "ip": "192.168.88.57", "port": 80}` |
+| Pi → Queue | ca. 25× pro Sekunde `GET http://<queue>/api/lage` mit Kopfzeile `X-Castcode: K7P2QM` |
+| Queue → Pi | `{"castcode": "K7P2QM", "seq": 123, "yaw": 37.5, "pitch": -4.2, "still": 0, "bat": 3.91}` (falscher Castcode: 403) |
+
 ## Teile
 - Seeed XIAO ESP32-C3 (klein, passt in ein ausgebohrtes Queue-Ende) oder ein anderes ESP32-Board
 - MPU6050-Modul (GY-521)
@@ -21,11 +33,11 @@ die Einrichtung läuft übers Handy.
 2. Ohne gespeichertes WLAN öffnet der Queue den Hotspot **„Billard-Queue-XXXX“**. Mit dem Handy
    verbinden – die Einrichtungsseite öffnet sich von selbst (sonst `http://192.168.4.1`).
 3. **WLAN wählen**, Passwort eingeben, „Weiter“.
-4. Der Queue zeigt seinen **Castcode** (6 Zeichen, z. B. `K7P2QM`). Im **Admin-Portal** des Pi unter
+4. Der Queue zeigt seinen **Castcode** (6 Zeichen, z. B. `K7P2QM`). Im **Admin-Panel** des Pi unter
    „KI-Schlagverbesserung → Queue mit Gyroskop“ eintragen → „Koppeln“.
-5. Auf dem Handy den **Haken** „Castcode ist im Admin-Portal eingetragen“ setzen → „Verbinden“.
+5. Auf dem Handy den **Haken** „Castcode ist im Admin-Panel eingetragen“ setzen → „Verbinden“.
    Der Queue verbindet sich mit dem WLAN, der Hotspot verschwindet.
-6. Im Portal steht nach wenigen Sekunden **„Queue: verbunden“**. Dann einmal kalibrieren: Queue flach
+6. Im Admin-Panel steht nach wenigen Sekunden **„Queue: verbunden“**. Dann einmal kalibrieren: Queue flach
    an die lange Bande legen, Spitze zeigt in der Grafik nach rechts → „Queue kalibrieren“.
 
 Der Castcode bleibt für immer gleich (auch nach Neustart oder WLAN-Wechsel). Bekommt der Queue eine
@@ -49,4 +61,4 @@ Ist das gespeicherte WLAN nicht erreichbar, öffnet er den Hotspot ebenfalls (un
   Weiße gezeichnet; verglichen wird nur der **Winkel**.
 - Ohne Magnetometer driftet der Winkel langsam (typisch unter 1° pro Minute). Liegt der Queue ruhig,
   wird nachgeführt. Wird die Abweichung sichtbar: kurz neu kalibrieren.
-- Ohne Hardware testen: `python3 -m sim.fake_cue` (im Ordner `app/`), Castcode `SMQ234` im Portal eintragen.
+- Ohne Hardware testen: `python3 -m sim.fake_cue` (im Ordner `app/`), Castcode `SMQ234` im Admin-Panel eintragen.

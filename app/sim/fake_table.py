@@ -1,10 +1,8 @@
 """
-Simulierte ESP32-CAM mit einem laufenden 8-Ball-Spiel (zum Testen ohne Tisch).
-
-    python3 -m sim.fake_table            # Stream unter http://<rechner>:8081/stream
+Simuliertes 8-Ball-Spiel als Kamerabild (Demo-Modus ohne Tisch, siehe cameras.DemoReader).
 
 Ablauf in Schleife: Rack liegt -> Break -> mehrere Stoesse -> neues Rack.
-Fuer die Kalibrierung im Portal die Ecken anklicken oder diese Werte nehmen:
+Fuer die Kalibrierung im Admin-Panel die Ecken anklicken oder diese Werte nehmen:
     DEFAULT_CORNERS = [(70, 150), (740, 120), (765, 470), (45, 480)]
 """
 
@@ -12,7 +10,6 @@ import math
 import os
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import cv2
 import numpy as np
@@ -23,7 +20,6 @@ from sim.render import DEFAULT_CORNERS, SimBall, rack_positions, random_layout, 
 L = TABLE_SIZES["8ft"]
 CLOTH = os.environ.get("SIM_CLOTH", "blau")   # Tuchfarbe der simulierten Kamera
 W = L / 2
-BOUNDARY = "billardframeboundary"
 FPS = 10
 
 
@@ -97,46 +93,3 @@ class Scenario(threading.Thread):
             balls = self._shot(balls, {8})
             self._emit(balls, self.hold_s * 2, "8 versenkt - Rack vorbei")
 
-
-SCENARIO = Scenario()
-
-
-class Handler(BaseHTTPRequestHandler):
-    def log_message(self, *a):
-        pass
-
-    def do_GET(self):
-        if self.path.startswith("/status"):
-            body = b'{"camera_ok":true,"ap_mode":false,"rssi":-50,"free_heap":0,"version":"sim"}'
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return
-        if not self.path.startswith("/stream"):
-            self.send_error(404)
-            return
-        self.send_response(200)
-        self.send_header("Content-Type", f"multipart/x-mixed-replace;boundary={BOUNDARY}")
-        self.end_headers()
-        try:
-            while True:
-                with SCENARIO.lock:
-                    jpg = SCENARIO.jpeg
-                if jpg:
-                    self.wfile.write(f"\r\n--{BOUNDARY}\r\nContent-Type: image/jpeg\r\n"
-                                     f"Content-Length: {len(jpg)}\r\n\r\n".encode() + jpg)
-                time.sleep(1 / FPS)
-        except (BrokenPipeError, ConnectionResetError):
-            pass
-
-
-def main(port=8081):
-    SCENARIO.start()
-    print(f"Simulierte Kamera: http://0.0.0.0:{port}/stream", flush=True)
-    ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
-
-
-if __name__ == "__main__":
-    main()
