@@ -302,9 +302,10 @@ details > div { margin-top: 12px; }
   </section>
 
   <details id="fixBallsDetails">
-    <summary>KI-Training: Bilder prüfen <span class="badge" id="reviewBadge" hidden></span></summary>
+    <summary>KI-Training: Kugeln festlegen <span class="badge" id="reviewBadge" hidden></span></summary>
     <div>
-      <p class="hint">Nach jedem Spielzug macht das System ein Bild und ordnet alle Kugeln zu. Hier prüfen: Stimmt alles, „Passt alles“ drücken. Sonst die Kugel antippen und richtig einordnen; fehlt eine Kugel, auf die freie Stelle tippen. Nur geprüfte Bilder werden zum Training benutzt.</p>
+      <p class="hint">Nach jedem Spielzug macht der Pi ein Bild. Ihr legt die Kugeln fest: auf eine Kugel tippen, dann ihre Nummer. Fehlt eine Kugel, auf die freie Stelle tippen. Sobald der KI-Chip ein Modell hat, schlägt er die Kugeln schon vor – dann nur noch prüfen und „Passt alles“. Nur festgelegte Bilder werden zum Training benutzt.</p>
+      <p class="statusline" id="qualityInfo"></p>
       <p class="statusline" id="trainInfo"></p>
       <div class="seg" role="radiogroup" aria-label="Welche Bilder" style="margin-bottom:12px">
         <input type="radio" name="fixMode" id="modeReview" value="review" checked><label for="modeReview">Gesammelte Bilder</label>
@@ -330,7 +331,8 @@ details > div { margin-top: 12px; }
           <button class="primary" type="button" id="fixSave" disabled>Korrektur speichern</button>
         </div>
       </div>
-      <label class="check" style="margin-top:16px"><input type="checkbox" id="collectToggle"> Nach jedem Spielzug ein Bild sammeln</label>
+      <button type="button" class="quiet" id="captureBtn" style="width:100%;margin-top:16px">Jetzt ein Bild aufnehmen</button>
+      <label class="check"><input type="checkbox" id="collectToggle"> Nach jedem Spielzug ein Bild aufnehmen</label>
     </div>
   </details>
 
@@ -338,17 +340,12 @@ details > div { margin-top: 12px; }
     <summary>KI-Modell (Coral)</summary>
     <div>
       <p class="statusline" id="modelStatus">-</p>
-      <div class="field">
-        <label for="detMode">Kugelerkennung</label>
-        <select id="detMode">
-          <option value="auto">Coral, sobald ein Modell da ist (sonst OpenCV)</option>
-          <option value="opencv">Nur OpenCV (ohne KI-Modell)</option>
-        </select>
-      </div>
-      <p class="hint">So kommt ein Modell auf den Coral: 1. Trainingsdaten laden. 2. Am PC oder in Google Colab trainieren (Anleitung: training/README.md). 3. Die Datei <b>billard_edgetpu.tflite</b> hier hochladen. Der Coral übernimmt sie sofort.</p>
+      <p class="hint">Die Kugeln (mit Nummer) erkennt ausschließlich der KI-Chip. Solange noch kein eigenes Modell trainiert ist, zählt der Pi nichts selbst – er nimmt nur Bilder auf, und ihr legt die Kugeln fest. Alle Bilder bleiben auf dem Pi gespeichert, auch verworfene.</p>
+      <p class="hint">So kommt ein eigenes Modell auf den Coral: 1. Trainingsdaten laden. 2. Am PC oder in Google Colab trainieren (Anleitung: training/README.md). 3. Die Datei <b>billard_edgetpu.tflite</b> hier hochladen. Der Coral übernimmt sie sofort.</p>
       <div class="grid two">
         <a class="btnlink" id="datasetLink" href="/api/dataset.zip" download>Trainingsdaten laden</a>
         <button type="button" id="modelUploadBtn">Modell hochladen</button>
+        <a class="btnlink span2" id="allImagesLink" href="/api/all-images.zip" download style="background:transparent;border:2px solid var(--rail-light)">Alle Bilder laden (auch offene und verworfene)</a>
       </div>
       <input type="file" id="modelFile" accept=".tflite" hidden>
     </div>
@@ -661,9 +658,18 @@ details > div { margin-top: 12px; }
       fctx.setLineDash([]);
       fctx.font = "bold 13px sans-serif"; fctx.textAlign = "center"; fctx.textBaseline = "middle";
       fctx.fillStyle = "rgba(0,0,0,.7)"; fctx.fillRect(b.x + r - 2, b.y - r - 14, 22, 16);
-      fctx.fillStyle = b.changed ? "#7FE0A0" : "#fff";
+      fctx.fillStyle = label === "?" ? "#FF8A80" : b.changed ? "#7FE0A0" : "#fff";
       fctx.fillText(label, b.x + r + 9, b.y - r - 6);
     });
+  }
+
+  // Nummer setzen: Typ und Farbe folgen daraus (der Server rechnet die Nummer daraus zurueck)
+  function setNumber(b, n) {
+    if (n === null) { b.kind = "none"; b.color = ""; }
+    else if (n === 0) { b.kind = "cue"; b.color = ""; }
+    else if (n === 8) { b.kind = "eight"; b.color = "schwarz"; }
+    else { const c = COLORS.find((x) => x[2] === (n < 8 ? n : n - 8)); b.kind = n < 8 ? "solid" : "stripe"; b.color = c[0]; }
+    b.changed = true;
   }
 
   function renderPicker() {
@@ -672,39 +678,44 @@ details > div { margin-top: 12px; }
     pk.classList.add("show");
     const b = snap.balls[selected];
     const n = numberOf(b);
-    $("pickerTitle").textContent = "Diese Kugel ist: " + (b.kind === "none" ? "keine Kugel" :
-      (KINDS.find((k) => k[0] === b.kind) || ["", "?"])[1] + (n && b.kind !== "eight" ? " (Nr. " + n + ")" : ""));
+    $("pickerTitle").textContent = "Welche Kugel ist das? " + (b.kind === "none" ? "(keine Kugel)" :
+      b.kind === "cue" ? "(jetzt: Weiße)" : n !== null ? "(jetzt: " + n + ")" : "(Nummer fehlt)");
     const kc = $("kindChips"); kc.innerHTML = "";
-    for (const [k, label] of KINDS) {
+    const chip = (label, num, style) => {
       const bt = document.createElement("button");
-      bt.type = "button"; bt.className = "chip" + (b.kind === k ? " sel" : ""); bt.textContent = label;
-      bt.addEventListener("click", () => { b.kind = k; b.changed = true; if (k === "cue" || k === "none") b.color = ""; if (k === "eight") b.color = "schwarz"; else if (b.color === "schwarz") b.color = ""; afterEdit(); });
+      bt.type = "button";
+      const cur = num === null ? b.kind === "none" : (num === 0 ? b.kind === "cue" : n === num);
+      bt.className = "chip" + (cur ? " sel" : "");
+      bt.textContent = label;
+      Object.assign(bt.style, style || {});
+      bt.setAttribute("aria-label", num === null ? "Keine Kugel" : num === 0 ? "Weiße" : "Kugel " + num);
+      bt.addEventListener("click", () => { setNumber(b, num); selected = -1; afterEdit(); });
       kc.appendChild(bt);
-    }
-    const cc = $("colorChips"); cc.innerHTML = "";
-    if (b.kind === "solid" || b.kind === "stripe") {
-      for (const [c, hex, num] of COLORS) {
-        const bt = document.createElement("button");
-        bt.type = "button"; bt.className = "chip" + (b.color === c ? " sel" : "");
-        bt.style.background = b.kind === "solid" ? hex : "linear-gradient(#EFE6D2 28%, " + hex + " 28% 72%, #EFE6D2 72%)";
-        bt.style.color = b.kind === "solid" ? "#fff" : "#111";
-        bt.textContent = String(b.kind === "solid" ? num : num + 8);
-        bt.setAttribute("aria-label", c + " " + bt.textContent);
-        bt.addEventListener("click", () => { b.color = c; b.changed = true; afterEdit(); });
-        cc.appendChild(bt);
-      }
-    }
+    };
+    chip("W", 0, { background: "#F4F1E8", color: "#111" });
+    for (const [c, hex, num] of COLORS) chip(String(num), num, { background: hex, color: "#fff" });
+    chip("8", 8, { background: "#111", color: "#fff" });
+    for (const [c, hex, num] of COLORS) chip(String(num + 8), num + 8,
+      { background: "linear-gradient(#EFE6D2 28%, " + hex + " 28% 72%, #EFE6D2 72%)", color: "#111" });
+    chip("Keine Kugel", null, {});
+    $("colorChips").innerHTML = "";
   }
 
   let fixMode = "review";
 
+  function missingNumbers() {
+    return snap ? snap.balls.filter((b) => b.kind !== "none" && b.kind !== "cue" && numberOf(b) === null).length : 0;
+  }
+
   function afterEdit() {
     const changed = !!snap && snap.balls.some((b) => b.changed);
-    $("fixSave").disabled = !changed;
-    $("reviewSave").disabled = !snap;
+    const missing = missingNumbers();
+    $("fixSave").disabled = !changed || missing > 0;
+    $("reviewSave").disabled = !snap || missing > 0;
     $("reviewDiscard").disabled = !snap;
     $("reviewSkip").disabled = !snap;
-    $("reviewSave").textContent = changed ? "Korrektur speichern" : "Passt alles";
+    $("reviewSave").textContent = missing ? missing + " Nummer(n) fehlen" :
+      (snap && !snap.balls.length ? "Ohne Kugeln speichern" : changed ? "Speichern" : "Passt alles");
     drawFix(); renderPicker();
   }
 
@@ -737,7 +748,7 @@ details > div { margin-top: 12px; }
       if (r.status === 404) {
         fctx.clearRect(0, 0, fixCanvas.width, fixCanvas.height);
         fixCanvas.hidden = true;
-        $("editorTitle").textContent = "Keine Bilder zu prüfen. Nach dem nächsten Spielzug kommen neue dazu.";
+        $("editorTitle").textContent = "Keine Bilder offen. Nach dem nächsten Spielzug kommt ein neues dazu – oder „Jetzt ein Bild aufnehmen“.";
         return;
       }
       if (!r.ok) { toast(data.error || "Kein Bild", true); return; }
@@ -759,6 +770,7 @@ details > div { margin-top: 12px; }
   }));
   $("reviewSave").addEventListener("click", async () => {
     if (!snap) return;
+    if (!snap.balls.length && !confirm("Liegen auf diesem Bild wirklich KEINE Kugeln? Sonst erst die Kugeln antippen.")) return;
     const res = await post("review_save", { name: snap.name, balls: snap.balls });
     if (res) loadReview();
   });
@@ -768,6 +780,10 @@ details > div { margin-top: 12px; }
     if (res) loadReview();
   });
   $("reviewSkip").addEventListener("click", () => { if (snap) loadReview(snap.name); });
+  $("captureBtn").addEventListener("click", async () => {
+    const res = await post("capture", {});
+    if (res && fixMode === "review" && !snap) loadReview();
+  });
   $("collectToggle").addEventListener("change", () => post("collect", { enabled: $("collectToggle").checked }));
 
   // ---------------- Kamera ----------------
@@ -815,7 +831,12 @@ details > div { margin-top: 12px; }
     const badge = $("reviewBadge");
     badge.hidden = !t.pending;
     badge.textContent = t.pending || "";
-    $("trainInfo").textContent = (t.pending || 0) + " Bilder zu prüfen  ·  " + (t.verified || 0) + " geprüft (für das Training)";
+    $("trainInfo").textContent = (t.pending || 0) + " Bilder offen  ·  " + (t.verified || 0) + " festgelegt (für das Training)  ·  " +
+      (t.discarded || 0) + " verworfen (aufgehoben)" + (t.disk_ok === false ? "  ·  SPEICHER FAST VOLL – es wird nichts mehr aufgenommen" : "");
+    const q = t.quality;
+    $("qualityInfo").textContent = q ? "Der KI-Chip (" + q.model + ") lag bei " + q.percent + " % der Kugeln richtig (letzte " +
+      q.images + " Bilder)." + (q.percent >= 95 ? " Das ist gut – Sammeln kann pausieren." : "") :
+      "Noch keine Bewertung: Sobald ihr Vorschläge des KI-Chips prüft, steht hier, wie oft er richtig liegt.";
     $("collectToggle").checked = !!t.collect;
     $("datasetLink").classList.toggle("off", !t.verified);
     const d = s.detector || {}, c = d.coral || {};
@@ -826,15 +847,14 @@ details > div { margin-top: 12px; }
       const b = document.createElement("b"); b.textContent = value; if (cls) b.className = cls;
       ms.appendChild(document.createTextNode(label)); ms.appendChild(b);
     };
-    line("Erkennung läuft mit: ", d.active === "coral" ? "Coral (KI-Modell)" : "OpenCV (Bildverarbeitung)", d.active === "coral" ? "good" : "");
     if (c.ready) {
-      line("Modell: ", (c.model_time ? "vom " + c.model_time : "geladen") + (c.ms ? ", " + c.ms.toFixed(0) + " ms pro Bild" : ""), "good");
+      line("KI-Chip: ", "bereit", "good");
+      line("Modell: ", (c.model || "geladen") + (c.model_time ? " vom " + c.model_time : "") + (c.ms ? ", " + c.ms.toFixed(0) + " ms pro Bild" : ""));
     } else {
-      line("Coral: ", c.error || "nicht bereit");
+      line("KI-Chip: ", c.error || "nicht bereit", "bad");
     }
-    if (document.activeElement !== $("detMode") && d.mode) $("detMode").value = d.mode;
+
   }
-  $("detMode").addEventListener("change", () => post("detector_mode", { mode: $("detMode").value }));
   $("modelUploadBtn").addEventListener("click", () => $("modelFile").click());
   $("modelFile").addEventListener("change", async () => {
     const f = $("modelFile").files[0];

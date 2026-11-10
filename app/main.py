@@ -26,7 +26,7 @@ import cv2
 import config
 import web
 from ballnum import ball_number
-from coral_detector import AutoDetector, CoralClient
+from coral_detector import CoralDetector, CoralEngine
 from cue_sensor import AlignChecker, CueSensor
 from geometry import Table, TABLE_SIZES
 from pipeline import Pipeline
@@ -55,16 +55,15 @@ def host_ip():
 
 
 class App:
-    def __init__(self, url, cue_port=5005, coral_port=8765):
+    def __init__(self, url, cue_port=5005, coral_engine=None):
         self.cfg = config.load()
         self._migrate_config(url)
         self.reader = make_reader(self.cfg["camera"], config.DATA_DIR).start()
         self.recorder = Recorder(os.path.join(config.DATA_DIR, "dataset"))
         self.recorder.enabled = bool(self.cfg.get("collect_training", True))
-        self.coral = CoralClient(port=coral_port)
+        self.coral = coral_engine or CoralEngine()          # Kugelerkennung nur ueber den KI-Chip
         table = self._table_for(self.reader)
-        self.pipe = Pipeline(table, recorder=self.recorder, detector_factory=lambda r: AutoDetector(
-            r, self.coral, lambda: self.cfg.get("detector", "auto")))
+        self.pipe = Pipeline(table, lambda r: CoralDetector(r, self.coral), recorder=self.recorder)
         self.cue = CueSensor(cue_port, self.cfg.get("cue_offset", 0.0), self.cfg.get("cue_flip", False)).start()
         self.align = AlignChecker(self.cfg.get("cue_tolerance", 2.0))
         self.rounds = RoundRecorder(os.path.join(config.DATA_DIR, "recordings"))
@@ -291,7 +290,7 @@ class App:
         return jpg.tobytes() if ok else None
 
     def _train_correction(self, p):
-        from detector import Ball
+        from ballnum import Ball
         snap = self._snapshots.get(int(p["id"]))
         if snap is None:
             raise config.UserError("Bild ist veraltet, bitte neu laden")
@@ -309,6 +308,9 @@ class App:
                 continue
             balls.append(Ball(x, y, r, kind, color))
             numbers.append(ball_number(kind, color))
+        if None in numbers:
+            raise config.UserError(f"{numbers.count(None)} Kugel(n) ohne Nummer - "
+                                   "Kugel antippen und Nummer wählen")
         self.recorder.save_verified(warped, balls, r, numbers)
         applied = 0
         if p.get("apply") and corrections:
@@ -328,12 +330,12 @@ class App:
                           "number": ball_number(kind, color), "changed": bool(d.get("changed"))})
         try:
             res = self.recorder.review(str(p["name"]), balls, bool(p.get("discard")))
-        except FileNotFoundError as e:
+        except (FileNotFoundError, ValueError) as e:
             raise config.UserError(str(e))
         return f"Bild {res}. Noch {self.recorder.pending} zu prüfen, {self.recorder.verified} geprüft."
 
     def save_model(self, data: bytes):
-        """Hochgeladenes Coral-Modell speichern. Der Coral-Container laedt es von selbst."""
+        """Hochgeladenes Coral-Modell speichern. Der Detektor laedt es von selbst (Aenderungszeit)."""
         if len(data) < 1000 or data[4:8] != b"TFL3":
             raise config.UserError("Das ist keine TFLite-Modelldatei (.tflite)")
         if b"edgetpu-custom-op" not in data:
@@ -346,8 +348,6 @@ class App:
         with open(tmp, "wb") as f:
             f.write(data)
         os.replace(tmp, path)
-        # Der Coral-Container merkt die neue Datei selbst; das Hauptprogramm holt sich
-        # das neue Ein-/Ausgabeformat beim naechsten Abgleich (spaetestens nach 10 s).
         return f"Modell gespeichert ({len(data) / 1e6:.1f} MB). Der Coral lädt es in wenigen Sekunden."
 
     # ------------------------------------------------------------- Portal-API
@@ -369,10 +369,9 @@ class App:
             "table_size": self.cfg.get("table_size"),
             "cloth": self.cfg.get("cloth", "blau"),
             "training": {"collect": self.recorder.enabled, "pending": self.recorder.pending,
-                         "verified": self.recorder.verified},
-            "detector": {"mode": self.cfg.get("detector", "auto"),
-                         "active": getattr(self.pipe.detector, "name", "opencv"),
-                         "coral": self.coral.status()},
+                         "verified": self.recorder.verified, "discarded": self.recorder.discarded,
+                         "disk_ok": self.recorder.disk_ok(), "quality": self.recorder.model_quality()},
+            "detector": {"coral": self.coral.status(), "not_ready": self.pipe.not_ready},
             "assist": bool(self.cfg.get("assist")),
             "suggestion": (self.suggestion or {}).get("text"),
             "scene_version": self.scene_version,
@@ -499,15 +498,12 @@ class App:
                 config.save(self.cfg)
                 return ("Nach jedem Spielzug wird ein Bild gesammelt" if self.recorder.enabled
                         else "Sammeln gestoppt")
+            elif name == "capture":
+                if self.pipe.capture_now() is None:
+                    raise config.UserError("Kein Kamerabild (Tisch eingerichtet?) oder zu viele Bilder offen")
+                return f"Bild aufgenommen. {self.recorder.pending} zu prüfen."
             elif name == "review_save":
                 return self._review_save(p)
-            elif name == "detector_mode":
-                if p.get("mode") not in ("auto", "opencv"):
-                    raise ValueError("Modus")
-                self.cfg["detector"] = p["mode"]
-                config.save(self.cfg)
-                return ("Erkennung: Coral, sobald ein Modell da ist" if p["mode"] == "auto"
-                        else "Erkennung: nur OpenCV")
             else:
                 return None
             return g.message
@@ -523,12 +519,11 @@ def main():
     ap.add_argument("--url", default=os.environ.get("CAM_URL", "http://192.168.88.200:81/stream"))
     ap.add_argument("--port", type=int, default=int(os.environ.get("WEB_PORT", "8080")))
     ap.add_argument("--cue-port", type=int, default=int(os.environ.get("CUE_PORT", "5005")))
-    ap.add_argument("--coral-port", type=int, default=int(os.environ.get("CORAL_PORT", "8765")))
     ap.add_argument("--windowed", action="store_true")
     ap.add_argument("--no-display", action="store_true")
     args = ap.parse_args()
 
-    app = App(args.url, args.cue_port, args.coral_port)
+    app = App(args.url, args.cue_port)
     web.start(app, args.port)
     ip = host_ip()
     admin_url = f"http://{ip}:{args.port}" if ip else ""

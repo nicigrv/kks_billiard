@@ -1,33 +1,35 @@
 """
 Verarbeitungskette pro Kamerabild:
-    Kamerabild -> Draufsicht -> Kugelerkennung -> Bewegung/Verdeckung -> Stoss -> Spielregeln
+    Kamerabild -> Draufsicht -> Kugelerkennung (KI-Chip) -> Bewegung/Verdeckung -> Stoss -> Spielregeln
 
-Wird identisch vom echten Programm (main.py) und vom Simulator-Test benutzt.
+Die Kugeln erkennt nur der Coral (coral_detector.py). Ist er nicht bereit (kein Stick, kein
+Modell), wird nichts ausgewertet - es gibt keine Ersatz-Erkennung auf dem Prozessor.
+Wird identisch vom echten Programm (main.py) und vom Simulator-Test benutzt (dort mit einem
+Detektor, der die Kugeln aus dem Simulator kennt).
 """
 
 import threading
 import time
 from collections import Counter
 
-from ballnum import ball_number
-from detector import Ball, ClassicDetector
+from ballnum import Ball, ball_number
+from coral_detector import CoralNotReady
 from game import Game
 from geometry import Table
-from shots import MotionMeter, ShotEvent, ShotMonitor
+from shots import MotionMeter, OcclusionMeter, ShotEvent, ShotMonitor
 
 OCCLUSION_LIMIT = 0.006   # Anteil Tischflaeche, ab dem "etwas haengt über dem Tisch"
 
 
 class Pipeline:
-    def __init__(self, table: Table, game: Game = None, clock=time.monotonic, recorder=None,
-                 detector_factory=None):
+    def __init__(self, table: Table, detector_factory, game: Game = None, clock=time.monotonic,
+                 recorder=None):
         self.lock = threading.RLock()
         self.clock = clock
         self.game = game or Game()
         self.recorder = recorder
-        # Erzeugt den Kugeldetektor fuer einen Kugelradius (Standard: OpenCV,
-        # main.py setzt den automatischen Wechsel Coral/OpenCV ein)
-        self.detector_factory = detector_factory or ClassicDetector
+        # Erzeugt den Kugeldetektor fuer einen Kugelradius (im Programm: Coral)
+        self.detector_factory = detector_factory
         self.set_table(table)
 
     def set_table(self, table: Table):
@@ -35,9 +37,12 @@ class Pipeline:
             self.table = table
             self.detector = self.detector_factory(table.ball_radius_px) if table.calibrated else None
             self.motion = MotionMeter()
+            self.occlusion = OcclusionMeter(table.ball_radius_px)
+            self.not_ready = ""
+            self._moved = False         # seit dem letzten Trainingsbild hat sich etwas bewegt
+            self._still_since = None
             self.monitor = ShotMonitor(table.ball_radius_px, clock=self.clock)
             self.balls = []
-            self.info = None
             self.moving = False
             self.occluded = False
             self.last_warped = None
@@ -48,12 +53,22 @@ class Pipeline:
             if self.detector is None:
                 return None
             warped = self.table.warp(frame)
-            balls, info = self.detector.detect(warped)
-            moving = self.motion.update(warped)
-            occluded = info.occlusion > OCCLUSION_LIMIT
-            ev = self.monitor.update(balls, moving, occluded)
-            self.balls, self.info, self.moving, self.occluded = balls, info, moving, occluded
             self.last_warped = warped
+            moving = self.motion.update(warped)
+            try:
+                balls = self.detector.detect(warped)
+            except CoralNotReady as e:
+                # Ohne KI-Chip wird nichts gezaehlt. Trainingsbilder entstehen trotzdem:
+                # nach jeder Bewegung, sobald der Tisch wieder ruhig ist - die Kugeln
+                # legt ihr dann auf dem iPad fest.
+                self.not_ready = str(e)
+                self.balls, self.moving = [], moving
+                self._capture_when_still(warped, moving)
+                return None
+            self.not_ready = ""
+            occluded = self.occlusion.update(warped, balls) > OCCLUSION_LIMIT
+            ev = self.monitor.update(balls, moving, occluded)
+            self.balls, self.moving, self.occluded = balls, moving, occluded
 
             if isinstance(ev, ShotEvent):
                 diff = ev.diff(self.table.ball_radius_px)
@@ -65,11 +80,32 @@ class Pipeline:
                 self._collect(warped, self.monitor.reference.balls)
             return ev
 
-    def _collect(self, warped, balls):
+    def _capture_when_still(self, warped, moving, still_s=1.5):
+        if moving:
+            self._moved, self._still_since = True, None
+            return
+        now = self.clock()
+        if self._still_since is None:
+            self._still_since = now
+        if self._moved and now - self._still_since >= still_s:
+            self._moved = False
+            self._collect(warped, [])
+
+    def capture_now(self):
+        """Knopf im Portal: aktuelles Bild (mit Vorschlag des Coral, falls bereit) zum Pruefen."""
+        with self.lock:
+            if self.last_warped is None:
+                return None
+            return self._collect(self.last_warped, list(self.balls), force=True)
+
+    def _collect(self, warped, balls, force=False):
         """Trainingsbild nach einem Spielzug (Tisch ruhig) mit der automatischen Zuordnung."""
         if self.recorder:
-            self.recorder.save_pending(warped, balls, self.table.ball_radius_px,
-                                       [ball_number(b.kind, b.color) for b in balls])
+            engine = getattr(self.detector, "engine", None)
+            st = engine.status() if engine is not None and balls else {}
+            model = f"{st['model']} vom {st['model_time']}" if st.get("model") else None
+            return self.recorder.save_pending(warped, balls, self.table.ball_radius_px,
+                                              [ball_number(b.kind, b.color) for b in balls], model, force)
 
     def restart_tracking(self):
         """Nach Spielstart / neuem Rack: der naechste ruhige Tisch ist der neue Ausgangszustand,
@@ -81,6 +117,8 @@ class Pipeline:
         """Kurzer Systemzustand fuer Anzeige und Portal."""
         if self.detector is None:
             return "Tisch nicht kalibriert - Admin-Portal oeffnen"
+        if self.not_ready:
+            return f"KI-Chip nicht bereit: {self.not_ready}"
         if self.occluded:
             return "Tisch wird verdeckt"
         if self.monitor.state == "warte":
@@ -113,7 +151,7 @@ class Pipeline:
                     changed += 1
                 continue
             if not hit:
-                near = Ball(float(c["x"]), float(c["y"]), r, c["kind"])
+                near = Ball(float(c["x"]), float(c["y"]), r, c["kind"], c.get("color", ""))
                 ref.balls.append(near)
             near.kind = c["kind"]
             near.votes = Counter({c["kind"]: 300})

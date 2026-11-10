@@ -7,16 +7,19 @@ Queue-Gyroskop ─WLAN (UDP 5005)─▶ │
                                   └── Admin-Portal  http://<pi-ip>:8080  (iPad / Handy)
 ```
 
+**Kugelerkennung:** ausschließlich über den **KI-Chip (Coral USB Accelerator)** – er erkennt jede
+Kugel samt Nummer. Bis ein eigenes Modell trainiert ist, zählt der Pi nichts selbst: Er nimmt nach
+jedem Spielzug ein Bild auf, und ihr legt die Kugeln auf dem iPad fest (Abschnitt 5).
+
 **Beamer:** links das Live-Kamerabild mit Kreisen um die Kugeln, rechts eine gezeichnete
 Grafik des Tisches (neu nach jedem Stoß, mit Stoßvorschlag), unten die **Game-Bar**:
 Mannschaften, Frames, Punkte und alle 15 Kugeln – versenkte sind durchgestrichen.
 
 | Ordner | Inhalt |
 |---|---|
-| `app/` | **Hauptprogramm**: Erkennung, 8-Ball-Regeln, Scoreboard, Admin-Portal |
+| `app/` | **Hauptprogramm**: Erkennung (KI-Chip), 8-Ball-Regeln, Scoreboard, Admin-Portal |
 | `app/sim/` | Simulator + Tests (laufen ohne Tisch) |
 | `cue_sensor/` | Firmware für das Gyroskop im Queue (ESP32 + MPU6050, PlatformIO) |
-| `coral/` | Coral-Container: führt das KI-Modell aus + Hardwaretest |
 | `training/` | Kugelmodell für den Coral trainieren (PC / Google Colab) |
 | `esp32cam_stream/` | Firmware der Kamera |
 | `firmware/` | fertige Kamera-Firmware (`.bin`) |
@@ -41,7 +44,7 @@ Dauer: ca. 1 Stunde, davon 15–30 Minuten Warten beim ersten Bauen.
 | – USB-Kamera | am Pi, möglichst 1280×720 mit MJPG |
 | – Pi-Kameramodul | Flachbandkabel; Pi 5 braucht ein Pi-5-Kamerakabel. Weitwinkel (Camera Module 3 **Wide**) hilft, damit der ganze Tisch ins Bild passt |
 | iPad oder Handy | für das Admin-Portal, im selben WLAN |
-| *optional* Coral USB Accelerator | für das KI-Modell, eigener Container (Abschnitt 5) |
+| **Coral USB Accelerator** (KI-Chip) | erkennt die Kugeln, an den **blauen USB-3-Port** (Abschnitt 5) |
 | *optional* Gyroskop im Queue | ESP32 + MPU6050, siehe `cue_sensor/README.md` |
 
 Ohne Kamera geht es auch: Im **Demo-Modus** läuft ein simuliertes Spiel (Abschnitt 1a).
@@ -176,8 +179,7 @@ Wer noch den alten Viewer aus Schritt 1 laufen hat: einmal `docker rm -f billard
 | Portal nicht erreichbar | Richtige IP/Port? `docker compose ps`. Läuft auf dem Port schon etwas anderes → Port ändern (1.5) |
 | „Warte auf Kamera …“ | Portal → „Kamera“: Status/Fehlermeldung lesen. ESP32: Adresse im Browser öffnen. USB: `ls /dev/video*` zeigt die Kamera? |
 | Pi-Kameramodul „belegt“ | Läuft eine andere Kamera-Anwendung auf dem Pi? Kabel richtig herum? Test auf dem Pi: `rpicam-hello --list-cameras` |
-| Coral wird nicht gefunden | Coral-Container gestartet (`docker compose --profile coral up -d --build`)? Stick am **blauen USB-3-Port**, Test in Abschnitt 5. Ohne Coral läuft alles mit OpenCV weiter |
-| Bauen bricht ab bei `coral` | Coral ist optional: `docker compose up -d --build` baut nur das Hauptprogramm. Grund steht in den Zeilen vor `Dockerfile:...` (Abschnitt 5) |
+| „KI-Chip nicht bereit“ | Stick am **blauen USB-3-Port**? Test: `docker compose exec billard python3 coral_check.py`. „Kein Modell“ ist am Anfang normal (Abschnitt 5) |
 | Container startet immer neu | `docker logs billard` zeigt den Fehler |
 
 ## 1a. Kamera wählen
@@ -234,11 +236,9 @@ links die **aktuelle Grafik vom Pi** (wie auf dem Beamer, aktualisiert sich selb
 - **Spiel starten / Neues Rack / Abbrechen**
 - **Letzten erkannten Stoß verwerfen**: wenn das System einen Stoß gezählt hat, der keiner war.
   Der Spielstand springt auf vor diesem Stoß zurück.
-- **KI-Training: Bilder prüfen**: die nach jedem Spielzug gesammelten Bilder durchgehen –
-  „Passt alles“ oder Kugel antippen → Weiße / 8 / Volle / Halbe / keine Kugel und Farbe wählen;
-  fehlende Kugel: auf die freie Stelle tippen. Geprüfte Bilder landen in `data/dataset/geprueft/`.
-  Unter „Live-Bild jetzt“ lässt sich auch das aktuelle Bild korrigieren, auf Wunsch sofort im Spiel.
-- **KI-Modell (Coral)**: Status, Trainingsdaten laden, Modell hochladen (siehe 5)
+- **KI-Training: Kugeln festlegen**: die Bilder durchgehen, die der Pi nach jedem Spielzug aufnimmt
+  (siehe 5)
+- **KI-Modell (Coral)**: Status des KI-Chips, Trainingsdaten / alle Bilder laden, Modell hochladen
 - **KI-Schlagverbesserung an/aus** (siehe 3b)
 - **Spielaufzeichnung** (siehe 3c)
 
@@ -278,63 +278,50 @@ des Tuchs antippen.
 
 Simuliertes Queue-Gyroskop: `docker compose --profile sim up -d fake-cue` (Schlagverbesserung im Portal einschalten).
 
-## 5. KI-Modell für den Coral-Stick
+## 5. KI-Chip: Kugeln festlegen, trainieren, Modell aufspielen
 
-Der Coral läuft im eigenen Container `billard-coral`. Er ist **optional** und wird extra gestartet
-(einmalig, danach startet er mit dem Pi von selbst):
+Die Kugeln erkennt **nur der KI-Chip** (Coral USB Accelerator). Er läuft direkt im Hauptprogramm,
+es gibt keinen eigenen Container mehr. Das Modell erkennt jede Kugel mit ihrer **Nummer**
+(Weiße, 1–15). Ohne Stick oder ohne Modell wird nichts gezählt – Bilder werden trotzdem aufgenommen.
 
+**So lernt das System euren Tisch:**
+
+1. **Bilder aufnehmen (Pi):** Nach jedem Spielzug – sobald der Tisch nach einer Bewegung wieder ruhig
+   ist – speichert der Pi ein Bild. Zusätzlich im Portal: „Jetzt ein Bild aufnehmen“.
+2. **Kugeln festlegen (iPad):** Portal → „KI-Training: Kugeln festlegen“. Auf eine Kugel tippen,
+   dann ihre Nummer (W, 1–15). Fehlt eine Kugel: auf die freie Stelle tippen. Unbrauchbare Bilder
+   (Arm im Bild): „Verwerfen“. Sobald es ein Modell gibt, sind die Kugeln schon vorgeschlagen –
+   dann nur noch prüfen und „Passt alles“.
+3. **Trainieren:** „Trainingsdaten laden“ (ZIP) → `training/train_coral.py`, am einfachsten in
+   Google Colab. Anleitung: `training/README.md`.
+4. **Hochladen:** `billard_edgetpu.tflite` unter „Modell hochladen“. Der KI-Chip nimmt es sofort.
+5. **Wiederholen, bis es passt:** Im Portal steht, wie oft der KI-Chip bei euren geprüften Bildern
+   richtig lag („… % der Kugeln richtig“). Mit jedem Training mit mehr Bildern wird es besser.
+
+**Alle Bilder bleiben auf dem Pi** (`data/dataset/`): `pruefen/` (offen), `geprueft/` (festgelegt,
+fürs Training), `verworfen/` (aufgehoben, nicht gelöscht). Gesammelt wird, bis weniger als 1 GB frei
+ist. Im Portal: „Alle Bilder laden“ lädt alles als ZIP herunter.
+
+Test des Sticks:
 ```bash
-docker compose --profile coral up -d --build
+docker compose exec billard python3 coral_check.py
 ```
+Erwartet: `[OK] Treiber findet den Stick` und – sobald ein Modell da ist – die Zeit pro Bild.
 
-Solange der Container nicht läuft oder kein Modell da ist, erkennt der Pi die Kugeln mit
-klassischer Bildverarbeitung (OpenCV) – das Spiel läuft also immer.
+Technik: Googles Coral-Paketquelle gibt es nicht mehr. Der Treiber (`libedgetpu`) und
+`tflite_runtime` für Python 3.11 kommen von den gepflegten Builds unter github.com/feranick
+(beide gegen TensorFlow 2.17.1, im Dockerfile mit Prüfsummen festgelegt).
 
-**Bricht das Bauen des Coral-Containers ab** (`exit code: 100`): Das liegt an den Paketservern
-(Debian 11 bzw. Googles Coral-Pakete), nicht am Pi. Das Hauptprogramm ist davon nicht betroffen.
-Die Zeilen **vor** der Meldung `Dockerfile:...` zeigen den Grund (z. B. `404 Not Found` oder
-`NO_PUBKEY`).
-Das Portal zeigt unter **„KI-Modell (Coral)“**, womit gerade erkannt wird.
+## 6. Tests
 
-1. **Sammeln:** Nach jedem Spielzug macht der Pi ein Bild und ordnet alle Kugeln zu (abschaltbar).
-2. **Prüfen (iPad):** „KI-Training: Bilder prüfen“ → „Passt alles“, Kugel antippen und korrigieren,
-   oder „Verwerfen“. Die Zahl am Titel zeigt, wie viele Bilder warten.
-3. **Trainieren:** „Trainingsdaten laden“ → mit `training/train_coral.py` trainieren, am einfachsten
-   in Google Colab. Anleitung: `training/README.md`.
-4. **Hochladen:** `billard_edgetpu.tflite` unter „Modell hochladen“. Der Coral übernimmt es sofort.
-
-Hardware-Test des Sticks:
-```bash
-docker compose stop coral                # der Stick kann nur einen Benutzer haben
-docker compose run --rm coral-check
-docker compose start coral
-```
-Erwartet: `[OK] Coral funktioniert: ~3-5 ms pro Bild`. Den Stick an einen **blauen USB-3-Port** stecken.
-
-## 6. Genauigkeit (gemessen im Simulator)
-
-| Messung | Ergebnis |
-|---|---|
-| Kugeln gefunden (Einzelbild) | 99–100 % |
-| Typ richtig (weiß / 8 / voll / halb) | 96–100 % |
-| Kugeln im Startdreieck gefunden | 13–16 von 16 |
-| Einzelstoß komplett richtig ausgewertet | 93 % (Foul mit der Weißen: 100 %) |
-| Simuliertes Spiel (3 Partien, je 8 Stöße) | alle Stöße richtig |
-| Rechenzeit pro Bild | ~31 ms auf x86, auf dem Pi 4 geschätzt 100–130 ms |
-
-**Auf deinem echten Tisch wird es schlechter sein.** Licht, Spiegelungen, Kameraqualität und Tuchfarbe
-bildet kein Simulator vollständig ab. Am schwierigsten sind Kugeln in Tuchfarbe – auf blauem Tuch
-also die 2 und 10 (blau) und 4 und 12 (violett). Im Simulator mit blauem Tuch: Kugeln 100 % gefunden,
-voll/halb 96–97 % richtig, Kugelnummer (Farbe) 98 % richtig – je Einzelbild.
-Deshalb: erste Abende mit dem Portal in der Hand spielen und Fehler korrigieren.
+Wie gut die Erkennung ist, hängt jetzt vom trainierten Modell ab. Das Portal zeigt die Trefferquote
+auf euren geprüften Bildern (Abschnitt 5).
 
 Tests selbst laufen lassen (im Ordner `app/`):
 ```bash
-python3 -m sim.test_detector      # Erkennungsqualität
-python3 -m sim.test_game          # Regeln + simuliertes Spiel
-python3 -m sim.benchmark_shots    # Trefferquote pro Stoß
+python3 -m sim.test_game          # Regeln + simuliertes Spiel (Kugeln aus dem Simulator)
 python3 -m sim.test_features      # Stoßvorschlag, Gyroskop, Game-Bar, Aufzeichnung
-python3 -m sim.test_coral         # Trainingsbilder prüfen, Coral-Anbindung
+python3 -m sim.test_coral         # KI-Chip, Bilder aufnehmen/festlegen, Trefferquote
 ```
 
 ## 7. Kamera-Firmware aktualisieren

@@ -14,7 +14,6 @@ DEFAULTS = {
     "table_size": "8ft",
     "cloth": "blau",            # Tuchfarbe fuer die Grafik (blau | gruen)
     "collect_training": True,   # nach jedem Spielzug ein Trainingsbild zum Pruefen sammeln
-    "detector": "auto",         # Kugelerkennung: auto (Coral, wenn Modell da) | opencv
     "assist": False,            # KI-Schlagverbesserung (Stossvorschlag + Queue-Lage)
     "cue_offset": 0.0,          # Gyroskop: Rohwinkel, wenn der Queue an der Bande liegt
     "cue_flip": False,          # Gyroskop: Drehrichtung umkehren

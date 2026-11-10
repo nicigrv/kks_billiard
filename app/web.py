@@ -144,6 +144,19 @@ def make_handler(app, pin):
                 if fpath is None:
                     return self._send(404, {"error": "Bild nicht gefunden"})
                 return self._send_file(fpath, "image/jpeg")
+            if path == "/api/all-images.zip":
+                # ALLE Bilder vom Pi (auch offene und verworfene) zum Aufheben
+                tmp = os.path.join(os.path.dirname(app.recorder.base_dir), f"alle-bilder-{threading.get_ident()}.zip")
+                try:
+                    if app.recorder.export_all_zip(tmp) == 0:
+                        return self._send(404, {"error": "Noch keine Bilder"})
+                    return self._send_file(tmp, "application/zip",
+                                           filename=time.strftime("billard-alle-bilder-%Y%m%d.zip"))
+                except (BrokenPipeError, ConnectionResetError):
+                    return None
+                finally:
+                    if os.path.exists(tmp):
+                        os.remove(tmp)
             if path == "/api/dataset.zip":
                 # Trainingsdaten herunterladen (fuer training/train_coral.py)
                 tmp = os.path.join(os.path.dirname(app.recorder.base_dir), f"trainingsdaten-{threading.get_ident()}.zip")
