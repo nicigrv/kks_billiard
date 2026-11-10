@@ -2,7 +2,9 @@
 
 Ablauf in Kürze:
 
-1. **Bilder aufnehmen** – per Knopf im Admin-Panel oder im Trainingsmodus (`/training`).
+1. **Bilder speichern** – am Tisch im Spiel-Panel („Bild speichern“ oder automatisch nach jedem
+   Stoß), im Admin-Panel oder im Trainingsmodus (`/training`). Festgelegt wird später in Ruhe:
+   Prüfer unter `/pruefen` (jeder bekommt ein anderes Bild) oder der Admin unter `/training`.
 2. **Kugeln festlegen (iPad)** – Admin-Panel → „KI-Training: Kugeln festlegen“: Kugel antippen, Nummer
    wählen (bzw. mit Modell: Vorschlag prüfen, „Passt alles“). Nur festgelegte Bilder kommen ins
    Training; jede Kugel braucht ihre Nummer.

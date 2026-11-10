@@ -33,11 +33,13 @@ STATIC = {"/notify.js": ("notify.js", "application/javascript; charset=utf-8")}
 PUBLIC_GET = set(PAGES) | set(STATIC) | {"/api/beamer.jpg", "/api/beamer.mjpg", "/api/me"}
 SPIEL_GET = {"/api/game", "/api/graphic.jpg"}            # + /videos/...
 PRUEFER_GET = {"/api/round", "/api/round/image"}
+STORED_GET = {"/api/review/next", "/api/review/image"}   # gespeicherte Bilder: Admin und Pruefer
 PUBLIC_POST = {"/api/login", "/api/logout"}
-PRUEFER_POST = {"/api/round/submit"}
+PRUEFER_POST = {"/api/round/submit", "/api/review_save", "/api/review_release"}
 # Diese Befehle darf auch das Spiel-Panel (PIN 1212); alle anderen nur der Admin
 GAME_COMMANDS = {"start", "new_rack", "abort", "foul", "switch_turn", "undo", "undo_shot", "set_group",
-                 "adjust", "winner", "assist", "record_round", "cue_use", "cue_calibrate"}
+                 "adjust", "winner", "assist", "record_round", "cue_use", "cue_calibrate",
+                 "capture", "auto_capture"}
 
 
 def needed_role(path):
@@ -48,6 +50,8 @@ def needed_role(path):
         return "spiel"
     if path in PRUEFER_GET:
         return "pruefer"
+    if path in STORED_GET:
+        return "stored"
     return "admin"
 
 
@@ -148,6 +152,8 @@ def make_handler(app, auth: Auth):
                 path = path.rstrip("/")                          # /admin/ -> /admin
             who = self._who()
             need = needed_role(path)
+            if need == "stored":
+                need = "pruefer" if who["role"] == "pruefer" else "admin"
             if need is not None and not Auth.can(who["role"], need):
                 return self._denied(who, need)
             if path in PAGES:
@@ -172,7 +178,8 @@ def make_handler(app, auth: Auth):
             if path == "/api/round":
                 if who["role"] == "pruefer":
                     app.reviews.heartbeat(who["name"])
-                    return self._send(200, dict(app.reviews.view(who["name"]), me=who["name"]))
+                    return self._send(200, dict(app.reviews.view(who["name"]), me=who["name"],
+                                            stored=app.recorder.pending))
                 return self._send(200, {"status": app.reviews.status(), "me": who["name"]})
             if path == "/api/round/image":
                 rid = query.get("id", [""])[0]
@@ -208,7 +215,7 @@ def make_handler(app, auth: Auth):
                     return self._send(404, {"error": "Bild nicht mehr vorhanden"})
                 return self._send(200, jpg, "image/jpeg")
             if path == "/api/review/next":
-                item = app.recorder.next_pending(query.get("after", [None])[0])
+                item = app.recorder.next_pending(query.get("after", [None])[0], who=who["name"])
                 if item is None:
                     return self._send(404, {"error": "Keine Bilder zu prüfen"})
                 return self._send(200, item)
@@ -273,6 +280,19 @@ def make_handler(app, auth: Auth):
             if path == "/api/logout":
                 auth.logout(Auth.token_from(self.headers.get("Cookie", "")))
                 return self._send(200, {"ok": True}, headers={"Set-Cookie": Auth.clear_cookie()})
+            if path in ("/api/review_save", "/api/review_release") and who["role"] == "pruefer":
+                # Pruefer legt ein gespeichertes Bild fest (spaeter, in Ruhe)
+                try:
+                    data = self._read_json()
+                    if path.endswith("release"):
+                        app.recorder.release(who["name"])
+                        return self._send(200, {"ok": True})
+                    msg = app.review_as(data, who["name"])
+                except UserError as e:
+                    return self._send(400, {"error": str(e)})
+                except (KeyError, ValueError, TypeError) as e:
+                    return self._send(400, {"error": f"Ungültige Daten: {e}"})
+                return self._send(200, {"ok": True, "message": msg, "stored": app.recorder.pending})
             if path in PRUEFER_POST and who["role"] == "pruefer":
                 try:
                     data = self._read_json()

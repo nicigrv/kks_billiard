@@ -92,11 +92,13 @@ def main():
                 except OSError:
                     pass
                 time.sleep(0.2)
+            ok = False
             run_panels(d)
+            ok = True
         finally:
             proc.terminate()
             out = proc.communicate(timeout=10)[0]
-            if FAILS:
+            if FAILS or not ok:
                 print(out[-3000:])
     print()
     if FAILS:
@@ -177,6 +179,37 @@ def run_panels(d):
     corner = cv2.resize(img[int(h * 0.8):, int(w * 0.88):], None, fx=3, fy=3, interpolation=cv2.INTER_NEAREST)
     check(cv2.QRCodeDetector().detectAndDecode(corner)[0] == "", "QR-Code ausgeschaltet -> weg")
     check(b"Admin" not in req("/beamer")[1], "Beamer-Ansicht ohne Link zum Admin")
+
+    print("Bilder am Tisch speichern, spaeter festlegen")
+    code, body, _ = req("/api/capture", {}, cookie=game)
+    st = json.loads(body).get("state", {}) if code == 200 else {}
+    check(code == 200 and st["training"]["pending"] == 1, "Spiel-Panel: Bild speichern")
+    code, body, _ = req("/api/auto_capture", {"enabled": True}, cookie=game)
+    check(code == 200 and json.loads(body)["state"]["training"]["auto_capture"] is True, "Spiel-Panel: automatisch nach jedem Stoß")
+    req("/api/auto_capture", {"enabled": False}, cookie=game)
+    req("/api/capture", {}, cookie=admin)
+    code, body, _ = req("/api/reviewer_add", {"name": "Anna"}, cookie=admin)
+    anna_code = [r for r in json.loads(body)["state"]["reviewers"] if r["name"] == "Anna"][0]["code"]
+    code, data, anna = login(anna_code)
+    check(data.get("role") == "pruefer", "Prüferin Anna angemeldet")
+    code, body, _ = req("/api/round", cookie=anna)
+    check(code == 200 and json.loads(body).get("stored") == 2, "Prüfer sieht: 2 gespeicherte Bilder offen")
+    code, body, _ = req("/api/review/next", cookie=anna)
+    item = json.loads(body) if code == 200 else {}
+    check(code == 200 and item.get("name"), "Prüfer bekommt ein gespeichertes Bild")
+    check(req("/api/review/image?name=" + item.get("name", ""), cookie=anna)[0] == 200, "... und das Bild dazu")
+    code, body, _ = req("/api/review/next", cookie=admin)
+    check(code == 200 and json.loads(body)["name"] != item.get("name"), "Admin bekommt gleichzeitig ein anderes Bild")
+    code, body, _ = req("/api/review_save", {"name": item["name"], "balls": [
+        {"x": 100, "y": 100, "kind": "cue", "color": ""}]}, cookie=anna)
+    check(code == 200 and json.loads(body)["stored"] == 1, f"Prüfer speichert ({code} {body[:80]!r})")
+    lbl = os.path.join(d, "dataset", "geprueft", "labels", item["name"] + ".json")
+    with open(lbl) as f:
+        check(json.load(f).get("labeled_by") == "Anna", "festgelegt von Anna")
+    check(req("/api/state", cookie=anna)[0] == 403 and req("/api/capture", {}, cookie=anna)[0] == 403,
+          "Prüfer darf sonst nichts")
+    check(req("/api/review/next", cookie=game)[0] == 403, "Spiel-PIN darf nicht festlegen")
+    check(req("/api/review_release", {}, cookie=anna)[0] == 200, "Prüfer gibt sein Bild frei")
 
     code, data, _ = login("0000")
     check(code == 401, "falsche PIN abgelehnt")

@@ -241,6 +241,17 @@ details > div { margin-top: 12px; }
   </section>
 
   <section>
+    <h2>Bilder fürs KI-Training</h2>
+    <p class="hint">Bilder werden nur gespeichert – festgelegt werden die Kugeln später in Ruhe (Prüfer unter <b>/pruefen</b> oder der Admin). So kostet es am Tisch keine Zeit.</p>
+    <button class="primary" type="button" id="captureBtn" style="width:100%">Bild speichern</button>
+    <div class="switchrow" style="margin-top:10px">
+      <span class="lbl" id="autoLbl">Nach jedem Stoß automatisch<span class="sub">speichert ein Bild, sobald der Tisch wieder ruhig ist</span></span>
+      <button class="switch" type="button" role="switch" id="autoSw" aria-checked="false" aria-labelledby="autoLbl"></button>
+    </div>
+    <p class="statusline" id="trainStatus"></p>
+  </section>
+
+  <section>
     <h2>Spielaufzeichnung</h2>
     <p class="hint">Speichert bei jedem Zug die Grafik und macht am Ende ein kurzes Video. Endet automatisch, wenn das Rack vorbei ist.</p>
     <button type="button" id="roundBtn" style="width:100%">Runde aufzeichnen</button>
@@ -376,6 +387,10 @@ details > div { margin-top: 12px; }
     $("recStatus").textContent = r.active ? "Aufzeichnung läuft, " + r.steps + " Züge gespeichert."
       : r.building ? "Video wird erstellt ..." : "";
     renderVideos(s.videos || []);
+    const t = s.training || {};
+    $("autoSw").setAttribute("aria-checked", t.auto_capture ? "true" : "false");
+    $("trainStatus").textContent = (t.pending || 0) === 1 ? "1 Bild wartet aufs Festlegen." :
+      (t.pending || 0) + " Bilder warten aufs Festlegen.";
     Notify.sync(s.notices);
     refreshGraphic(s);
   }
@@ -444,6 +459,13 @@ details > div { margin-top: 12px; }
   $("assistSw").addEventListener("click", () => post("assist", { enabled: !(state && state.assist) }));
   $("cueSw").addEventListener("click", () => post("cue_use", { enabled: !(state && state.cue && state.cue.enabled) }));
   $("cueCalib").addEventListener("click", () => post("cue_calibrate", {}));
+  $("captureBtn").addEventListener("click", async () => {
+    const b = $("captureBtn");
+    b.disabled = true;
+    await post("capture", {});
+    setTimeout(() => { b.disabled = false; }, 600);
+  });
+  $("autoSw").addEventListener("click", () => post("auto_capture", { enabled: !(state && state.training && state.training.auto_capture) }));
   $("roundBtn").addEventListener("click", () => post("record_round", { enabled: !(state && state.round && state.round.active) }));
 
   let polling = false;

@@ -299,9 +299,17 @@ es gibt keinen eigenen Container mehr. Das Modell erkennt jede Kugel mit ihrer *
 
 **So lernt das System euren Tisch:**
 
-1. **Bilder aufnehmen:** Nur per Knopf – im Admin-Panel „Jetzt ein Bild aufnehmen“ oder im
-   Trainingsmodus (`/training`) „Bild aufnehmen“. Automatisch wird nichts aufgenommen.
-2. **Kugeln festlegen (iPad):** Admin-Panel → „KI-Training: Kugeln festlegen“. Auf eine Kugel tippen,
+1. **Bilder speichern (am Tisch, kostet keine Zeit):** im Spiel-Panel „Bild speichern“ – oder dort
+   den Schalter **„Nach jedem Stoß automatisch“** einschalten: Sobald der Tisch nach einem Stoß
+   2 Sekunden ruhig ist, wird ein Bild gespeichert (höchstens eins alle 8 Sekunden, geht auch ohne
+   KI-Chip). Auf dem Beamer kommt kurz „Bild gespeichert“. Außerdem: Admin-Panel „Jetzt ein Bild
+   aufnehmen“ oder Trainingsmodus „Bild aufnehmen“.
+2. **Kugeln festlegen – später, in Ruhe:** Prüfer öffnen `http://<pi-ip>:8080/pruefen` (eigener Code,
+   Abschnitt 5a). Läuft gerade keine Prüfrunde, bekommen sie die gespeicherten Bilder – arbeiten
+   mehrere gleichzeitig, bekommt jeder ein anderes Bild. „Später“ überspringt, „Unbrauchbar“ legt
+   das Bild beiseite. Startet der Admin eine Prüfrunde, geht es nach dem aktuellen Bild dort weiter.
+   Der Admin kann dasselbe im Trainingsmodus (`/training`) oder im Admin-Panel →
+   „KI-Training: Kugeln festlegen“. Auf eine Kugel tippen,
    dann ihre Nummer (W, 1–15). Fehlt eine Kugel: auf die freie Stelle tippen. Unbrauchbare Bilder
    (Arm im Bild): „Verwerfen“. Sobald es ein Modell gibt, sind die Kugeln schon vorgeschlagen –
    dann nur noch prüfen und „Passt alles“.

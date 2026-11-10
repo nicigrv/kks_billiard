@@ -140,8 +140,8 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
       <button class="primary big" type="button" id="saveBtn" disabled>Passt alles</button>
       <button class="quiet big2" type="button" id="takeHumanBtn" hidden data-admin>Prüfer-Ergebnis übernehmen</button>
       <button class="quiet" type="button" id="undoBtn" disabled>Rückgängig</button>
-      <button class="quiet" type="button" id="skipBtn" disabled data-admin>Später</button>
-      <button class="danger" type="button" id="discardBtn" disabled data-admin>Verwerfen</button>
+      <button class="quiet" type="button" id="skipBtn" disabled>Später</button>
+      <button class="danger" type="button" id="discardBtn" disabled>Verwerfen</button>
     </div>
   </aside>
 </main>
@@ -156,10 +156,14 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
   const COLORS = [["gelb", "#F5C314", 1], ["blau", "#2355CD", 2], ["rot", "#D72D28", 3], ["violett", "#7837A0", 4],
                   ["orange", "#F57D19", 5], ["gruen", "#198C41", 6], ["weinrot", "#871E2D", 7]];
   const ZOOM = 4;                      // Vergroesserung der Lupe
-  // /training = Admin (PIN), /pruefen = Pruefer (eigener Code, Pruefrunden)
+  // /training = Admin (PIN), /pruefen = Pruefer (eigener Code): Pruefrunden haben Vorrang,
+  // sonst legen Pruefer die gespeicherten Bilder fest (spaeter, in Ruhe - jeder ein anderes)
   const PRUEFER = location.pathname.startsWith("/pruefen");
   let me = { role: null, name: null };
   let round = null;              // aktuelle Pruefrunde (nur Pruefer)
+  let mode = PRUEFER ? "idle" : "stored";   // Pruefer: "round" | "stored" | "idle"
+  let waitingRound = false;      // Pruefrunde wartet, bis das angefangene Bild fertig ist
+  let storedCount = 0, doneByMe = 0, loading = false;
   let item = null, selected = -1, history = [];
 
   function toast(text, err) { Notify.show(text, "", err ? "error" : "success"); }
@@ -341,10 +345,11 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
     const changed = !!item && item.balls.some((b) => b.changed);
     $("saveBtn").disabled = !item || m > 0;
     $("saveBtn").textContent = !item ? "Passt alles" : m ? m + " Nummer(n) fehlen" :
-      PRUEFER ? (round && round.submitted ? "Nochmal speichern" : "Speichern") :
+      PRUEFER && mode === "round" ? (round && round.submitted ? "Nochmal speichern" : "Speichern") :
       !item.balls.length ? "Ohne Kugeln speichern" : changed ? "Speichern & weiter" : "Passt alles";
     $("skipBtn").disabled = !item;
     $("discardBtn").disabled = !item;
+    $("skipBtn").hidden = $("discardBtn").hidden = PRUEFER && mode !== "stored";
     $("undoBtn").disabled = !history.length;
     // Admin: "?" aus dem KI-Abgleich, bei denen die Pruefer eine klare Antwort hatten
     const takeable = !PRUEFER && item ? item.balls.filter((b) => b.has_human && numberOf(b) === null).length : 0;
@@ -356,6 +361,8 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
 
   // ---------------- Laden / Speichern ----------------
   async function load(after) {
+    if (loading) return;
+    loading = true;
     item = null; selected = -1; history = [];
     update();
     try {
@@ -363,35 +370,52 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
       if (r.status === 404) {
         $("empty").classList.add("show"); $("caption").hidden = true;
         ctx.clearRect(0, 0, view.w, view.h);
+        if (PRUEFER) { mode = "idle"; storedCount = 0; showIdle(); }
         return;
       }
+      if (r.status === 401 || r.status === 403) { showLogin(); return; }
       const data = await r.json();
       if (!r.ok) { toast(data.error || "Kein Bild", true); return; }
       $("empty").classList.remove("show");
+      if (PRUEFER) { mode = "stored"; storedCount = data.pending; $("banner").hidden = true; renderPrueferStats(); }
       item = data;
       view.w = data.width; view.h = data.height;
       fit();
       const t = data.name.slice(9, 11) + ":" + data.name.slice(11, 13);
       const nq = data.balls.filter((b) => b.note).length;
-      $("caption").textContent = "Bild von " + t + " Uhr · noch " + data.pending + " offen" +
+      $("caption").textContent = (PRUEFER ? "Gespeichertes Bild von " : "Bild von ") + t + " Uhr · noch " + data.pending + " offen" +
         (nq ? " · " + nq + " × ? prüfen (KI falsch oder Prüfer uneinig)" :
          data.round ? " · aus Prüfrunde " + data.round : data.model ? " · Vorschlag vom KI-Chip" : " · ohne Vorschlag");
       $("caption").hidden = false;
       img.src = "/api/review/image?name=" + encodeURIComponent(data.name);
       update();
     } catch (e) { toast("Tisch nicht erreichbar", true); }
+    finally { loading = false; }
+  }
+
+  // Nach Speichern / Spaeter / Verwerfen: naechstes gespeichertes Bild - oder in die Pruefrunde
+  function next(after) {
+    if (PRUEFER && waitingRound) {
+      waitingRound = false;
+      item = null; selected = -1; history = []; mode = "idle";
+      fetch("/api/review_release", { method: "POST" }).catch(() => {});
+      update();
+      pollRoundNow();
+      return;
+    }
+    load(after);
   }
   img.onload = draw;
 
   $("saveBtn").addEventListener("click", async () => {
     if (!item) return;
     if (!item.balls.length && !confirm("Liegen auf diesem Bild wirklich KEINE Kugeln?")) return;
-    if (PRUEFER) {
+    if (PRUEFER && mode === "round") {
       const res = await post("round/submit", { id: item.name, balls: item.balls });
-      if (res) showRound(res);
+      if (res) onRound(res);
       return;
     }
-    if (await post("review_save", { name: item.name, balls: item.balls })) load();
+    if (await post("review_save", { name: item.name, balls: item.balls })) { doneByMe++; next(); }
   });
   $("takeHumanBtn").addEventListener("click", () => {
     if (!item) return;
@@ -407,9 +431,9 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
     await post("round_start", {});
   });
   $("discardBtn").addEventListener("click", async () => {
-    if (item && await post("review_save", { name: item.name, discard: true })) load();
+    if (item && await post("review_save", { name: item.name, discard: true })) next();
   });
-  $("skipBtn").addEventListener("click", () => { if (item) load(item.name); });
+  $("skipBtn").addEventListener("click", () => { if (item) next(item.name); });
   $("undoBtn").addEventListener("click", () => {
     if (!history.length || !item) return;
     item.balls = JSON.parse(history.pop());
@@ -491,29 +515,64 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
   }
 
   // ---------------- Pruefer-Modus ----------------
+  let lastRoundText = "";
+  function renderPrueferStats() {
+    const el = $("stats");
+    el.innerHTML = "";
+    const b = document.createElement("b"); b.textContent = storedCount;
+    el.append(b, document.createTextNode(storedCount === 1 ? " gespeichertes Bild offen" : " gespeicherte Bilder offen"));
+    if (doneByMe) {
+      const b2 = document.createElement("b"); b2.className = "q"; b2.textContent = doneByMe;
+      el.append(document.createTextNode("  ·  du hast "), b2, document.createTextNode(" festgelegt"));
+    }
+  }
+  function showIdle() {
+    round = null;
+    if (item) { item = null; selected = -1; history = []; update(); }
+    ctx.clearRect(0, 0, view.w, view.h);
+    $("caption").hidden = true;
+    $("empty").innerHTML = "";
+    const p1 = document.createElement("div");
+    p1.textContent = "Gerade keine Bilder offen – warte auf neue Bilder oder eine Prüfrunde …";
+    $("empty").appendChild(p1);
+    if (lastRoundText) {
+      const p2 = document.createElement("div");
+      p2.style.marginTop = "12px"; p2.style.fontSize = "15px";
+      p2.textContent = "Zuletzt: " + lastRoundText;
+      $("empty").appendChild(p2);
+    }
+    $("empty").classList.add("show");
+    $("banner").hidden = true;
+  }
+  // Antwort von /api/round: Pruefrunde hat Vorrang, sonst gespeicherte Bilder
+  function onRound(data) {
+    if ("stored" in data) storedCount = data.stored || 0;
+    if (data.last && data.last.text) lastRoundText = data.last.text;
+    renderPrueferStats();
+    if (data.round) {
+      if (mode === "stored" && item) {
+        if (history.length) {                       // angefangenes Bild erst fertig machen
+          waitingRound = true;
+          const banner = $("banner");
+          banner.textContent = "Neue Prüfrunde wartet – dieses Bild speichern oder „Später“, dann geht es weiter.";
+          banner.hidden = false;
+          return;
+        }
+        fetch("/api/review_release", { method: "POST" }).catch(() => {});
+      }
+      mode = "round";
+      showRound(data);
+      return;
+    }
+    if (mode === "round") { round = null; item = null; mode = "idle"; }
+    waitingRound = false;
+    if (mode === "idle") {
+      if (storedCount > 0) load(); else showIdle();
+    }
+  }
   function showRound(data) {
     const r = data.round;
     const banner = $("banner");
-    if (!r) {
-      round = null;
-      if (item) { item = null; selected = -1; history = []; update(); }
-      ctx.clearRect(0, 0, view.w, view.h);
-      $("caption").hidden = true;
-      const last = data.last;
-      $("empty").innerHTML = "";
-      const p1 = document.createElement("div");
-      p1.textContent = "Warte auf das nächste Bild vom Admin …";
-      $("empty").appendChild(p1);
-      if (last && last.text) {
-        const p2 = document.createElement("div");
-        p2.style.marginTop = "12px"; p2.style.fontSize = "15px";
-        p2.textContent = "Zuletzt: " + last.text;
-        $("empty").appendChild(p2);
-      }
-      $("empty").classList.add("show");
-      banner.hidden = true;
-      return;
-    }
     $("empty").classList.remove("show");
     if (!round || round.id !== r.id) {
       // neues Bild: Vorschlag (bzw. eigenes Ergebnis) laden
@@ -545,14 +604,17 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
     update();
   }
 
+  let roundTimer = null;
   async function pollRound() {
+    clearTimeout(roundTimer);
     try {
       const r = await fetch("/api/round", { cache: "no-store" });
       if (r.status === 401 || r.status === 403) { showLogin(); return; }
-      if (r.ok) showRound(await r.json());
+      if (r.ok) onRound(await r.json());
     } catch (e) { /* naechster Versuch */ }
-    setTimeout(pollRound, 1500);
+    roundTimer = setTimeout(pollRound, 1500);
   }
+  function pollRoundNow() { pollRound(); }
   async function poll() {
     try {
       const r = await fetch("/api/state", { cache: "no-store" });
@@ -575,6 +637,7 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
       $("title").textContent = "Prüfen";
       $("who").textContent = me.name || "";
       $("stats").textContent = "";
+      $("discardBtn").textContent = "Unbrauchbar";
       pollRound();
     } else {
       $("logoutBtn").hidden = !me.pin_required;
