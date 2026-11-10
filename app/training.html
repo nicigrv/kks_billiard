@@ -61,8 +61,9 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
 .chip { min-height: 44px; padding: 4px; border-radius: 24px; font-size: 18px; border: 3px solid transparent; }
 .chip.sel { border-color: var(--ink); }
 .chip.wide { grid-column: span 4; font-size: 15px; border-radius: var(--r); }
-.save { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.save .big { grid-column: span 2; min-height: 64px; font-size: 20px; }
+.save { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.save .big { grid-column: span 3; min-height: 60px; font-size: 20px; }
+.save button:not(.big) { padding: 8px 6px; font-size: 15px; }
 
 .toast { position: fixed; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translate(-50%, 160%);
   transition: transform .2s; background: var(--ink); color: #0A2F25; font-weight: 700; padding: 10px 16px;
@@ -120,7 +121,7 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
       <button class="primary big" type="button" id="saveBtn" disabled>Passt alles</button>
       <button class="quiet" type="button" id="undoBtn" disabled>Rückgängig</button>
       <button class="quiet" type="button" id="skipBtn" disabled>Später</button>
-      <button class="danger" type="button" id="discardBtn" disabled style="grid-column:span 2">Bild verwerfen</button>
+      <button class="danger" type="button" id="discardBtn" disabled>Verwerfen</button>
     </div>
   </aside>
 </main>
