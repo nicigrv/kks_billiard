@@ -95,7 +95,8 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
     <button class="primary" type="submit">OK</button>
   </form>
   <div class="actions">
-    <button class="quiet" type="button" id="captureBtn">Bild aufnehmen</button>
+    <button class="primary" type="button" id="captureBtn">Bild aufnehmen</button>
+    <button class="danger" type="button" id="deleteAllBtn">Alle löschen</button>
     <a class="btn quiet" href="/">Portal</a>
   </div>
 </header>
@@ -104,7 +105,7 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
   <div class="stage" id="stage">
     <canvas id="canvas" width="800" height="400" aria-label="Tischbild: Kugel antippen oder freie Stelle antippen, um eine Kugel hinzuzufügen"></canvas>
     <div class="caption" id="caption" hidden></div>
-    <div class="empty" id="empty">Keine Bilder offen.<br>Nach dem nächsten Spielzug kommt ein neues dazu – oder oben „Bild aufnehmen“.</div>
+    <div class="empty" id="empty">Keine Bilder offen.<br>Oben „Bild aufnehmen“ drücken.</div>
   </div>
 
   <aside>
@@ -342,6 +343,12 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
     selected = -1;
     update();
   });
+  let counts = 0;
+  $("deleteAllBtn").addEventListener("click", async () => {
+    if (!counts) { toast("Es gibt keine Bilder zum Löschen"); return; }
+    if (!confirm("ALLE " + counts + " Trainingsbilder löschen (offene, festgelegte und verworfene)?\n\nDas kann nicht rückgängig gemacht werden. Das KI-Modell bleibt erhalten.")) return;
+    if (await post("delete_images", { confirm: true })) load();
+  });
   $("captureBtn").addEventListener("click", async () => {
     if (await post("capture", {}) && !item) load();
   });
@@ -391,6 +398,7 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
   // ---------------- Zaehler ----------------
   function renderStats(s) {
     const t = s.training || {};
+    counts = (t.pending || 0) + (t.verified || 0) + (t.discarded || 0);
     const el = $("stats");
     el.innerHTML = "";
     const add = (txt, val, cls) => {

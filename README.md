@@ -8,8 +8,8 @@ Queue-Gyroskop ─WLAN (UDP 5005)─▶ │
 ```
 
 **Kugelerkennung:** ausschließlich über den **KI-Chip (Coral USB Accelerator)** – er erkennt jede
-Kugel samt Nummer. Bis ein eigenes Modell trainiert ist, zählt der Pi nichts selbst: Er nimmt nach
-jedem Spielzug ein Bild auf, und ihr legt die Kugeln auf dem iPad fest (Abschnitt 5).
+Kugel samt Nummer. Bis ein eigenes Modell trainiert ist, zählt der Pi nichts selbst: Ihr nehmt per
+Knopf Bilder auf und legt die Kugeln auf dem iPad fest (Abschnitt 5).
 
 **Beamer:** links das Live-Kamerabild mit Kreisen um die Kugeln, rechts eine gezeichnete
 Grafik des Tisches (neu nach jedem Stoß, mit Stoßvorschlag), unten die **Game-Bar**:
@@ -236,8 +236,8 @@ links die **aktuelle Grafik vom Pi** (wie auf dem Beamer, aktualisiert sich selb
 - **Spiel starten / Neues Rack / Abbrechen**
 - **Letzten erkannten Stoß verwerfen**: wenn das System einen Stoß gezählt hat, der keiner war.
   Der Spielstand springt auf vor diesem Stoß zurück.
-- **KI-Training: Kugeln festlegen**: die Bilder durchgehen, die der Pi nach jedem Spielzug aufnimmt
-  (siehe 5)
+- **KI-Training: Kugeln festlegen**: Bilder aufnehmen (nur per Knopf), Kugeln festlegen, alle Bilder
+  löschen (siehe 5). Großer **Trainingsmodus** unter `/training`
 - **KI-Modell (Coral)**: Status des KI-Chips, Trainingsdaten / alle Bilder laden, Modell hochladen
 - **KI-Schlagverbesserung an/aus** (siehe 3b)
 - **Spielaufzeichnung** (siehe 3c)
@@ -286,8 +286,8 @@ es gibt keinen eigenen Container mehr. Das Modell erkennt jede Kugel mit ihrer *
 
 **So lernt das System euren Tisch:**
 
-1. **Bilder aufnehmen (Pi):** Nach jedem Spielzug – sobald der Tisch nach einer Bewegung wieder ruhig
-   ist – speichert der Pi ein Bild. Zusätzlich im Portal: „Jetzt ein Bild aufnehmen“.
+1. **Bilder aufnehmen:** Nur per Knopf – im Portal „Jetzt ein Bild aufnehmen“ oder im
+   Trainingsmodus (`/training`) „Bild aufnehmen“. Automatisch wird nichts aufgenommen.
 2. **Kugeln festlegen (iPad):** Portal → „KI-Training: Kugeln festlegen“. Auf eine Kugel tippen,
    dann ihre Nummer (W, 1–15). Fehlt eine Kugel: auf die freie Stelle tippen. Unbrauchbare Bilder
    (Arm im Bild): „Verwerfen“. Sobald es ein Modell gibt, sind die Kugeln schon vorgeschlagen –
@@ -298,9 +298,13 @@ es gibt keinen eigenen Container mehr. Das Modell erkennt jede Kugel mit ihrer *
 5. **Wiederholen, bis es passt:** Im Portal steht, wie oft der KI-Chip bei euren geprüften Bildern
    richtig lag („… % der Kugeln richtig“). Mit jedem Training mit mehr Bildern wird es besser.
 
-**Alle Bilder bleiben auf dem Pi** (`data/dataset/`): `pruefen/` (offen), `geprueft/` (festgelegt,
-fürs Training), `verworfen/` (aufgehoben, nicht gelöscht). Gesammelt wird, bis weniger als 1 GB frei
-ist. Im Portal: „Alle Bilder laden“ lädt alles als ZIP herunter.
+**Die Bilder bleiben auf dem Pi** (`data/dataset/`): `pruefen/` (offen), `geprueft/` (festgelegt,
+fürs Training), `verworfen/` (aufgehoben, nicht gelöscht). Aufgenommen wird, solange mehr als 1 GB
+frei ist. „Alle Bilder laden“ lädt alles als ZIP herunter.
+
+**Alle Bilder löschen:** Knopf im Portal bzw. „Alle löschen“ im Trainingsmodus, mit Rückfrage. Löscht
+offene, festgelegte und verworfene Bilder und setzt die Trefferquote zurück. Das hochgeladene
+KI-Modell bleibt. Vorher ggf. „Trainingsdaten laden“ bzw. „Alle Bilder laden“ zum Sichern.
 
 Test des Sticks:
 ```bash

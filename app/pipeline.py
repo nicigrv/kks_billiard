@@ -39,8 +39,6 @@ class Pipeline:
             self.motion = MotionMeter()
             self.occlusion = OcclusionMeter(table.ball_radius_px)
             self.not_ready = ""
-            self._moved = False         # seit dem letzten Trainingsbild hat sich etwas bewegt
-            self._still_since = None
             self.monitor = ShotMonitor(table.ball_radius_px, clock=self.clock)
             self.balls = []
             self.moving = False
@@ -58,12 +56,9 @@ class Pipeline:
             try:
                 balls = self.detector.detect(warped)
             except CoralNotReady as e:
-                # Ohne KI-Chip wird nichts gezaehlt. Trainingsbilder entstehen trotzdem:
-                # nach jeder Bewegung, sobald der Tisch wieder ruhig ist - die Kugeln
-                # legt ihr dann auf dem iPad fest.
+                # Ohne KI-Chip wird nichts gezaehlt (Trainingsbilder gibt es per Knopf)
                 self.not_ready = str(e)
                 self.balls, self.moving = [], moving
-                self._capture_when_still(warped, moving)
                 return None
             self.not_ready = ""
             occluded = self.occlusion.update(warped, balls) > OCCLUSION_LIMIT
@@ -74,38 +69,24 @@ class Pipeline:
                 diff = ev.diff(self.table.ball_radius_px)
                 msg = self.game.apply_shot(ev.before.counts(), ev.after.counts(),
                                            diff.cue_before, diff.cue_after, diff=diff)
-                self._collect(warped, ev.after.balls)
                 return ("shot", msg, ev)
-            if ev == "reference":
-                self._collect(warped, self.monitor.reference.balls)
             return ev
 
-    def _capture_when_still(self, warped, moving, still_s=1.5):
-        if moving:
-            self._moved, self._still_since = True, None
-            return
-        now = self.clock()
-        if self._still_since is None:
-            self._still_since = now
-        if self._moved and now - self._still_since >= still_s:
-            self._moved = False
-            self._collect(warped, [])
-
     def capture_now(self):
-        """Knopf im Portal: aktuelles Bild (mit Vorschlag des Coral, falls bereit) zum Pruefen."""
+        """Knopf "Bild aufnehmen": aktuelles Bild (mit Vorschlag des KI-Chips, falls bereit)
+        zum Festlegen. Nur so entstehen Trainingsbilder - nichts wird automatisch aufgenommen."""
         with self.lock:
             if self.last_warped is None:
                 return None
-            return self._collect(self.last_warped, list(self.balls), force=True)
+            return self._collect(self.last_warped, list(self.balls))
 
-    def _collect(self, warped, balls, force=False):
-        """Trainingsbild nach einem Spielzug (Tisch ruhig) mit der automatischen Zuordnung."""
+    def _collect(self, warped, balls):
         if self.recorder:
             engine = getattr(self.detector, "engine", None)
             st = engine.status() if engine is not None and balls else {}
             model = f"{st['model']} vom {st['model_time']}" if st.get("model") else None
             return self.recorder.save_pending(warped, balls, self.table.ball_radius_px,
-                                              [ball_number(b.kind, b.color) for b in balls], model, force)
+                                              [ball_number(b.kind, b.color) for b in balls], model)
 
     def restart_tracking(self):
         """Nach Spielstart / neuem Rack: der naechste ruhige Tisch ist der neue Ausgangszustand,

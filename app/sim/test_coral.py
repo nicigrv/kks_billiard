@@ -4,7 +4,7 @@ Tests fuer KI-Chip und Trainingsbilder (ohne echten Coral-Stick):
   * Trefferquote des Modells (Vorschlag gegen festgelegtes Ergebnis)
   * CoralEngine/CoralDetector mit einem Ersatz-Interpreter, der wie ein Edge-TPU-Modell
     aus dem Training antwortet (int8, 16 Kugelnummern, Kaesten 0..1)
-  * Pipeline: ohne KI-Chip wird nichts gezaehlt, aber nach jedem Spielzug ein Bild aufgenommen
+  * Pipeline: ohne KI-Chip wird nichts gezaehlt, Bilder entstehen nur per Knopf
 
     python3 -m sim.test_coral
 """
@@ -37,7 +37,7 @@ def check(cond, text):
 def test_training_data():
     print("Trainingsbilder aufnehmen und festlegen")
     with tempfile.TemporaryDirectory() as d:
-        rec = Recorder(d, min_interval_s=0)
+        rec = Recorder(d)
         img = np.zeros((400, 800, 3), np.uint8)
         # 1. ohne Modell: Bild ohne Vorschlag
         n1 = rec.save_pending(img, [], 10.0)
@@ -93,8 +93,15 @@ def test_training_data():
 
         # Speicher voll -> nichts mehr aufnehmen
         rec.min_free_bytes = 1 << 62
-        check(rec.save_pending(img, [], 10.0, force=True) is None and not rec.disk_ok(),
+        check(rec.save_pending(img, [], 10.0) is None and not rec.disk_ok(),
               "Speicher fast voll -> keine Aufnahme mehr")
+        rec.min_free_bytes = 0
+
+        # Alle Bilder loeschen
+        k = rec.delete_all()
+        check(k == 5 and rec.pending == 0 and rec.verified == 0 and rec.discarded == 0
+              and rec.model_quality() is None, f"Alle Bilder loeschen ({k} Bilder, Trefferquote zurueckgesetzt)")
+        check(rec.save_pending(img, [], 10.0) is not None and rec.pending == 1, "danach geht Aufnehmen wieder")
 
 
 # ------------------------------------------------------------------ KI-Chip
@@ -197,7 +204,7 @@ def test_pipeline_without_chip():
     W = L / 2
     t = [0.0]
     with tempfile.TemporaryDirectory() as d:
-        rec = Recorder(d, min_interval_s=0)
+        rec = Recorder(d)
         eng = CoralEngine(model_paths=(os.path.join(d, "fehlt.tflite"),), clock=lambda: t[0])
         pipe = Pipeline(Table(DEFAULT_CORNERS, L), lambda r: CoralDetector(r, eng), clock=lambda: t[0], recorder=rec)
         rng = np.random.default_rng(1)
@@ -212,13 +219,10 @@ def test_pipeline_without_chip():
         show(a, 25)
         check("KI-Chip nicht bereit" in pipe.status_text(), f"Status sagt es ({pipe.status_text()[:50]}...)")
         check(pipe.game.shots == 0, "ohne KI-Chip wird nichts gezaehlt")
-        first = rec.pending
         show(b[:1] + a[1:], 1)            # Bewegung (Weisse rollt)
         show(b, 25)                       # wieder ruhig
-        check(rec.pending == first + 1, "nach dem Spielzug ein Bild aufgenommen (ohne Vorschlag)")
-        show(b, 25)
-        check(rec.pending == first + 1, "ruhiger Tisch: kein weiteres Bild")
-        check(pipe.capture_now() is not None and rec.pending == first + 2, "Knopf 'Jetzt aufnehmen'")
+        check(rec.pending == 0, "nichts wird automatisch aufgenommen")
+        check(pipe.capture_now() is not None and rec.pending == 1, "Bild nur per Knopf 'Bild aufnehmen'")
 
 
 if __name__ == "__main__":

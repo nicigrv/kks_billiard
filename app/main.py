@@ -60,7 +60,6 @@ class App:
         self._migrate_config(url)
         self.reader = make_reader(self.cfg["camera"], config.DATA_DIR).start()
         self.recorder = Recorder(os.path.join(config.DATA_DIR, "dataset"))
-        self.recorder.enabled = bool(self.cfg.get("collect_training", True))
         self.coral = coral_engine or CoralEngine()          # Kugelerkennung nur ueber den KI-Chip
         table = self._table_for(self.reader)
         self.pipe = Pipeline(table, lambda r: CoralDetector(r, self.coral), recorder=self.recorder)
@@ -368,7 +367,7 @@ class App:
             "camera": self.camera_state(),
             "table_size": self.cfg.get("table_size"),
             "cloth": self.cfg.get("cloth", "blau"),
-            "training": {"collect": self.recorder.enabled, "pending": self.recorder.pending,
+            "training": {"pending": self.recorder.pending,
                          "verified": self.recorder.verified, "discarded": self.recorder.discarded,
                          "disk_ok": self.recorder.disk_ok(), "quality": self.recorder.model_quality()},
             "detector": {"coral": self.coral.status(), "not_ready": self.pipe.not_ready},
@@ -492,12 +491,11 @@ class App:
                 config.save(self.cfg)
                 self.pipe.set_table(table)
                 return "Tisch gespeichert. Die Erkennung startet neu."
-            elif name == "collect":
-                self.recorder.enabled = bool(p.get("enabled"))
-                self.cfg["collect_training"] = self.recorder.enabled
-                config.save(self.cfg)
-                return ("Nach jedem Spielzug wird ein Bild gesammelt" if self.recorder.enabled
-                        else "Sammeln gestoppt")
+            elif name == "delete_images":
+                if p.get("confirm") is not True:
+                    raise config.UserError("Löschen nicht bestätigt")
+                n = self.recorder.delete_all()
+                return f"{n} Bilder gelöscht. Das KI-Modell bleibt erhalten."
             elif name == "capture":
                 if self.pipe.capture_now() is None:
                     raise config.UserError("Kein Kamerabild (Tisch eingerichtet?) oder zu viele Bilder offen")

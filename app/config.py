@@ -13,7 +13,6 @@ DEFAULTS = {
     "corners": None,            # alt (vor mehreren Kameraquellen), wird uebernommen
     "table_size": "8ft",
     "cloth": "blau",            # Tuchfarbe fuer die Grafik (blau | gruen)
-    "collect_training": True,   # nach jedem Spielzug ein Trainingsbild zum Pruefen sammeln
     "assist": False,            # KI-Schlagverbesserung (Stossvorschlag + Queue-Lage)
     "cue_offset": 0.0,          # Gyroskop: Rohwinkel, wenn der Queue an der Bande liegt
     "cue_flip": False,          # Gyroskop: Drehrichtung umkehren
