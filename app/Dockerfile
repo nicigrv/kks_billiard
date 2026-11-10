@@ -49,7 +49,7 @@ RUN if [ "$PI_CAMERA" = "1" ]; then ( \
     fi; rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY *.py admin.html beamer.html ./
+COPY *.py *.html ./
 COPY models/ ./models/
 COPY sim/ ./sim/
 
