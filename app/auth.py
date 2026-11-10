@@ -1,9 +1,11 @@
 """
 Anmeldung am Portal.
 
-  * Admin: PIN (ADMIN_PIN in docker-compose.yml, z. B. 1902). Ist keine PIN gesetzt,
-    ist jeder Admin (wie frueher).
-  * Pruefer: eigener 4-stelliger Code, den der Admin im Portal vergibt (config.json).
+  * Admin: PIN (ADMIN_PIN in docker-compose.yml, z. B. 1902) -> Admin-Panel /admin und alles andere.
+    Ist keine PIN gesetzt, ist jeder Admin.
+  * Spiel: PIN (GAME_PIN, z. B. 1212) -> Spiel-Panel unter / (Spiel starten, Korrekturen,
+    Schlagverbesserung, Queue an/aus). Ohne GAME_PIN ist das Spiel-Panel offen.
+  * Pruefer: eigener 4-stelliger Code, den der Admin im Admin-Panel vergibt (config.json).
 
 Nach der Anmeldung merkt sich der Browser ein Sitzungs-Cookie (30 Tage). So funktionieren
 auch Bilder und Download-Links, die keine Kopfzeilen mitschicken koennen. Sitzungen
@@ -26,9 +28,10 @@ class LoginError(ValueError):
 
 
 class Auth:
-    def __init__(self, pin, data_dir, reviewers, clock=time.time):
+    def __init__(self, pin, data_dir, reviewers, clock=time.time, game_pin=""):
         """reviewers: Funktion, die die aktuelle Pruefer-Liste [{"name", "code"}] liefert."""
         self.pin = pin or ""
+        self.game_pin = game_pin or ""
         self.path = os.path.join(data_dir, "sitzungen.json")
         self.reviewers = reviewers
         self.clock = clock
@@ -67,6 +70,8 @@ class Auth:
             sess = None
             if self.pin and secret == self.pin:
                 sess = {"role": "admin", "name": "Admin"}
+            elif self.game_pin and secret == self.game_pin:
+                sess = {"role": "spiel", "name": "Spiel"}
             else:
                 for r in self.reviewers():
                     if secret and secret == str(r.get("code")):
@@ -97,7 +102,7 @@ class Auth:
 
     # --------------------------------------------------------------- Abfrage
     def who(self, cookie_header, pin_header=""):
-        """-> {"role": "admin"|"pruefer"|None, "name": ...} fuer eine Anfrage."""
+        """-> {"role": "admin"|"spiel"|"pruefer"|None, "name": ...} fuer eine Anfrage."""
         if not self.pin:
             return {"role": "admin", "name": "Admin", "open": True}
         if pin_header and pin_header == self.pin:
@@ -105,11 +110,19 @@ class Auth:
         token = self.token_from(cookie_header)
         with self.lock:
             s = self.sessions.get(token)
+            if s is not None and s["role"] == "pruefer" and \
+                    not any(r["name"] == s["name"] for r in self.reviewers()):
+                s = None                                      # Pruefer wurde entfernt
             if s is None:
+                if not self.game_pin:                         # Spiel-Panel ohne PIN: offen
+                    return {"role": "spiel", "name": "Spiel", "open": True}
                 return {"role": None, "name": None}
-            if s["role"] == "pruefer" and not any(r["name"] == s["name"] for r in self.reviewers()):
-                return {"role": None, "name": None}           # Pruefer wurde entfernt
             return {"role": s["role"], "name": s["name"]}
+
+    @staticmethod
+    def can(role, need):
+        """Darf diese Rolle das? Admin darf alles, was das Spiel-Panel darf."""
+        return role == need or (role == "admin" and need == "spiel")
 
     @staticmethod
     def token_from(cookie_header):

@@ -1,5 +1,0 @@
-# Auf dem Pi besser per apt installieren (fertige ARM-Pakete):
-#   sudo apt install python3-pygame python3-opencv python3-numpy
-pygame>=2.1
-numpy
-opencv-python-headless

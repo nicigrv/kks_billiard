@@ -182,7 +182,7 @@ def test_auth():
     print("Anmeldung")
     with tempfile.TemporaryDirectory() as d:
         revs = [{"name": "Anna", "code": "4821"}]
-        a = Auth("1902", d, lambda: revs)
+        a = Auth("1902", d, lambda: revs, game_pin="1212")
         sess, tok = a.login("1902", "ip1")
         check(sess["role"] == "admin", "Admin-PIN 1902")
         check(a.who(f"billard={tok}")["role"] == "admin", "Cookie -> Admin")
@@ -190,7 +190,13 @@ def test_auth():
         check(sess == {"role": "pruefer", "name": "Anna"}, "Pruefer-Code -> Anna")
         check(a.who(f"x=1; billard={tok2}")["name"] == "Anna", "Cookie unter mehreren")
         check(a.who("")["role"] is None and a.who("", "1902")["role"] == "admin", "ohne Anmeldung nichts, PIN-Kopfzeile geht")
-        a2 = Auth("1902", d, lambda: revs)
+        sess, tok3 = a.login("1212", "ip1")
+        check(sess["role"] == "spiel" and a.who(f"billard={tok3}")["role"] == "spiel", "Spiel-PIN 1212 -> Spiel-Panel")
+        check(Auth.can("admin", "spiel") and Auth.can("spiel", "spiel") and not Auth.can("spiel", "admin")
+              and not Auth.can("pruefer", "spiel") and not Auth.can(None, "spiel"), "Admin darf alles vom Spiel-Panel, sonst niemand")
+        open_game = Auth("1902", d, lambda: revs)
+        check(open_game.who("")["role"] == "spiel", "ohne Spiel-PIN ist das Spiel-Panel offen")
+        a2 = Auth("1902", d, lambda: revs, game_pin="1212")
         check(a2.who(f"billard={tok2}")["name"] == "Anna", "Sitzung ueberlebt Neustart")
         revs.clear()
         check(a.who(f"billard={tok2}")["role"] is None, "entfernter Pruefer ist abgemeldet")

@@ -1,9 +1,9 @@
 // Einstellungen fuer das Queue-Gyroskop.
 // WLAN und Castcode werden NICHT hier eingetragen: Beim ersten Start oeffnet der Queue den
-// Hotspot "Billard-Queue-...", dort WLAN waehlen, Castcode im Admin-Portal eintragen, fertig.
+// Hotspot "Billard-Queue-...", dort WLAN waehlen, Castcode im Admin-Panel eintragen, fertig.
 #pragma once
 
-#define FW_VERSION       "2.0.0"
+#define FW_VERSION       "2.0.1"
 #define SETUP_AP_PREFIX  "Billard-Queue-"   // Hotspot-Name, dahinter die ersten 4 Zeichen des Castcodes
 #define API_PORT         80                 // HTTP-API, ueber die der Pi die Lage abfragt
 #define DISCOVERY_PORT   5005               // Pi sucht den Queue per UDP-Broadcast {"suche": "<castcode>"}

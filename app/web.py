@@ -1,10 +1,14 @@
 """
-Admin-Portal (Port 8080): Spiel starten/abbrechen, Korrekturen, Kalibrierung, KI-Training.
-Nur Python-Standardbibliothek, keine Zusatzpakete.
+Webserver (Port 8080). Nur Python-Standardbibliothek, keine Zusatzpakete.
 
-Schutz (auth.py): Ist ADMIN_PIN gesetzt, braucht alles ausser den Seiten selbst, der
-Beamer-Ansicht und der Anmeldung eine Anmeldung. Pruefer (eigener Code) duerfen nur ihre
-Pruefrunde sehen und speichern; alles andere nur der Admin (PIN).
+  /          Spiel-Panel (PIN 1212): Spiel starten, Korrekturen, Schlagverbesserung, Queue an/aus
+  /admin     Admin-Panel (PIN 1902): Kamera, Tisch, Queue koppeln, QR-Code, Pruefer, KI-Training
+  /pruefen   Pruefer (eigener Code): Bilder der Pruefrunde festlegen
+  /training  Trainingsmodus (Admin)
+  /beamer    Beamerbild im Browser (ohne Anmeldung)
+
+Schutz (auth.py): Die Seiten selbst, die Beamer-Ansicht und die Anmeldung sind offen, alles
+andere braucht die passende Rolle. Der Admin darf alles, was das Spiel-Panel darf.
 """
 
 import json
@@ -23,11 +27,28 @@ MAX_MODEL_BYTES = 64 * 1024 * 1024
 BEAMER_SIZES = {"sd": (960, 540), "hd": (1280, 720), "fhd": (1920, 1080)}
 
 
-PUBLIC_GET = {"/", "/index.html", "/beamer", "/training", "/pruefen", "/api/beamer.jpg", "/api/beamer.mjpg",
-              "/api/me"}
+PAGES = {"/": "game", "/index.html": "game", "/admin": "admin", "/beamer": "beamer", "/training": "training",
+         "/pruefen": "training"}                       # Pruefer: gleiche Seite wie der Trainingsmodus, eigene Rolle
+STATIC = {"/notify.js": ("notify.js", "application/javascript; charset=utf-8")}
+PUBLIC_GET = set(PAGES) | set(STATIC) | {"/api/beamer.jpg", "/api/beamer.mjpg", "/api/me"}
+SPIEL_GET = {"/api/game", "/api/graphic.jpg"}            # + /videos/...
 PRUEFER_GET = {"/api/round", "/api/round/image"}
 PUBLIC_POST = {"/api/login", "/api/logout"}
 PRUEFER_POST = {"/api/round/submit"}
+# Diese Befehle darf auch das Spiel-Panel (PIN 1212); alle anderen nur der Admin
+GAME_COMMANDS = {"start", "new_rack", "abort", "foul", "switch_turn", "undo", "undo_shot", "set_group",
+                 "adjust", "winner", "assist", "record_round", "cue_use", "cue_calibrate"}
+
+
+def needed_role(path):
+    """Welche Rolle braucht ein GET? None = offen."""
+    if path in PUBLIC_GET:
+        return None
+    if path in SPIEL_GET or path.startswith("/videos/"):
+        return "spiel"
+    if path in PRUEFER_GET:
+        return "pruefer"
+    return "admin"
 
 
 def make_handler(app, auth: Auth):
@@ -110,10 +131,11 @@ def make_handler(app, auth: Auth):
         def _who(self):
             return auth.who(self.headers.get("Cookie", ""), self.headers.get("X-Admin-Pin", ""))
 
-        def _denied(self, who):
+        def _denied(self, who, need="admin"):
             if who["role"] is None:
                 return self._send(401, {"error": "Bitte anmelden", "login": True})
-            return self._send(403, {"error": "Nur für den Admin", "login": True})
+            text = {"admin": "Nur für den Admin", "spiel": "Nur mit der Spiel-PIN"}.get(need, "Keine Berechtigung")
+            return self._send(403, {"error": text, "login": True})
 
         def _read_json(self):
             n = int(self.headers.get("Content-Length", "0"))
@@ -122,21 +144,31 @@ def make_handler(app, auth: Auth):
         def do_GET(self):
             url = urlsplit(self.path)
             path, query = url.path, parse_qs(url.query)
+            if len(path) > 1 and path.endswith("/") and path.rstrip("/") in PAGES:
+                path = path.rstrip("/")                          # /admin/ -> /admin
             who = self._who()
-            if path not in PUBLIC_GET and not (path in PRUEFER_GET and who["role"] == "pruefer") \
-                    and who["role"] != "admin":
-                return self._denied(who)
-            if path in ("/", "/index.html"):
-                with open(os.path.join(HERE, "admin.html"), "rb") as f:
+            need = needed_role(path)
+            if need is not None and not Auth.can(who["role"], need):
+                return self._denied(who, need)
+            if path in PAGES:
+                with open(os.path.join(HERE, PAGES[path] + ".html"), "rb") as f:
                     return self._send(200, f.read(), "text/html; charset=utf-8")
+            if path in STATIC:
+                fname, ctype = STATIC[path]
+                with open(os.path.join(HERE, fname), "rb") as f:
+                    return self._send(200, f.read(), ctype)
             if path == "/api/me":
-                return self._send(200, {"role": who["role"], "name": who["name"], "pin_required": bool(auth.pin)})
+                return self._send(200, {"role": who["role"], "name": who["name"], "pin_required": bool(auth.pin),
+                                        "game_pin_required": bool(auth.game_pin)})
             if path == "/api/state":
                 return self._send(200, app.state_dict())
-            if path in ("/beamer", "/training", "/pruefen"):
-                page = "training" if path == "/pruefen" else path[1:]     # Pruefer: gleiche Seite, eigene Rolle
-                with open(os.path.join(HERE, page + ".html"), "rb") as f:
-                    return self._send(200, f.read(), "text/html; charset=utf-8")
+            if path == "/api/game":
+                return self._send(200, app.game_state())
+            if path == "/api/qr.png":
+                png = app.qr_preview()
+                if png is None:
+                    return self._send(404, {"error": "Kein QR-Code"})
+                return self._send(200, png, "image/png")
             if path == "/api/round":
                 if who["role"] == "pruefer":
                     app.reviews.heartbeat(who["name"])
@@ -249,8 +281,10 @@ def make_handler(app, auth: Auth):
                     return self._send(400, {"error": str(e)})
                 msg = "Gespeichert - warte auf die anderen" if res is None else "Gespeichert - alle fertig!"
                 return self._send(200, dict(app.reviews.view(who["name"]), ok=True, message=msg, me=who["name"]))
-            if who["role"] != "admin":
-                return self._denied(who)
+            name = path.removeprefix("/api/")
+            need = "spiel" if name in GAME_COMMANDS else "admin"
+            if not Auth.can(who["role"], need):
+                return self._denied(who, need)
             if path == "/api/model":
                 # Coral-Modell hochladen (Datei roh im Body)
                 n = int(self.headers.get("Content-Length", "0"))
@@ -267,7 +301,6 @@ def make_handler(app, auth: Auth):
                 payload = json.loads(self.rfile.read(n) or b"{}") if n else {}
             except ValueError:
                 return self._send(400, {"error": "Ungültige Daten"})
-            name = self.path.split("?")[0].removeprefix("/api/")
             try:
                 result = app.command(name, payload)
             except UserError as e:
@@ -276,17 +309,27 @@ def make_handler(app, auth: Auth):
                 return self._send(400, {"error": f"Ungültiger Befehl: {e}"})
             if result is None:
                 return self._send(404, {"error": f"Unbekannter Befehl {name}"})
-            return self._send(200, {"ok": True, "message": result, "state": app.state_dict()})
+            state = app.state_dict() if who["role"] == "admin" else app.game_state()
+            return self._send(200, {"ok": True, "message": result, "state": state})
 
     return Handler
 
 
+class PortalServer(ThreadingHTTPServer):
+    # Viele iPads gleichzeitig (z. B. 10 Pruefer + Admin + Beamer-Ansicht): Standard waeren nur
+    # 5 wartende Verbindungen, dann werden Anfragen abgewiesen.
+    request_queue_size = 128
+    daemon_threads = True
+
+
 def start(app, port=8080):
     pin = os.environ.get("ADMIN_PIN", "")
-    auth = Auth(pin, os.environ.get("DATA_DIR", "/data"), app.reviewer_list)
+    game_pin = os.environ.get("GAME_PIN", "")
+    auth = Auth(pin, os.environ.get("DATA_DIR", "/data"), app.reviewer_list, game_pin=game_pin)
     app.auth = auth
-    server = ThreadingHTTPServer(("0.0.0.0", port), make_handler(app, auth))
+    server = PortalServer(("0.0.0.0", port), make_handler(app, auth))
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, name="web", daemon=True).start()
-    print(f"[web] Admin-Portal auf Port {port}" + (" (mit PIN)" if pin else " (OHNE PIN)"), flush=True)
+    print(f"[web] Spiel-Panel auf Port {port} " + ("(mit PIN)" if game_pin else "(OHNE PIN)") +
+          f", Admin-Panel unter /admin " + ("(mit PIN)" if pin else "(OHNE PIN)"), flush=True)
     return server

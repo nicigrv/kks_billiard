@@ -8,7 +8,7 @@ Das Modell (YOLOv8n, 16 Klassen) liefert jede Kugel direkt mit ihrer Nummer:
 Farbauswertung, keine klassische Kugelsuche mehr.
 
 Modell:
-    /data/models/billard_edgetpu.tflite      eigenes Modell (Upload im Admin-Portal)
+    /data/models/billard_edgetpu.tflite      eigenes Modell (Upload im Admin-Panel)
     /app/models/start_edgetpu.tflite         Startmodell (mit Simulator-Bildern trainiert)
 Wird die Datei ersetzt, laedt der Detektor das neue Modell von selbst.
 
@@ -84,7 +84,7 @@ class CoralEngine:
         if now < self._next_try:
             return False
         if path is None:
-            return self._fail("Kein Modell vorhanden (im Admin-Portal hochladen)")
+            return self._fail("Kein Modell vorhanden (im Admin-Panel hochladen)")
         if time.time() - mtime < 2:
             return self._fail("Modell wird gerade geschrieben", 1.0)
         try:

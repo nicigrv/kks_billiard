@@ -78,6 +78,16 @@ def main():
     check(st["castcode"] == "SMQ234" and st["address"] == "127.0.0.1:8193" and st["battery"] == 3.95,
           "Status: Castcode, Adresse, Akku")
 
+    print("Queue optional (aus/an)")
+    s.set_enabled(False)
+    time.sleep(1.3)
+    n0 = s.packets
+    time.sleep(0.5)
+    check(not s.connected and s.status()["state"] == "ausgeschaltet" and s.packets == n0,
+          "aus: keine Abfragen, gilt als nicht verbunden")
+    s.set_enabled(True)
+    check(wait_for(lambda: s.connected), "wieder an: verbunden")
+
     print("Falscher Castcode")
     s.pair("ABCDEF")
     time.sleep(2.5)

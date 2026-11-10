@@ -5,7 +5,7 @@ Beamer), Game-Bar (unterer Rand) und das grosse gruene Haken-Symbol.
 Gezeichnet wird mit pygame auf beliebige Surfaces, auch ganz ohne Bildschirm. Dieselbe
 Darstellung nutzen:
   * der Beamer (display.py),
-  * das Admin-Portal auf dem iPad (/api/graphic.jpg),
+  * Spiel- und Admin-Panel auf dem iPad (/api/graphic.jpg),
   * die Spielaufzeichnung (replay.py).
 
 Eingabe ist ein "Szene"-dict (App.scene() in main.py):
@@ -17,16 +17,20 @@ Eingabe ist ein "Szene"-dict (App.scene() in main.py):
     suggestion  Stossvorschlag (planner.py) oder None
     cue         {"angle": Grad oder None, "ok": bool, "err": Grad} oder None   (Gyroskop)
     status, info  kurze Texte fuer die Fusszeile
+    qr          {"text", "matrix", "label"} oder None   QR-Code unten rechts (nur Beamer)
+    notices     [{"key", "level", "title", "body", "t"}]  Meldungen oben rechts (nur Beamer)
 """
 
 import math
 import threading
+import time
 
 import numpy as np
 import pygame
 
 from ballnum import SOLIDS, STRIPES
 from geometry import WARP_H, WARP_W
+from notices import age_text
 
 # pygame/SDL_ttf ist nicht fuer gleichzeitiges Zeichnen aus mehreren Threads gedacht
 RENDER_LOCK = threading.RLock()
@@ -39,7 +43,7 @@ MUTED = (150, 160, 175)
 ACCENT = (80, 220, 120)
 WARN = (255, 170, 60)
 FOUL = (220, 70, 60)
-# Tuchfarbe der Grafik (Fuellung, Linien) - passend zum echten Tisch, Einstellung im Portal
+# Tuchfarbe der Grafik (Fuellung, Linien) - passend zum echten Tisch, Einstellung im Admin-Panel
 CLOTHS = {
     "blau": ((28, 84, 150), (58, 112, 178)),
     "gruen": ((18, 98, 72), (40, 125, 96)),
@@ -55,6 +59,18 @@ UNKNOWN_COLORS = {"solid": (215, 170, 50), "stripe": (70, 150, 225)}
 CUE_WHITE = (246, 244, 236)
 
 GROUP_NAMES = {"solid": "Volle", "stripe": "Halbe"}
+
+# Meldungen oben rechts: Farben wie bei Apple (systemRed, systemOrange, systemBlue, systemGreen)
+NOTICE_COLORS = {"error": (255, 69, 58), "warning": (255, 159, 10), "info": (10, 132, 255), "success": (48, 209, 88)}
+NOTICE_SLIDE_S = 0.35
+
+
+def _ui_font_path(bold):
+    """Schlichte serifenlose Schrift fuer die Meldungen (FreeSans kommt mit pygame aus Debian)."""
+    try:
+        return pygame.font.match_font("freesans", bold=bold) or None
+    except Exception:
+        return None
 
 
 # --------------------------------------------------------------------- Logik
@@ -121,6 +137,18 @@ class SceneRenderer:
             pygame.font.init()
         self._fonts = {}
         self._sprites = {}
+        self._qr = (None, None)
+
+    def ui_font(self, size, bold=False):
+        size = max(8, int(size))
+        key = ("ui", size, bold)
+        if key not in self._fonts:
+            path = _ui_font_path(bold)
+            try:
+                self._fonts[key] = pygame.font.Font(path, size)
+            except (OSError, pygame.error):
+                self._fonts[key] = self.font(size, bold)
+        return self._fonts[key]
 
     def font(self, size, bold=False):
         size = max(8, int(size))
@@ -311,6 +339,135 @@ class SceneRenderer:
         for p in pts:
             pygame.draw.circle(surf, ACCENT, (int(p[0]), int(p[1])), w // 2)
 
+    # ------------------------------------------------------------ QR-Code
+    def draw_qr(self, surf, rect, qr):
+        """Weisse Karte mit QR-Code (und kurzer Beschriftung) in der Ecke unten rechts."""
+        pygame.draw.rect(surf, PANEL, rect)
+        pygame.draw.line(surf, PANEL_LIGHT, rect.topleft, rect.topright, 2)
+        m = qr.get("matrix") if qr else None
+        if m is None:
+            return
+        pad = max(4, int(rect.h * 0.07))
+        card = rect.inflate(-2 * pad, -2 * pad)
+        side = min(card.w, card.h)
+        card = pygame.Rect(0, 0, side, side)
+        card.center = rect.center
+        pygame.draw.rect(surf, (255, 255, 255), card, border_radius=max(4, side // 12))
+        label = (qr.get("label") or "").strip()
+        lab_fs = max(10, int(side * 0.12))
+        lab_h = int(lab_fs * 1.05) if label and side >= 70 else 0
+        n = m.shape[0]
+        room = side - lab_h - 2 * max(2, side // 22)        # weisser Rand (Ruhezone) um den Code
+        mod = max(1, room // n)                            # ganze Pixel je Modul: scharf und lesbar
+        size = n * mod
+        key = (qr.get("text"), mod)
+        if self._qr[0] != key:
+            arr = np.where(m.T, 0, 255).astype(np.uint8)
+            small = pygame.surfarray.make_surface(np.stack([arr] * 3, axis=-1))
+            self._qr = (key, pygame.transform.scale(small, (size, size)))
+        top = card.y + (side - lab_h - size) // 2
+        surf.blit(self._qr[1], (card.centerx - size // 2, top))
+        if lab_h:
+            f = self.ui_font(lab_fs, True)
+            while label and f.size(label)[0] > side - 8:
+                label = label[:-1]
+            img = f.render(label, True, (30, 30, 34))
+            surf.blit(img, img.get_rect(midbottom=(card.centerx, card.bottom - max(2, side // 30))))
+
+    # ------------------------------------------------------- Meldungen
+    def draw_notices(self, surf, notices, now=None):
+        """Meldungen oben rechts wie die Mitteilungen bei iPhone/Mac: abgerundete, leicht
+        durchscheinende Karte mit farbigem Symbol, fetter Titelzeile und Text."""
+        if not notices:
+            return
+        now = time.time() if now is None else now
+        sw, sh = surf.get_size()
+        margin = max(8, int(sh * 0.022))
+        w = min(sw - 2 * margin, max(260, int(sw * 0.31)))
+        pad = max(8, int(sh * 0.016))
+        icon = max(18, int(sh * 0.034))
+        app_fs = max(10, int(sh * 0.019))
+        title_fs = max(13, int(sh * 0.027))
+        body_fs = max(12, int(sh * 0.025))
+        radius = max(10, int(sh * 0.022))
+        f_app, f_title, f_body = self.ui_font(app_fs), self.ui_font(title_fs, True), self.ui_font(body_fs)
+        y = margin
+        for n in notices:
+            text_w = w - 2 * pad
+            title = n.get("title", "")
+            while title and f_title.size(title)[0] > text_w:
+                title = title[:-2] + "…" if len(title) > 2 else ""
+            body = wrap(f_body, n.get("body", ""), text_w)
+            if len(body) > 3:
+                body = body[:3]
+                body[2] = body[2][:max(0, len(body[2]) - 2)] + "…"
+            h = pad + icon + int(pad * 0.6) + int(title_fs * 1.15) + len(body) * int(body_fs * 1.2) + pad
+            # einschieben von rechts (ease-out)
+            k = min(1.0, max(0.0, (now - n.get("t", now)) / NOTICE_SLIDE_S))
+            ease = 1 - (1 - k) ** 3
+            x_final = sw - margin - w
+            x = int(x_final + (1 - ease) * (w + margin * 2))
+            rect = pygame.Rect(x_final, y, w, h)
+            card = pygame.Surface((w, h), pygame.SRCALPHA)
+            # Milchglas: Hintergrund stark weichzeichnen, dunkel abtoenen
+            try:
+                region = surf.subsurface(rect.clip(surf.get_rect())).copy()
+                small = pygame.transform.smoothscale(region, (max(1, region.get_width() // 10),
+                                                               max(1, region.get_height() // 10)))
+                card.blit(pygame.transform.smoothscale(small, (w, h)), (0, 0))
+            except (ValueError, pygame.error):
+                card.fill((30, 30, 32, 255))
+            tint = pygame.Surface((w, h), pygame.SRCALPHA)
+            tint.fill((28, 28, 30, 205))
+            card.blit(tint, (0, 0))
+            pygame.draw.rect(card, (255, 255, 255, 34), card.get_rect(), 1, border_radius=radius)
+            mask = pygame.Surface((w, h), pygame.SRCALPHA)
+            pygame.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(), border_radius=radius)
+            card.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
+            # weicher Schatten
+            shadow = pygame.Surface((w + 24, h + 24), pygame.SRCALPHA)
+            for i, a in ((12, 18), (8, 26), (4, 34)):
+                pygame.draw.rect(shadow, (0, 0, 0, a), pygame.Rect(12 - i, 16 - i, w + 2 * i, h + 2 * i),
+                                 border_radius=radius + i)
+            surf.blit(shadow, (x - 12, y - 10))
+            surf.blit(card, (x, y))
+            # Kopfzeile: Symbol, "BILLARD", Zeit
+            col = NOTICE_COLORS.get(n.get("level"), NOTICE_COLORS["info"])
+            ic = pygame.Rect(x + pad, y + pad, icon, icon)
+            pygame.draw.rect(surf, col, ic, border_radius=max(4, icon // 4))
+            self._notice_glyph(surf, ic, n.get("level"))
+            ga = f_app.render("BILLARD", True, (235, 235, 245))
+            ga.set_alpha(150)
+            surf.blit(ga, ga.get_rect(midleft=(ic.right + int(pad * 0.7), ic.centery)))
+            tt = f_app.render(age_text(max(0.0, now - n.get("t", now))), True, (235, 235, 245))
+            tt.set_alpha(150)
+            surf.blit(tt, tt.get_rect(midright=(x + w - pad, ic.centery)))
+            ty = ic.bottom + int(pad * 0.6)
+            surf.blit(f_title.render(title, True, (255, 255, 255)), (x + pad, ty))
+            ty += int(title_fs * 1.15)
+            for line in body:
+                img = f_body.render(line, True, (235, 235, 245))
+                img.set_alpha(200)
+                surf.blit(img, (x + pad, ty))
+                ty += int(body_fs * 1.2)
+            y += h + int(margin * 0.5)
+
+    @staticmethod
+    def _notice_glyph(surf, r, level):
+        """Weisses Zeichen im Symbol: ! (Fehler/Warnung), i (Hinweis), Haken (erledigt)."""
+        white = (255, 255, 255)
+        cx, s = r.centerx, r.w
+        lw = max(2, s // 8)
+        if level == "success":
+            pts = [(r.x + s * 0.27, r.y + s * 0.53), (r.x + s * 0.44, r.y + s * 0.70), (r.x + s * 0.75, r.y + s * 0.33)]
+            pygame.draw.lines(surf, white, False, pts, lw)
+        elif level == "info":
+            pygame.draw.circle(surf, white, (cx, int(r.y + s * 0.28)), max(1, lw * 2 // 3))
+            pygame.draw.line(surf, white, (cx, r.y + s * 0.42), (cx, r.y + s * 0.76), lw)
+        else:
+            pygame.draw.line(surf, white, (cx, r.y + s * 0.22), (cx, r.y + s * 0.58), lw)
+            pygame.draw.circle(surf, white, (cx, int(r.y + s * 0.75)), max(1, lw * 2 // 3))
+
     # ------------------------------------------------- rechte Bildschirmhaelfte
     def headline(self, game):
         if game["phase"] == "idle":
@@ -490,11 +647,16 @@ class SceneRenderer:
         else:
             return False
         w = int(rect.w * 0.8)
-        fs = max(18, int(rect.h * 0.075))
-        row = int(fs * 1.25)
-        cols = 2 if len(parts) > 4 else 1
+        cols = 1 if len(parts) <= 4 else (2 if len(parts) <= 10 else 3)
         rows = (len(parts) + cols - 1) // cols
-        h = int(fs * 1.4 + row * 1.1 + rows * row + fs * 0.9)
+        # Schrift so gross wie moeglich, aber die Karte muss in die Tischgrafik passen (auch bei 10+ Pruefern)
+        fs = max(18, int(rect.h * 0.075))
+        while True:
+            row = int(fs * 1.25)
+            h = int(fs * 1.4 + row * 1.1 + rows * row + fs * 0.9)
+            if h <= rect.h * 0.94 or fs <= 12:
+                break
+            fs -= 1
         card = pygame.Rect(0, 0, w, h)
         card.center = rect.center
         bg = pygame.Surface(card.size, pygame.SRCALPHA)
@@ -519,7 +681,13 @@ class SceneRenderer:
                                                     (mc[0] + mark_r * 0.55, mc[1] - mark_r * 0.4)], max(2, fs // 10))
             else:
                 pygame.draw.circle(surf, MUTED, mc, mark_r, max(2, fs // 12))
-            self.text(surf, ptc["name"], fs, (cx + 2 * mark_r + fs // 3, cy), TEXT if done else MUTED, bold=done)
+            name, room = ptc["name"], colw - 2 * mark_r - fs // 3 - fs // 2
+            f = self.font(fs, done)
+            if f.size(name)[0] > room:                      # lange Namen kuerzen statt ueberlappen
+                while name and f.size(name + "…")[0] > room:
+                    name = name[:-1]
+                name += "…"
+            self.text(surf, name, fs, (cx + 2 * mark_r + fs // 3, cy), TEXT if done else MUTED, bold=done)
         return True
 
     # ---------------------------------------------------- Komplettansicht (iPad/Video)

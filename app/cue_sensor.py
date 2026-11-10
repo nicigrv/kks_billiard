@@ -3,7 +3,7 @@ Gyroskop im Queue: Der Pi fragt die Lage des Queues per WLAN ab (Firmware: cue_s
 und vergleicht sie mit dem Stossvorschlag.
 
 Koppeln ueber den CASTCODE (6 Zeichen, zeigt der Queue in seinem Einrichtungs-Hotspot):
-  1. Im Admin-Portal unter "Queue mit Gyroskop" den Castcode eintragen.
+  1. Im Admin-Panel unter "Queue mit Gyroskop" den Castcode eintragen.
   2. Der Pi sucht den Queue per UDP-Broadcast {"suche": "<castcode>"} an Port 5005;
      der Queue mit diesem Code antwortet mit seiner IP.
   3. Danach fragt der Pi ca. 25x pro Sekunde  GET http://<queue>/api/lage  ab
@@ -12,10 +12,11 @@ Koppeln ueber den CASTCODE (6 Zeichen, zeigt der Queue in seinem Einrichtungs-Ho
      yaw   = Richtung in der Waagerechten, Grad, gegen den Uhrzeigersinn positiv
      pitch = Neigung (Spitze nach unten negativ)
   Ist der Queue nicht mehr erreichbar (neue IP nach Neustart), sucht der Pi ihn neu.
+  Der Queue ist optional: ausgeschaltet (enabled=False) sucht und fragt der Pi nichts ab.
 
 Ein Gyroskop kennt nur Drehungen, nicht die Richtung zum Tisch. Deshalb einmal
 kalibrieren: Queue an die lange Bande legen, Spitze zeigt in der Grafik nach RECHTS,
-im Portal "Queue kalibrieren" druecken. Ab dann: Tischwinkel = Abweichung davon.
+im Spiel- oder Admin-Panel "Queue kalibrieren" druecken. Ab dann: Tischwinkel = Abweichung davon.
 Die Position des Queues kann ein Gyroskop nicht messen - der helle Queue wird in
 der Grafik deshalb immer hinter die Weisse gezeichnet, gedreht um den gemessenen Winkel.
 """
@@ -60,8 +61,9 @@ def clean_castcode(code):
 
 class CueSensor:
     def __init__(self, castcode="", offset=0.0, flip=False, discovery_port=5005, address=None,
-                 on_found=None, poll_hz=25.0, clock=time.monotonic):
+                 on_found=None, poll_hz=25.0, clock=time.monotonic, enabled=True):
         self.castcode = castcode or ""
+        self.enabled = bool(enabled)
         self.offset = float(offset)
         self.flip = bool(flip)
         self.discovery_port = discovery_port
@@ -77,7 +79,7 @@ class CueSensor:
         self.addr = None
         self.packets = 0
         self.last_error = ""
-        self.state = "kein Castcode eingetragen" if not self.castcode else "suche Queue ..."
+        self.state = self._idle_state()
         self._stop = threading.Event()
         self._wake = threading.Event()
 
@@ -89,13 +91,27 @@ class CueSensor:
         self._stop.set()
         self._wake.set()
 
+    def _idle_state(self):
+        if not self.castcode:
+            return "kein Castcode eingetragen"
+        return "suche Queue ..." if self.enabled else "ausgeschaltet"
+
     def pair(self, castcode):
         """Neuen Castcode eintragen (leer = entkoppeln)."""
         with self.lock:
             self.castcode = castcode or ""
             self.address = None
             self.data = None
-            self.state = "suche Queue ..." if castcode else "kein Castcode eingetragen"
+            self.state = self._idle_state()
+        self._wake.set()
+
+    def set_enabled(self, enabled):
+        """Queue benutzen ja/nein. Aus: keine Suche, keine Abfragen, gilt als nicht verbunden."""
+        with self.lock:
+            self.enabled = bool(enabled)
+            if not self.enabled:
+                self.data = None
+            self.state = self._idle_state()
         self._wake.set()
 
     # ------------------------------------------------------------- Suche
@@ -134,7 +150,7 @@ class CueSensor:
         while not self._stop.is_set():
             t0 = time.monotonic()
             code, address = self.castcode, self.address
-            if not code:
+            if not code or not self.enabled:
                 self._wake.wait(1.0)
                 self._wake.clear()
                 continue
@@ -155,7 +171,7 @@ class CueSensor:
                     self.on_found(found)
             try:
                 raw = self.fetch(address, code)
-                if self.feed(raw, address):
+                if self.enabled and self.castcode == code and self.feed(raw, address):
                     fails = 0
                     self.state = "verbunden"
                     self.last_error = ""
@@ -165,6 +181,8 @@ class CueSensor:
             except (OSError, ValueError) as e:
                 self.last_error = str(e)
                 fails += 1
+            if not self.enabled:
+                continue
             if fails >= 10:                     # ~2-6 s nichts: neue IP? neu suchen
                 with self.lock:
                     if self.castcode == code:
@@ -217,6 +235,7 @@ class CueSensor:
             d = dict(self.data) if self.data else {}
         return {
             "castcode": self.castcode,
+            "enabled": self.enabled,
             "state": "verbunden" if self.connected else self.state,
             "connected": self.connected,
             "angle": None if self.table_angle() is None else round(self.table_angle(), 1),

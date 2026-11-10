@@ -2,7 +2,7 @@
 Simulator: erzeugt Kamerabilder eines Pooltisches mit bekannten Kugelpositionen.
 
 Bewusst NICHT geschoent: Schatten, Glanzlichter, ungleichmaessige Beleuchtung,
-schraeger Kamerawinkel, Sensorrauschen und JPEG-Artefakte wie bei der ESP32-CAM.
+schraeger Kamerawinkel, Sensorrauschen und JPEG-Artefakte wie bei einer echten Kamera.
 Dient zum Testen der Erkennung und der Spiellogik ohne echten Tisch.
 """
 

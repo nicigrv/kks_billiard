@@ -160,15 +160,6 @@ details > div { margin-top: 12px; }
 .calib canvas { display: block; width: 100%; height: auto; }
 .liveview { width: 100%; border-radius: 10px; display: block; background: #000; min-height: 120px; }
 
-.toast {
-  position: fixed; left: 50%; bottom: max(20px, env(safe-area-inset-bottom));
-  transform: translate(-50%, 140%); transition: transform .25s, visibility .25s; visibility: hidden;
-  background: var(--ivory); color: var(--felt-dark); font-weight: 700;
-  padding: 12px 18px; border-radius: 12px; max-width: calc(100% - 32px);
-  box-shadow: 0 6px 20px rgba(0,0,0,.35);
-}
-.toast.show { transform: translate(-50%, 0); visibility: visible; }
-.toast.err { background: var(--foul); color: var(--ivory); }
 /* Anmeldung (Admin-PIN) */
 .login { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center;
   background: rgba(10, 47, 37, .97); padding: 16px; }
@@ -184,6 +175,21 @@ details > div { margin-top: 12px; }
 .dot { width: 12px; height: 12px; border-radius: 50%; background: #55645C; display: inline-block; }
 .dot.on { background: #7FE0A0; }
 .addrow { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.topnav { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.topnav h1 { font: 700 30px/1 var(--display); margin: 0 auto 0 0; }
+.topnav a, .topnav button { min-height: 40px; padding: 8px 12px; font-size: 15px; border-radius: 10px; }
+.topnav a { color: var(--ivory); text-decoration: none; border: 2px solid var(--rail-light); font-weight: 700; }
+.switchrow { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 16px;
+  border-radius: 14px; background: rgba(10, 47, 37, .7); border: 2px solid rgba(122, 75, 46, .55); margin-bottom: 10px; }
+.switchrow .lbl { font-weight: 700; }
+.switchrow .sub { display: block; font-weight: 400; font-size: 14px; color: var(--ivory-dim); }
+.switch { position: relative; flex: 0 0 auto; width: 56px; height: 34px; min-height: 0; padding: 0; border-radius: 17px;
+  background: #3A4A44; transition: background .25s; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 28px; height: 28px; border-radius: 50%;
+  background: #fff; box-shadow: 0 2px 4px rgba(0,0,0,.3); transition: transform .25s cubic-bezier(.3,1.3,.5,1); }
+.switch[aria-checked="true"] { background: #30D158; }
+.switch[aria-checked="true"]::after { transform: translateX(22px); }
+.qrprev { display: block; width: 160px; height: 160px; margin: 4px 0 12px; border-radius: 12px; background: #fff; image-rendering: pixelated; }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
@@ -194,8 +200,13 @@ details > div { margin-top: 12px; }
 <main>
  <div class="col-left">
 
+  <nav class="topnav" aria-label="Seiten">
+    <h1>Admin</h1>
+    <a href="/">Spiel-Panel</a>
+    <a href="/beamer" target="_blank" rel="noopener">Beamer-Ansicht</a>
+    <button class="quiet" type="button" id="logoutBtn">Abmelden</button>
+  </nav>
   <img class="graphic" id="graphic" alt="Grafische Ansicht des Tisches wie auf dem Beamer">
-  <p class="hint" style="margin:-6px 0 14px"><a class="link" href="/beamer" target="_blank" rel="noopener">Beamer-Ansicht im Browser öffnen</a> – das komplette Beamerbild live, z. B. für einen Fernseher oder ein zweites Tablet.</p>
 
   <div class="board" aria-live="polite">
     <div class="cueball hidden" id="cueball" aria-hidden="true"></div>
@@ -221,102 +232,58 @@ details > div { margin-top: 12px; }
  </div>
  <div class="col-right">
 
-  <section id="fixSection">
-    <h2>Korrigieren</h2>
-    <div class="grid">
-      <button class="danger" data-cmd="foul">Foul</button>
-      <button data-cmd="switch_turn">Zug wechseln</button>
-      <button class="quiet" data-cmd="undo" id="undoBtn">Rückgängig</button>
-      <button class="quiet span3" data-cmd="undo_shot" id="undoShotBtn">Letzten erkannten Stoß verwerfen</button>
+  <details id="cueDetails" open>
+    <summary>Queue mit Gyroskop</summary>
+    <div>
+      <div class="switchrow">
+        <span class="lbl" id="cueUseLbl">Queue benutzen<span class="sub">optional – auch im Spiel-Panel schaltbar</span></span>
+        <button class="switch" type="button" role="switch" id="cueUse" aria-checked="false" aria-labelledby="cueUseLbl"></button>
+      </div>
+      <p class="statusline" id="cueStatus">-</p>
+      <p class="hint">Koppeln: Queue einschalten, am Handy mit dem WLAN <b>„Billard-Queue-…“</b> verbinden. Auf der Seite, die sich öffnet, euer WLAN wählen. Der Queue zeigt dann seinen <b>Castcode</b> – hier eintragen, dort den Haken setzen und „Verbinden“. Danach finden sich Pi und Queue über das Netzwerk von selbst.</p>
+      <form class="addrow" id="cuePairForm" autocomplete="off">
+        <input type="text" id="cueCode" maxlength="9" placeholder="Castcode, z. B. K7P2QM" aria-label="Castcode des Queues" autocapitalize="characters" spellcheck="false" style="text-transform:uppercase;letter-spacing:3px">
+        <button type="submit" class="primary">Koppeln</button>
+      </form>
+      <button class="quiet" type="button" id="cueUnpair" style="width:100%;margin:8px 0 14px" hidden>Queue entkoppeln</button>
+      <p class="hint">Kalibrieren: Queue flach an die lange Bande legen, die Spitze zeigt in der Grafik nach <b>rechts</b>. Dann drücken und den Queue kurz ruhig lassen.</p>
+      <button class="primary" type="button" id="cueCalib" style="width:100%">Queue kalibrieren</button>
+      <div class="grid two" style="margin-top:12px">
+        <button class="quiet" type="button" id="cueFlip">Drehrichtung umkehren</button>
+        <div>
+          <label for="cueTol">Grüner Haken ab</label>
+          <select id="cueTol">
+            <option value="1">± 1°</option><option value="2">± 2°</option><option value="3">± 3°</option><option value="5">± 5°</option>
+          </select>
+        </div>
+      </div>
+      <p class="hint" style="margin-top:8px">Dreht sich der helle Queue in der Grafik falsch herum, „Drehrichtung umkehren“ drücken.</p>
     </div>
-    <p class="hint" style="margin-top:8px">„Stoß verwerfen“, wenn das System einen Stoß erkannt hat, der keiner war (z. B. Kugel von Hand verschoben). Der Spielstand springt auf vor diesem Stoß zurück.</p>
-    <details>
-      <summary>Weitere Korrekturen</summary>
-      <div>
-        <p class="hint">Gruppe festlegen</p>
-        <div class="grid two" style="margin-bottom:14px">
-          <button data-cmd="set_group" data-team="0" data-group="solid" class="g0">A spielt Volle</button>
-          <button data-cmd="set_group" data-team="0" data-group="stripe" class="g0">A spielt Halbe</button>
-        </div>
-        <p class="hint">Restkugeln anpassen</p>
-        <div class="grid" style="grid-template-columns:1fr 1fr 1fr 1fr;margin-bottom:14px">
-          <button data-cmd="adjust" data-group="solid" data-delta="-1" aria-label="Eine volle weniger">Volle −</button>
-          <button data-cmd="adjust" data-group="solid" data-delta="1" aria-label="Eine volle mehr">Volle +</button>
-          <button data-cmd="adjust" data-group="stripe" data-delta="-1" aria-label="Eine halbe weniger">Halbe −</button>
-          <button data-cmd="adjust" data-group="stripe" data-delta="1" aria-label="Eine halbe mehr">Halbe +</button>
-        </div>
-        <p class="hint">Rack beenden</p>
-        <div class="grid two">
-          <button data-cmd="winner" data-team="0" id="win0">A gewinnt</button>
-          <button data-cmd="winner" data-team="1" id="win1">B gewinnt</button>
-        </div>
-      </div>
-    </details>
-  </section>
+  </details>
 
-  <section>
-    <h2>Spiel</h2>
-    <div id="playingControls" class="grid two">
-      <button class="primary" data-cmd="new_rack">Neues Rack</button>
-      <button class="quiet" data-cmd="abort">Spiel abbrechen</button>
-      <p class="hint span3" style="margin:4px 0 0">Erst die Kugeln aufbauen, dann „Neues Rack“ drücken. Die Teams brechen abwechselnd an.</p>
+  <details id="qrDetails">
+    <summary>Beamer: QR-Code</summary>
+    <div>
+      <p class="hint">Unten rechts auf dem Beamer. Ohne eigenen Inhalt führt er zum Spiel-Panel (dort braucht es die Spiel-PIN). Ihr könnt auch eine eigene Adresse eintragen, z. B. eure Webseite.</p>
+      <div class="switchrow">
+        <span class="lbl" id="qrOnLbl">QR-Code zeigen</span>
+        <button class="switch" type="button" role="switch" id="qrOn" aria-checked="true" aria-labelledby="qrOnLbl"></button>
+      </div>
+      <img class="qrprev" id="qrPreview" alt="Vorschau des QR-Codes">
+      <p class="statusline" id="qrNow"></p>
+      <form id="qrForm" autocomplete="off">
+        <div class="field">
+          <label for="qrText">Inhalt (Adresse oder Text)</label>
+          <input type="text" id="qrText" inputmode="url" maxlength="300" placeholder="leer = Spiel-Panel">
+        </div>
+        <div class="field">
+          <label for="qrLabel">Beschriftung darunter</label>
+          <input type="text" id="qrLabel" maxlength="24" placeholder="z. B. Spiel-Panel">
+        </div>
+        <button class="primary" type="submit" style="width:100%">QR-Code speichern</button>
+      </form>
     </div>
-    <form id="startForm">
-      <div class="grid two">
-        <div class="field"><label for="ta">Team 1</label><input type="text" id="ta" maxlength="18" placeholder="z. B. Rot" autocomplete="off"></div>
-        <div class="field"><label for="tb">Team 2</label><input type="text" id="tb" maxlength="18" placeholder="z. B. Blau" autocomplete="off"></div>
-      </div>
-      <div class="field">
-        <label id="breakLabel">Wer bricht an?</label>
-        <div class="seg" role="radiogroup" aria-labelledby="breakLabel">
-          <input type="radio" name="breaker" id="b0" value="0" checked><label for="b0" id="b0l">Team 1</label>
-          <input type="radio" name="breaker" id="b1" value="1"><label for="b1" id="b1l">Team 2</label>
-        </div>
-      </div>
-      <button class="primary" type="submit" style="width:100%">Spiel starten</button>
-      <p class="hint" style="margin-top:8px">Kugeln vorher aufbauen. Die Kamera merkt sich die Aufstellung, sobald der Tisch ruhig ist.</p>
-    </form>
-  </section>
-
-  <section>
-    <h2>KI-Schlagverbesserung</h2>
-    <p class="hint">Zeigt auf dem Beamer den einfachsten Stoß: dunkler Queue = optimale Lage, heller Queue = echte Lage (Gyroskop im Queue). Passt die Lage, kommt ein großer grüner Haken.</p>
-    <button class="toggle" id="assistBtn" type="button" style="width:100%">Schlagverbesserung: aus</button>
-    <p class="statusline" id="suggestionText"></p>
-    <details id="cueDetails">
-      <summary>Queue mit Gyroskop</summary>
-      <div>
-        <p class="statusline" id="cueStatus">-</p>
-        <p class="hint">Koppeln: Queue einschalten, am Handy mit dem WLAN <b>„Billard-Queue-…“</b> verbinden. Auf der Seite, die sich öffnet, euer WLAN wählen. Der Queue zeigt dann seinen <b>Castcode</b> – hier eintragen, dort den Haken setzen und „Verbinden“.</p>
-        <form class="addrow" id="cuePairForm" autocomplete="off">
-          <input type="text" id="cueCode" maxlength="9" placeholder="Castcode, z. B. K7P2QM" aria-label="Castcode des Queues" autocapitalize="characters" spellcheck="false" style="text-transform:uppercase;letter-spacing:3px">
-          <button type="submit" class="primary">Koppeln</button>
-        </form>
-        <button class="quiet" type="button" id="cueUnpair" style="width:100%;margin:8px 0 14px" hidden>Queue entkoppeln</button>
-        <p class="hint">Kalibrieren: Queue flach an die lange Bande legen, die Spitze zeigt in der Grafik nach <b>rechts</b>. Dann drücken und den Queue kurz ruhig lassen.</p>
-        <button class="primary" type="button" id="cueCalib" style="width:100%">Queue kalibrieren</button>
-        <div class="grid two" style="margin-top:12px">
-          <button class="quiet" type="button" id="cueFlip">Drehrichtung umkehren</button>
-          <div>
-            <label for="cueTol">Grüner Haken ab</label>
-            <select id="cueTol">
-              <option value="1">± 1°</option><option value="2">± 2°</option><option value="3">± 3°</option><option value="5">± 5°</option>
-            </select>
-          </div>
-        </div>
-        <p class="hint" style="margin-top:8px">Dreht sich der helle Queue in der Grafik falsch herum, „Drehrichtung umkehren“ drücken.</p>
-      </div>
-    </details>
-  </section>
-
-  <section>
-    <h2>Spielaufzeichnung</h2>
-    <p class="hint">Speichert bei jedem Zug die grafische Ansicht (keine Kamerabilder) und macht daraus am Ende ein kurzes Video. Endet automatisch, wenn das Rack vorbei ist.</p>
-    <button type="button" id="roundBtn" style="width:100%">Runde aufzeichnen</button>
-    <p class="statusline" id="roundStatus"></p>
-    <ul class="videos" id="videos"></ul>
-    <video class="player" id="player" controls playsinline preload="metadata"></video>
-  </section>
+  </details>
 
   <details id="roundDetails">
     <summary>Prüfrunde (mehrere Prüfer) <span class="badge" id="roundBadge" hidden></span></summary>
@@ -324,7 +291,7 @@ details > div { margin-top: 12px; }
       <p class="hint">Jedes Bild wird von mehreren Prüfern gleichzeitig festgelegt. Prüfer öffnen am iPad <b id="pruefenUrl">/pruefen</b> und melden sich mit ihrem Code an. „Bild an alle Prüfer“ schickt das aktuelle Kamerabild an alle, die gerade angemeldet sind. Haben alle gespeichert, zeigt der Beamer „Alle fertig – weiter!“ und es klingt ein Ding. Mehrheit entscheidet. Gibt es ein KI-Modell, macht der KI-Chip zu jedem Bild einen Vorschlag, der danach mit dem Ergebnis der Prüfer verglichen wird: Wo die KI falsch lag oder die Prüfer uneinig sind, kommt ein „?“ – das Bild landet dann bei euch unter den offenen Bildern.</p>
       <button class="primary" type="button" id="roundStartBtn" style="width:100%">Bild an alle Prüfer</button>
       <label class="check"><input type="checkbox" id="showAiToggle"> Prüfer sehen den KI-Vorschlag (sonst legen sie selbst fest und es wird danach verglichen – genauer)</label>
-      <p class="statusline" id="roundStatus"></p>
+      <p class="statusline" id="reviewRoundStatus"></p>
       <div class="grid two" id="roundActions" hidden>
         <button class="quiet" type="button" id="roundFinishBtn">Mit den bisherigen abschließen</button>
         <button class="danger" type="button" id="roundCancelBtn">Runde abbrechen</button>
@@ -408,15 +375,10 @@ details > div { margin-top: 12px; }
       <div class="field">
         <label for="camSource">Kameraquelle</label>
         <select id="camSource">
-          <option value="esp32">ESP32-CAM (WLAN)</option>
-          <option value="usb">USB-Kamera am Pi</option>
           <option value="picam">Pi-Kameramodul (Flachbandkabel)</option>
+          <option value="usb">USB-Kamera am Pi</option>
           <option value="demo">Demo (Bild aus dem Internet / Simulation)</option>
         </select>
-      </div>
-      <div class="field cam-opt" data-src="esp32">
-        <label for="camUrl">Adresse des Kamera-Streams</label>
-        <input type="text" id="camUrl" inputmode="url" autocomplete="off" placeholder="http://192.168.88.200:81/stream">
       </div>
       <div class="field cam-opt" data-src="usb">
         <label for="camDevice">Gerät</label>
@@ -466,30 +428,24 @@ details > div { margin-top: 12px; }
 
  </div>
 </main>
-<div class="toast" id="toast" role="status"></div>
 <div class="login" id="login" hidden>
   <form id="loginForm" autocomplete="off">
-    <h2>Admin-Portal</h2>
+    <h2>Admin-Panel</h2>
     <p class="hint" id="loginHint" style="margin:0">Bitte den Admin-PIN eingeben.</p>
     <input type="password" id="loginInput" inputmode="numeric" maxlength="12" aria-label="Admin-PIN">
     <button class="primary" type="submit">Anmelden</button>
-    <p class="hint" style="margin:0">Prüfer melden sich unter <b>/pruefen</b> mit ihrem Code an.</p>
+    <p class="hint" style="margin:0">Spieler nehmen das Spiel-Panel (Startseite), Prüfer melden sich unter <b>/pruefen</b> mit ihrem Code an.</p>
   </form>
 </div>
 
+<script src="/notify.js"></script>
 <script>
 (function () {
   "use strict";
   const $ = (id) => document.getElementById(id);
   let state = null;
 
-  function toast(text, isErr) {
-    const t = $("toast");
-    t.textContent = text;
-    t.className = "toast show" + (isErr ? " err" : "");
-    clearTimeout(toast._t);
-    toast._t = setTimeout(() => { t.className = "toast"; }, 3200);
-  }
+  function toast(text, isErr) { Notify.show(text, "", isErr ? "error" : "success"); }
 
   async function post(name, payload) {
     try {
@@ -523,10 +479,15 @@ details > div { margin-top: 12px; }
         body: JSON.stringify({ secret: $("loginInput").value.trim() }) });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) { showLogin(data.error || "Anmeldung fehlgeschlagen"); return; }
-      if (data.role !== "admin") { showLogin("Das ist ein Prüfer-Code. Prüfer nehmen die Seite /pruefen."); return; }
+      if (data.role === "pruefer") { showLogin("Das ist ein Prüfer-Code. Prüfer nehmen die Seite /pruefen."); return; }
+      if (data.role !== "admin") { showLogin("Das ist die Spiel-PIN. Hier braucht es die Admin-PIN."); return; }
       $("login").hidden = true;
       poll();
     } catch (err) { showLogin("Tisch nicht erreichbar"); }
+  });
+  $("logoutBtn").addEventListener("click", async () => {
+    await fetch("/api/logout", { method: "POST" }).catch(() => {});
+    showLogin();
   });
 
   // ---------------- Darstellung ----------------
@@ -562,17 +523,9 @@ details > div { margin-top: 12px; }
     $("status").textContent = s.status;
     $("status").className = s.status === "Bereit" ? "ok" : "";
     $("fps").textContent = s.camera_fps ? s.camera_fps.toFixed(1) + " Bilder/s" : "Kamera getrennt";
-
-    $("fixSection").style.display = idle ? "none" : "";
-    $("playingControls").style.display = idle ? "none" : "";
-    $("startForm").style.display = idle ? "" : "none";
-    $("undoBtn").disabled = !g.can_undo;
-    $("undoShotBtn").disabled = !g.can_undo_shot;
     renderExtras(s);
-    $("win0").textContent = g.teams[0] + " gewinnt";
-    $("win1").textContent = g.teams[1] + " gewinnt";
-    document.querySelectorAll(".g0")[0].textContent = g.teams[0] + " spielt Volle";
-    document.querySelectorAll(".g0")[1].textContent = g.teams[0] + " spielt Halbe";
+    renderQr(s);
+    Notify.sync(s.notices);
 
     const log = $("log");
     log.innerHTML = "";
@@ -592,7 +545,7 @@ details > div { margin-top: 12px; }
     if (!calibDirty && s.cloth) $("clothColor").value = s.cloth;
   }
 
-  // ---------------- Grafik, Schlagverbesserung, Aufzeichnung ----------------
+  // ---------------- Grafik, Queue ----------------
   let graphicVersion = -1, graphicBusy = false, graphicAt = 0;
   function refreshGraphic(s) {
     const live = s.assist && s.cue && s.cue.connected;
@@ -609,13 +562,8 @@ details > div { margin-top: 12px; }
 
   function renderExtras(s) {
     refreshGraphic(s);
-    const ab = $("assistBtn");
-    ab.textContent = "Schlagverbesserung: " + (s.assist ? "an" : "aus");
-    ab.classList.toggle("on", !!s.assist);
-    ab.setAttribute("aria-pressed", s.assist ? "true" : "false");
-    $("suggestionText").textContent = s.assist ? (s.suggestion || "Noch kein Vorschlag (Spiel läuft? Tisch ruhig?)") : "";
-
     const c = s.cue || {};
+    $("cueUse").setAttribute("aria-checked", c.enabled ? "true" : "false");
     const cs = $("cueStatus");
     cs.innerHTML = "";
     const add = (label, value, cls) => {
@@ -625,7 +573,7 @@ details > div { margin-top: 12px; }
     };
     if (c.castcode) add("Castcode: ", c.castcode);
     add("Queue: ", c.connected ? "verbunden" + (c.address ? " (" + c.address + ")" : "") : (c.state || "nicht verbunden"),
-        c.connected ? "good" : "bad");
+        c.connected ? "good" : c.enabled ? "bad" : "");
     if (!c.connected && c.error && c.castcode) add("", c.error);
     $("cueUnpair").hidden = !c.castcode;
     if (document.activeElement !== $("cueCode") && !$("cueCode").value) $("cueCode").placeholder = c.castcode ? "anderer Castcode" : "Castcode, z. B. K7P2QM";
@@ -639,47 +587,8 @@ details > div { margin-top: 12px; }
     $("cueFlip").classList.toggle("toggle", true);
     if (document.activeElement !== $("cueTol") && c.tolerance) $("cueTol").value = String(Math.round(c.tolerance));
 
-    const r = s.round || {};
-    $("roundBtn").textContent = r.active ? "Aufzeichnung beenden" : "Runde aufzeichnen";
-    $("roundBtn").className = r.active ? "danger" : "";
-    $("roundStatus").textContent = r.active ? ("Aufzeichnung läuft, " + r.steps + " Züge gespeichert.")
-      : r.building ? "Video wird erstellt ..." : (r.error || "");
-    renderVideos(s.videos || []);
   }
 
-  let videoKey = "";
-  function renderVideos(list) {
-    const key = list.map((v) => v.name + v.size_mb).join("|");
-    if (key === videoKey) return;
-    videoKey = key;
-    const ul = $("videos");
-    ul.innerHTML = "";
-    if (!list.length) {
-      const li = document.createElement("li"); li.textContent = "Noch keine Videos."; ul.appendChild(li); return;
-    }
-    for (const v of list) {
-      const li = document.createElement("li");
-      const span = document.createElement("span");
-      span.textContent = v.time + "  ·  " + v.size_mb.toFixed(1).replace(".", ",") + " MB";
-      const play = document.createElement("a");
-      play.href = "/videos/" + encodeURIComponent(v.name);
-      play.textContent = "Ansehen";
-      play.addEventListener("click", (e) => {
-        e.preventDefault();
-        const p = $("player"); p.src = play.href; p.classList.add("show"); p.play().catch(() => {});
-      });
-      const dl = document.createElement("a");
-      dl.href = play.href; dl.download = v.name; dl.textContent = "Laden";
-      const right = document.createElement("span");
-      right.style.display = "flex"; right.style.gap = "16px";
-      right.appendChild(play); right.appendChild(dl);
-      li.appendChild(span); li.appendChild(right);
-      ul.appendChild(li);
-    }
-  }
-
-  $("assistBtn").addEventListener("click", () => post("assist", { enabled: !(state && state.assist) }));
-  $("cueCalib").addEventListener("click", () => post("cue_calibrate", {}));
   $("cuePairForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     if (await post("cue_pair", { castcode: $("cueCode").value })) $("cueCode").value = "";
@@ -687,9 +596,26 @@ details > div { margin-top: 12px; }
   $("cueUnpair").addEventListener("click", () => { if (confirm("Queue entkoppeln?")) post("cue_unpair", {}); });
   $("cueFlip").addEventListener("click", () => post("cue_settings", { flip: !(state && state.cue && state.cue.flip) }));
   $("cueTol").addEventListener("change", () => post("cue_settings", { tolerance: Number($("cueTol").value) }));
-  $("roundBtn").addEventListener("click", () => {
-    const active = state && state.round && state.round.active;
-    post("record_round", { enabled: !active });
+  $("cueUse").addEventListener("click", () => post("cue_use", { enabled: !(state && state.cue && state.cue.enabled) }));
+  $("cueCalib").addEventListener("click", () => post("cue_calibrate", {}));
+
+  // ---------------- QR-Code ----------------
+  let qrKey = "";
+  function renderQr(s) {
+    const q = s.qr || {};
+    $("qrOn").setAttribute("aria-checked", q.enabled ? "true" : "false");
+    $("qrNow").textContent = q.url ? "Zeigt: " + q.url : "Noch keine Adresse (IP des Pi unbekannt) – eigenen Inhalt eintragen.";
+    const ae = document.activeElement;
+    if (ae !== $("qrText") && ae !== $("qrLabel") && !qrDirty) { $("qrText").value = q.text || ""; $("qrLabel").value = q.label || ""; }
+    const key = (q.url || "") + "|" + q.enabled;
+    if (key !== qrKey) { qrKey = key; $("qrPreview").hidden = !q.url; if (q.url) $("qrPreview").src = "/api/qr.png?t=" + Date.now(); }
+  }
+  let qrDirty = false;
+  for (const id of ["qrText", "qrLabel"]) $(id).addEventListener("input", () => { qrDirty = true; });
+  $("qrOn").addEventListener("click", () => post("qr_settings", { enabled: !(state && state.qr && state.qr.enabled) }));
+  $("qrForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (await post("qr_settings", { text: $("qrText").value, label: $("qrLabel").value })) qrDirty = false;
   });
 
   // ---------------- Kugeln korrigieren (KI-Training) ----------------
@@ -871,7 +797,7 @@ details > div { margin-top: 12px; }
     $("roundStartBtn").textContent = rv.active ? "Prüfrunde läuft …" :
       online ? "Bild an alle Prüfer (" + online + " online)" : "Bild an alle Prüfer (niemand online)";
     $("roundActions").hidden = !rv.active;
-    const st = $("roundStatus");
+    const st = $("reviewRoundStatus");
     st.innerHTML = "";
     if (rv.active) {
       st.appendChild(document.createTextNode("Bild " + rv.no + ": "));
@@ -941,21 +867,20 @@ details > div { margin-top: 12px; }
     const extra = [c.info, c.error].filter(Boolean).join(" · ");
     if (extra) { st.appendChild(document.createElement("br")); st.appendChild(document.createTextNode(extra)); }
     if (!camDirty) {
-      $("camSource").value = c.source || "esp32";
-      $("camUrl").value = c.url || "";
+      $("camSource").value = c.source || "picam";
       $("camDevice").value = c.device || "";
       $("demoUrl").value = c.demo_url || "";
       showCamOpts();
     }
   }
-  for (const id of ["camSource", "camUrl", "camDevice", "demoUrl"]) {
+  for (const id of ["camSource", "camDevice", "demoUrl"]) {
     $(id).addEventListener("input", () => { camDirty = true; showCamOpts(); });
   }
   $("camApply").addEventListener("click", async () => {
     const btn = $("camApply");
     btn.disabled = true;
     btn.textContent = "Kamera wird umgestellt ...";
-    const res = await post("camera", { source: $("camSource").value, url: $("camUrl").value,
+    const res = await post("camera", { source: $("camSource").value,
                                        device: $("camDevice").value, demo_url: $("demoUrl").value });
     btn.disabled = false;
     btn.textContent = "Kamera übernehmen";
@@ -1044,31 +969,6 @@ details > div { margin-top: 12px; }
     const live = state && state.assist && state.cue && state.cue.connected;
     setTimeout(poll, live ? 600 : 1500);
   }
-
-  // ---------------- Knöpfe ----------------
-  document.querySelectorAll("[data-cmd]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const d = btn.dataset;
-      const cmd = d.cmd;
-      if (cmd === "abort" && !confirm("Spiel wirklich abbrechen? Der Spielstand geht verloren.")) return;
-      if (cmd === "undo_shot" && !confirm("Letzten erkannten Stoß verwerfen? Der Spielstand springt auf vor diesem Stoß zurück.")) return;
-      const payload = {};
-      if (d.team !== undefined) payload.team = Number(d.team);
-      if (d.group) payload.group = d.group;
-      if (d.delta) payload.delta = Number(d.delta);
-      post(cmd, payload);
-    });
-  });
-
-  for (const [inp, lbl, def] of [["ta", "b0l", "Team 1"], ["tb", "b1l", "Team 2"]]) {
-    $(inp).addEventListener("input", () => { $(lbl).textContent = $(inp).value.trim() || def; });
-  }
-  $("startForm").addEventListener("submit", (e) => {
-    e.preventDefault();
-    const breaker = Number(document.querySelector("input[name=breaker]:checked").value);
-    post("start", { team_a: $("ta").value, team_b: $("tb").value, breaker });
-  });
-
 
   // ---------------- Live-Ansicht ----------------
   let viewTimer = null;

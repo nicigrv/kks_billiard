@@ -1,10 +1,9 @@
 """
-Kameraquellen. Alle liefern dieselbe Schnittstelle wie stream_reader.MjpegReader:
+Kameraquellen. Alle liefern dieselbe Schnittstelle:
     start(), stop(), latest() -> (bild, bild_nr, alter_s), fps, connected, last_error
 
-  esp32   ESP32-CAM per WLAN (MJPEG-Stream)                        -> stream_reader.MjpegReader
+  picam   Raspberry-Pi-Kameramodul (Flachbandkabel, libcamera)     -> PiCamReader  (Standard)
   usb     USB-Kamera am Pi (/dev/video0 ...)                       -> V4L2Reader
-  picam   Raspberry-Pi-Kameramodul (Flachbandkabel, libcamera)     -> PiCamReader
   demo    Foto aus dem Internet als Kamerabild. Ist keine Adresse  -> DemoReader
           gesetzt oder laesst sich das Bild nicht laden, laeuft das
           eingebaute simulierte Spiel (immer verfuegbar).
@@ -22,11 +21,8 @@ import urllib.request
 import cv2
 import numpy as np
 
-from stream_reader import MjpegReader
-
-SOURCES = ("esp32", "usb", "picam", "demo")
-SOURCE_NAMES = {"esp32": "ESP32-CAM (WLAN)", "usb": "USB-Kamera am Pi",
-                "picam": "Pi-Kameramodul", "demo": "Demo"}
+SOURCES = ("picam", "usb", "demo")
+SOURCE_NAMES = {"picam": "Pi-Kameramodul", "usb": "USB-Kamera am Pi", "demo": "Demo"}
 
 
 class _Reader:
@@ -256,15 +252,9 @@ class DemoReader(_Reader):
 
 # ------------------------------------------------------------------ Auswahl
 def make_reader(cam: dict, data_dir: str):
-    src = cam.get("source", "esp32")
+    src = cam.get("source", "picam")
     if src == "usb":
         return V4L2Reader(cam.get("device") or "/dev/video0")
-    if src == "picam":
-        return PiCamReader()
     if src == "demo":
         return DemoReader(cam.get("demo_url", ""), data_dir)
-    r = MjpegReader(cam.get("url") or "http://192.168.88.200:81/stream")
-    r.calib_key = "esp32"
-    r.default_corners = None
-    r.info = cam.get("url", "")
-    return r
+    return PiCamReader()

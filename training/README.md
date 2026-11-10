@@ -2,14 +2,14 @@
 
 Ablauf in Kürze:
 
-1. **Bilder aufnehmen** – per Knopf im Portal oder im Trainingsmodus (`/training`).
-2. **Kugeln festlegen (iPad)** – Portal → „KI-Training: Kugeln festlegen“: Kugel antippen, Nummer
+1. **Bilder aufnehmen** – per Knopf im Admin-Panel oder im Trainingsmodus (`/training`).
+2. **Kugeln festlegen (iPad)** – Admin-Panel → „KI-Training: Kugeln festlegen“: Kugel antippen, Nummer
    wählen (bzw. mit Modell: Vorschlag prüfen, „Passt alles“). Nur festgelegte Bilder kommen ins
    Training; jede Kugel braucht ihre Nummer.
-3. **Trainieren** – Portal → „KI-Modell (Coral)“ → „Trainingsdaten laden“ (ZIP), dann eine der
+3. **Trainieren** – Admin-Panel → „KI-Modell (Coral)“ → „Trainingsdaten laden“ (ZIP), dann eine der
    Varianten unten.
-4. **Hochladen** – die Datei `billard_edgetpu.tflite` im Portal unter „Modell hochladen“.
-   Der KI-Chip nimmt sie sofort, das Portal zeigt „KI-Chip: bereit“ und mit jedem geprüften Bild,
+4. **Hochladen** – die Datei `billard_edgetpu.tflite` im Admin-Panel unter „Modell hochladen“.
+   Der KI-Chip nimmt sie sofort, das Admin-Panel zeigt „KI-Chip: bereit“ und mit jedem geprüften Bild,
    wie oft er richtig lag.
 
 **Wie viele Bilder?** Brauchbar ab etwa 200–300 geprüften Bildern, besser 500+, bei
