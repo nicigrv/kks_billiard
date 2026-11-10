@@ -341,6 +341,18 @@ Trainingsdaten. Gibt es keine Mehrheit (z. B. bei 2 Prüfern: einer sagt 3, eine
 beim Admin unter den offenen Bildern, die strittigen Kugeln sind mit „?“ markiert.
 Geht jemand weg: „Mit den bisherigen abschließen“ oder „Runde abbrechen“.
 
+**KI-Abgleich (sobald ein Modell hochgeladen ist):** Der KI-Chip macht zu jedem Bild der Prüfrunde
+einen Vorschlag. Die Prüfer legen die Kugeln trotzdem selbst fest – standardmäßig **ohne** den
+Vorschlag zu sehen (ehrlicher Vergleich; im Portal umschaltbar: „Prüfer sehen den KI-Vorschlag“).
+Danach wird das Ergebnis der Prüfer mit der KI verglichen:
+- KI überall richtig und Prüfer einig → Bild direkt in die Trainingsdaten.
+- Wo die KI falsch lag (andere Nummer, Kugel übersehen, Kugel gesehen, wo keine ist), kommt ein
+  **„?“** mit Notiz, z. B. „KI: 3 · Prüfer: 11“. Das Bild liegt dann beim Admin unter den offenen
+  Bildern. **„Prüfer-Ergebnis übernehmen“** setzt alle „?“, bei denen die Prüfer eine klare Antwort
+  hatten, mit einem Klick – kurz ansehen, speichern.
+- Der Beamer zeigt nach der Runde z. B. „KI lag bei 12 von 14 Kugeln richtig – 2 × ?“; im Portal
+  steht die Trefferquote über die letzten Bilder.
+
 **Ding-Ton:** „Ding testen (HDMI)“ im Portal. Kommt nichts: am Beamer Lautstärke prüfen; anderer
 Ausgang über `AUDIO_DEVICE` in `docker-compose.yml` (Liste: `docker compose exec billard aplay -L`,
 für HDMI 1 z. B. `hdmi:CARD=vc4hdmi1,DEV=0`).

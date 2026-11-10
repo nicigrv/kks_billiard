@@ -476,7 +476,11 @@ class SceneRenderer:
         elif last and now - last.get("t", 0) < show_done_s and last.get("names"):
             parts = [{"name": n, "done": True} for n in last["names"]]
             title = "Alle fertig - weiter!"
-            if not last.get("ok"):
+            ai = last.get("ai")
+            if ai:
+                sub = f"KI lag bei {ai['correct']} von {ai['total']} Kugeln richtig" + \
+                      (f" - {ai['wrong']} × ?" if ai["wrong"] else "")
+            elif not last.get("ok"):
                 sub = f"Bild {last.get('no')}: {last.get('disputed')} Kugel(n) uneinig - Admin entscheidet"
             elif last.get("agreement", 100) >= 100:
                 sub = f"Bild {last.get('no')}: alle einig"

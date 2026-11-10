@@ -315,8 +315,9 @@ details > div { margin-top: 12px; }
   <details id="roundDetails">
     <summary>Prüfrunde (mehrere Prüfer) <span class="badge" id="roundBadge" hidden></span></summary>
     <div>
-      <p class="hint">Jedes Bild wird von mehreren Prüfern gleichzeitig festgelegt. Prüfer öffnen am iPad <b id="pruefenUrl">/pruefen</b> und melden sich mit ihrem Code an. „Bild an alle Prüfer“ schickt das aktuelle Kamerabild an alle, die gerade angemeldet sind. Haben alle gespeichert, zeigt der Beamer „Alle fertig – weiter!“ und es klingt ein Ding. Mehrheit entscheidet; bei Uneinigkeit landet das Bild bei euch unter den offenen Bildern.</p>
+      <p class="hint">Jedes Bild wird von mehreren Prüfern gleichzeitig festgelegt. Prüfer öffnen am iPad <b id="pruefenUrl">/pruefen</b> und melden sich mit ihrem Code an. „Bild an alle Prüfer“ schickt das aktuelle Kamerabild an alle, die gerade angemeldet sind. Haben alle gespeichert, zeigt der Beamer „Alle fertig – weiter!“ und es klingt ein Ding. Mehrheit entscheidet. Gibt es ein KI-Modell, macht der KI-Chip zu jedem Bild einen Vorschlag, der danach mit dem Ergebnis der Prüfer verglichen wird: Wo die KI falsch lag oder die Prüfer uneinig sind, kommt ein „?“ – das Bild landet dann bei euch unter den offenen Bildern.</p>
       <button class="primary" type="button" id="roundStartBtn" style="width:100%">Bild an alle Prüfer</button>
+      <label class="check"><input type="checkbox" id="showAiToggle"> Prüfer sehen den KI-Vorschlag (sonst legen sie selbst fest und es wird danach verglichen – genauer)</label>
       <p class="statusline" id="roundStatus"></p>
       <div class="grid two" id="roundActions" hidden>
         <button class="quiet" type="button" id="roundFinishBtn">Mit den bisherigen abschließen</button>
@@ -888,6 +889,7 @@ details > div { margin-top: 12px; }
         ul.appendChild(li);
       }
     }
+    if (document.activeElement !== $("showAiToggle")) $("showAiToggle").checked = !!s.review_show_ai;
     const snd = s.sound || {};
     $("soundInfo").textContent = "Ton über: " + (snd.device || "-") + (snd.error ? "  ·  Problem: " + snd.error : "");
   }
@@ -903,6 +905,7 @@ details > div { margin-top: 12px; }
     if (await post("reviewer_add", { name })) $("reviewerName").value = "";
   });
   $("soundTestBtn").addEventListener("click", () => post("sound_test", {}));
+  $("showAiToggle").addEventListener("change", () => post("review_show_ai", { enabled: $("showAiToggle").checked }));
 
   // ---------------- Kamera ----------------
   let camDirty = false;

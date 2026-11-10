@@ -65,6 +65,7 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
 .save { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
 .save .big { grid-column: span 3; min-height: 60px; font-size: 20px; }
 .save button:not(.big) { padding: 8px 6px; font-size: 15px; }
+.save .big2 { grid-column: span 3; }
 
 .toast { position: fixed; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translate(-50%, 160%);
   transition: transform .2s; background: var(--ink); color: #0A2F25; font-weight: 700; padding: 10px 16px;
@@ -143,6 +144,7 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
     </div>
     <div class="box save">
       <button class="primary big" type="button" id="saveBtn" disabled>Passt alles</button>
+      <button class="quiet big2" type="button" id="takeHumanBtn" hidden data-admin>Prüfer-Ergebnis übernehmen</button>
       <button class="quiet" type="button" id="undoBtn" disabled>Rückgängig</button>
       <button class="quiet" type="button" id="skipBtn" disabled data-admin>Später</button>
       <button class="danger" type="button" id="discardBtn" disabled data-admin>Verwerfen</button>
@@ -284,6 +286,17 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
       ctx.fillRect(b.x + r + 2, b.y - r - fs - 2, w, fs + 4);
       ctx.fillStyle = st.label === "?" ? "#FF8A80" : b.changed ? "#7FE0A0" : "#FFFFFF";
       ctx.fillText(st.label, b.x + r + 2 + w / 2, b.y - r - fs / 2);
+      if (b.note && numberOf(b) === null) {
+        // Warum ein "?" - z. B. "KI: 3 · Prüfer: 11"
+        const nf = Math.max(12, Math.round(fs * 0.8));
+        ctx.font = "600 " + nf + "px system-ui, sans-serif";
+        const tw = ctx.measureText(b.note).width + 10;
+        const nx = Math.min(Math.max(b.x - tw / 2, 2), view.w - tw - 2), ny = b.y + r + 6;
+        ctx.fillStyle = "rgba(0,0,0,.8)"; ctx.fillRect(nx, ny, tw, nf + 6);
+        ctx.fillStyle = "#FFD180"; ctx.textAlign = "left";
+        ctx.fillText(b.note, nx + 5, ny + nf / 2 + 3);
+        ctx.textAlign = "center";
+      }
     });
     drawZoom();
   }
@@ -345,6 +358,10 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
     $("skipBtn").disabled = !item;
     $("discardBtn").disabled = !item;
     $("undoBtn").disabled = !history.length;
+    // Admin: "?" aus dem KI-Abgleich, bei denen die Pruefer eine klare Antwort hatten
+    const takeable = !PRUEFER && item ? item.balls.filter((b) => b.has_human && numberOf(b) === null).length : 0;
+    $("takeHumanBtn").hidden = !takeable;
+    $("takeHumanBtn").textContent = "Prüfer-Ergebnis übernehmen (" + takeable + " × ?)";
     draw();
     renderChips();
   }
@@ -367,8 +384,10 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
       view.w = data.width; view.h = data.height;
       fit();
       const t = data.name.slice(9, 11) + ":" + data.name.slice(11, 13);
+      const nq = data.balls.filter((b) => b.note).length;
       $("caption").textContent = "Bild von " + t + " Uhr · noch " + data.pending + " offen" +
-        (data.model ? " · Vorschlag vom KI-Chip" : " · ohne Vorschlag");
+        (nq ? " · " + nq + " × ? prüfen (KI falsch oder Prüfer uneinig)" :
+         data.round ? " · aus Prüfrunde " + data.round : data.model ? " · Vorschlag vom KI-Chip" : " · ohne Vorschlag");
       $("caption").hidden = false;
       img.src = "/api/review/image?name=" + encodeURIComponent(data.name);
       update();
@@ -385,6 +404,16 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
       return;
     }
     if (await post("review_save", { name: item.name, balls: item.balls })) load();
+  });
+  $("takeHumanBtn").addEventListener("click", () => {
+    if (!item) return;
+    snapshot();
+    // Pruefer hatten recht: Nummer der Pruefer setzen bzw. Kugel entfernen, wo sie keine sahen
+    item.balls = item.balls.filter((b) => !(b.has_human && numberOf(b) === null && b.human === null));
+    item.balls.forEach((b) => { if (b.has_human && numberOf(b) === null) { setNumber(b, b.human); b.note = ""; } });
+    selected = -1;
+    update();
+    toast("Prüfer-Ergebnis übernommen – kurz prüfen, dann speichern");
   });
   $("roundBtn").addEventListener("click", async () => {
     await post("round_start", {});
@@ -506,7 +535,8 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
       view.w = r.width; view.h = r.height;
       fit();
       img.src = "/api/round/image?id=" + encodeURIComponent(r.id);
-      $("caption").textContent = "Prüfrunde · Bild " + r.no + (r.model ? " · Vorschlag vom KI-Chip" : " · ohne Vorschlag");
+      $("caption").textContent = "Prüfrunde · Bild " + r.no + (r.model ? " · Vorschlag vom KI-Chip" :
+        r.blind ? " · selbst festlegen (die KI hat auch getippt – wird danach verglichen)" : "");
       $("caption").hidden = false;
     }
     round = r;
