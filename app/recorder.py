@@ -2,10 +2,13 @@
 Trainingsbilder fuer das Coral-Modell.
 
 Ablauf:
-  1. Nur per Knopf "Bild aufnehmen" (nichts automatisch) wird die entzerrte Draufsicht
-     gespeichert, zusammen mit dem, was der KI-Chip erkannt hat (Position und Kugelnummer).
+  1. Per Knopf "Bild speichern" (Spiel- oder Admin-Panel) - oder, wenn eingeschaltet,
+     automatisch nach jedem Stoss - wird die entzerrte Draufsicht gespeichert, zusammen mit dem,
+     was der KI-Chip erkannt hat (Position und Kugelnummer).
      -> dataset/pruefen/<name>.jpg + <name>.json
-  2. Auf dem iPad wird jedes Bild angesehen: "passt alles" oder korrigieren (oder verwerfen).
+  2. Spaeter, in Ruhe: Admin (/training) oder Pruefer (/pruefen) sehen jedes Bild an:
+     "passt alles" oder korrigieren (oder verwerfen). Arbeiten mehrere Pruefer gleichzeitig,
+     bekommt jeder ein anderes Bild (wer ein Bild offen hat, "haelt" es ein paar Minuten).
      -> dataset/geprueft/images/<name>.jpg
         dataset/geprueft/labels/<name>.json   Kugeln mit Nummer (massgeblich)
         dataset/geprueft/labels/<name>.txt    YOLO-Format: Klasse x_mitte y_mitte breite hoehe (0..1)
@@ -33,6 +36,7 @@ from ballnum import ball_number
 
 CLASSES = ["weiss"] + [str(n) for n in range(1, 16)]      # Index = Kugelnummer
 NAME_RE = re.compile(r"[0-9]{8}-[0-9]{6}-[0-9]{3}")
+CLAIM_S = 600             # so lange gehoert ein geoeffnetes Bild dem, der es pruefen will
 
 
 def ball_num(b):
@@ -81,6 +85,21 @@ class Recorder:
         self.discard_dir = os.path.join(base_dir, "verworfen")
         self.min_free_bytes = min_free_bytes
         self.lock = threading.Lock()
+        self.claims = {}                  # Bildname -> (wer, seit wann): gerade in Arbeit
+        self.clock = time.monotonic
+
+    # ------------------------------------------------------- wer prueft was
+    def _claimed_by_other(self, name, who, now):
+        c = self.claims.get(name)
+        if c and c[0] != who and now - c[1] < CLAIM_S:
+            return c[0]
+        return None
+
+    def release(self, who):
+        """Bild(er), die 'who' offen hat, wieder freigeben (z. B. Wechsel in eine Pruefrunde)."""
+        with self.lock:
+            for n in [n for n, c in self.claims.items() if c[0] == who]:
+                del self.claims[n]
 
     # ------------------------------------------------------------- Zaehler
     @staticmethod
@@ -133,23 +152,33 @@ class Recorder:
         return name
 
     # --------------------------------------------------------- 2. auf dem iPad pruefen
-    def next_pending(self, after=None):
-        """Aeltestes noch nicht geprueftes Bild (oder das naechste nach 'after')."""
+    def next_pending(self, after=None, who=None):
+        """Aeltestes noch nicht geprueftes Bild (oder das naechste nach 'after'), das nicht
+        gerade jemand anderes offen hat. Mit 'who' gehoert es danach diesem Pruefer."""
         try:
-            names = sorted(n[:-5] for n in os.listdir(self.pending_dir) if n.endswith(".json"))
+            all_names = sorted(n[:-5] for n in os.listdir(self.pending_dir) if n.endswith(".json"))
         except OSError:
             return None
-        if after:
-            names = [n for n in names if n > after] or names
-        for name in names:
-            try:
-                with open(os.path.join(self.pending_dir, name + ".json")) as f:
-                    data = json.load(f)
-            except (OSError, ValueError):
-                continue
-            data["name"] = name
-            data["pending"] = len(names)
-            return data
+        now = self.clock()
+        with self.lock:
+            free = [n for n in all_names if not self._claimed_by_other(n, who, now)]
+            names = free
+            if after:
+                names = [n for n in free if n > after] or [n for n in free if n != after] or free
+            for name in names:
+                try:
+                    with open(os.path.join(self.pending_dir, name + ".json")) as f:
+                        data = json.load(f)
+                except (OSError, ValueError):
+                    continue
+                if who:
+                    for n in [n for n, c in self.claims.items() if c[0] == who]:
+                        del self.claims[n]
+                    self.claims[name] = (who, now)
+                data["name"] = name
+                data["pending"] = len(all_names)
+                data["free"] = len(free)
+                return data
         return None
 
     def pending_image(self, name):
@@ -158,7 +187,7 @@ class Recorder:
         p = os.path.join(self.pending_dir, name + ".jpg")
         return p if os.path.isfile(p) else None
 
-    def review(self, name, balls, discard=False):
+    def review(self, name, balls, discard=False, by=None):
         """Ergebnis der Pruefung: Bild verwerfen oder mit (ggf. korrigierter) Zuordnung uebernehmen."""
         if not NAME_RE.fullmatch(name or ""):
             raise ValueError("Bildname")
@@ -166,7 +195,11 @@ class Recorder:
             jpg = os.path.join(self.pending_dir, name + ".jpg")
             js = os.path.join(self.pending_dir, name + ".json")
             if not os.path.isfile(js):
+                self.claims.pop(name, None)
                 raise FileNotFoundError("Bild wurde schon geprüft")
+            other = self._claimed_by_other(name, by, self.clock())
+            if other:
+                raise ValueError(f"{other} prüft dieses Bild gerade")
             k = 0 if discard else missing_numbers(balls)
             if k:
                 raise ValueError(f"{k} Kugel(n) ohne Nummer - Kugel antippen und Nummer wählen")
@@ -176,6 +209,7 @@ class Recorder:
                 for p in (jpg, js):
                     if os.path.exists(p):
                         shutil.move(p, os.path.join(self.discard_dir, os.path.basename(p)))
+                self.claims.pop(name, None)
                 return "verworfen (aufgehoben)"
             with open(js) as f:
                 meta = json.load(f)
@@ -186,9 +220,12 @@ class Recorder:
             os.makedirs(self.ok_lbl, exist_ok=True)
             # Herkunft aus einer Pruefrunde (Einzelergebnisse, KI-Abgleich) mit aufheben
             extra = {k: meta[k] for k in ("reviewers", "agreement", "round", "ai", "disputed", "ai_diffs") if k in meta}
+            if by:
+                extra["labeled_by"] = by
             self._write_verified(name, balls, meta["radius"], meta["width"], meta["height"], changed, extra)
             shutil.move(jpg, os.path.join(self.ok_img, name + ".jpg"))
             os.remove(js)
+            self.claims.pop(name, None)
         return "übernommen"
 
     # ---------------------------------------------------- Wie gut ist das Modell?
@@ -280,6 +317,7 @@ class Recorder:
             n = self.pending + self.verified + self.discarded
             for folder in (self.pending_dir, os.path.dirname(self.ok_img), self.discard_dir):
                 shutil.rmtree(folder, ignore_errors=True)
+            self.claims.clear()
             try:
                 os.remove(os.path.join(self.base_dir, "modell-statistik.json"))
             except OSError:

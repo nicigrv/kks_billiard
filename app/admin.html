@@ -310,7 +310,11 @@ details > div { margin-top: 12px; }
   <details id="fixBallsDetails">
     <summary>KI-Training: Kugeln festlegen <span class="badge" id="reviewBadge" hidden></span></summary>
     <div>
-      <p class="hint">Bilder entstehen nur, wenn ihr „Jetzt ein Bild aufnehmen“ drückt. Ihr legt die Kugeln fest: auf eine Kugel tippen, dann ihre Nummer. Fehlt eine Kugel, auf die freie Stelle tippen. Sobald der KI-Chip ein Modell hat, schlägt er die Kugeln schon vor – dann nur noch prüfen und „Passt alles“. Nur festgelegte Bilder werden zum Training benutzt.</p>
+      <div class="switchrow">
+        <span class="lbl" id="autoLbl">Nach jedem Stoß automatisch ein Bild speichern<span class="sub">auch im Spiel-Panel schaltbar; Prüfer legen die Bilder später unter /pruefen fest</span></span>
+        <button class="switch" type="button" role="switch" id="autoSw" aria-checked="false" aria-labelledby="autoLbl"></button>
+      </div>
+      <p class="hint">Bilder entstehen per Knopf („Jetzt ein Bild aufnehmen“ hier oder „Bild speichern“ im Spiel-Panel) oder automatisch (Schalter oben). Festlegen geht später in Ruhe: Prüfer melden sich unter <b>/pruefen</b> an und bekommen – solange keine Prüfrunde läuft – die gespeicherten Bilder, jeder ein anderes. Ihr legt die Kugeln fest: auf eine Kugel tippen, dann ihre Nummer. Fehlt eine Kugel, auf die freie Stelle tippen. Sobald der KI-Chip ein Modell hat, schlägt er die Kugeln schon vor – dann nur noch prüfen und „Passt alles“. Nur festgelegte Bilder werden zum Training benutzt.</p>
       <p class="statusline" id="qualityInfo"></p>
       <p class="statusline" id="trainInfo"></p>
       <a class="btnlink" href="/training" style="margin-bottom:14px">Trainingsmodus öffnen (großes Bild, Lupe)</a>
@@ -900,6 +904,7 @@ details > div { margin-top: 12px; }
       q.images + " Bilder)." + (q.percent >= 95 ? " Das ist gut – Sammeln kann pausieren." : "") :
       "Noch keine Bewertung: Sobald ihr Vorschläge des KI-Chips prüft, steht hier, wie oft er richtig liegt.";
     $("datasetLink").classList.toggle("off", !t.verified);
+    $("autoSw").setAttribute("aria-checked", t.auto_capture ? "true" : "false");
     const d = s.detector || {}, c = d.coral || {};
     const ms = $("modelStatus");
     ms.innerHTML = "";
@@ -916,6 +921,7 @@ details > div { margin-top: 12px; }
     }
 
   }
+  $("autoSw").addEventListener("click", () => post("auto_capture", { enabled: !(state && state.training && state.training.auto_capture) }));
   $("modelUploadBtn").addEventListener("click", () => $("modelFile").click());
   $("modelFile").addEventListener("change", async () => {
     const f = $("modelFile").files[0];

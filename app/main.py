@@ -68,6 +68,8 @@ class App:
         self.coral = coral_engine or CoralEngine()          # Kugelerkennung nur ueber den KI-Chip
         table = self._table_for(self.reader)
         self.pipe = Pipeline(table, lambda r: CoralDetector(r, self.coral), recorder=self.recorder)
+        self.pipe.auto_capture = bool(self.cfg.get("auto_capture"))
+        self.pipe.on_capture = self._captured
         self.cue = CueSensor(self.cfg.get("cue_castcode", ""), self.cfg.get("cue_offset", 0.0),
                              self.cfg.get("cue_flip", False), discovery_port=cue_port,
                              address=self.cfg.get("cue_address"), on_found=self._cue_found,
@@ -392,7 +394,19 @@ class App:
         return (f"Gespeichert ({self.recorder.verified} geprüfte Bilder)"
                 + (f", {applied} Kugel(n) im Spiel übernommen" if applied else ""))
 
-    def _review_save(self, p):
+    def _captured(self, name, source):
+        """Trainingsbild gespeichert: kurz oben rechts melden (auch auf dem Beamer)."""
+        n = self.recorder.pending
+        self.notes.push("Bild automatisch gespeichert" if source == "auto" else "Bild gespeichert",
+                        f"{n} " + ("Bild wartet" if n == 1 else "Bilder warten") + " aufs Festlegen",
+                        "success", ttl=3.0, key="capture")
+
+    def review_as(self, p, by):
+        """Gespeichertes Bild festgelegt - von einem Pruefer (/pruefen) oder dem Admin."""
+        with self.pipe.lock:
+            return self._review_save(p, by)
+
+    def _review_save(self, p, by="Admin"):
         """Ein gesammeltes Trainingsbild wurde auf dem iPad geprueft."""
         balls = []
         for d in p.get("balls", []):
@@ -402,7 +416,7 @@ class App:
             balls.append({"x": float(d["x"]), "y": float(d["y"]), "kind": kind, "color": color,
                           "number": ball_number(kind, color), "changed": bool(d.get("changed"))})
         try:
-            res = self.recorder.review(str(p["name"]), balls, bool(p.get("discard")))
+            res = self.recorder.review(str(p["name"]), balls, bool(p.get("discard")), by=by)
         except (FileNotFoundError, ValueError) as e:
             raise config.UserError(str(e))
         return f"Bild {res}. Noch {self.recorder.pending} zu prüfen, {self.recorder.verified} geprüft."
@@ -502,7 +516,7 @@ class App:
             "camera": self.camera_state(),
             "table_size": self.cfg.get("table_size"),
             "cloth": self.cfg.get("cloth", "blau"),
-            "training": {"pending": self.recorder.pending,
+            "training": {"pending": self.recorder.pending, "auto_capture": self.pipe.auto_capture,
                          "verified": self.recorder.verified, "discarded": self.recorder.discarded,
                          "disk_ok": self.recorder.disk_ok(), "quality": self.recorder.model_quality()},
             "detector": {"coral": self.coral.status(), "not_ready": self.pipe.not_ready},
@@ -541,6 +555,7 @@ class App:
                     "ok": self.align.ok, "err": None if self.align.err is None else round(self.align.err, 1)},
             "round": self.rounds.status(),
             "videos": self.rounds.videos(),
+            "training": {"pending": self.recorder.pending, "auto_capture": self.pipe.auto_capture},
             "notices": self.notices(),
         }
 
@@ -722,8 +737,14 @@ class App:
                 return f"{n} Bilder gelöscht. Das KI-Modell bleibt erhalten."
             elif name == "capture":
                 if self.pipe.capture_now() is None:
-                    raise config.UserError("Kein Kamerabild (Tisch eingerichtet?) oder zu viele Bilder offen")
-                return f"Bild aufgenommen. {self.recorder.pending} zu prüfen."
+                    raise config.UserError("Kein Kamerabild (Tisch eingerichtet?) oder Speicher voll")
+                return f"Bild gespeichert. {self.recorder.pending} warten aufs Festlegen."
+            elif name == "auto_capture":
+                on = bool(p.get("enabled"))
+                self.cfg["auto_capture"] = self.pipe.auto_capture = on
+                config.save(self.cfg)
+                return ("Ab jetzt wird nach jedem Stoß ein Bild gespeichert" if on
+                        else "Bilder werden nur noch per Knopf gespeichert")
             elif name == "review_save":
                 return self._review_save(p)
             else:

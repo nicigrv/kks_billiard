@@ -19,6 +19,11 @@ from geometry import Table
 from shots import MotionMeter, OcclusionMeter, ShotEvent, ShotMonitor
 
 OCCLUSION_LIMIT = 0.006   # Anteil Tischflaeche, ab dem "etwas haengt über dem Tisch"
+# Automatisch Trainingsbilder sammeln (falls eingeschaltet): nach einem Stoss, sobald der Tisch
+# wieder ruhig ist. Geht auch ohne KI-Chip - es zaehlt nur die Bewegung im Bild.
+AUTO_MIN_MOTION_S = 0.4   # so lange muss sich etwas bewegt haben (kein Bildrauschen)
+AUTO_SETTLE_S = 2.0       # so lange muss der Tisch danach ruhig sein
+AUTO_MIN_GAP_S = 8.0      # hoechstens ein Bild alle paar Sekunden
 
 
 class Pipeline:
@@ -28,6 +33,9 @@ class Pipeline:
         self.clock = clock
         self.game = game or Game()
         self.recorder = recorder
+        self.auto_capture = False       # nach jedem Stoss automatisch ein Trainingsbild speichern
+        self.on_capture = None          # Rueckmeldung (z. B. Meldung auf dem Beamer)
+        self._last_auto = -1e9
         # Erzeugt den Kugeldetektor fuer einen Kugelradius (im Programm: Coral)
         self.detector_factory = detector_factory
         self.set_table(table)
@@ -44,6 +52,8 @@ class Pipeline:
             self.moving = False
             self.occluded = False
             self.last_warped = None
+            self._motion_start = None
+            self._moved_at = None
 
     def process(self, frame):
         """Ein Kamerabild verarbeiten. Gibt ein Ereignis zurueck (oder None)."""
@@ -56,14 +66,16 @@ class Pipeline:
             try:
                 balls = self.detector.detect(warped)
             except CoralNotReady as e:
-                # Ohne KI-Chip wird nichts gezaehlt (Trainingsbilder gibt es per Knopf)
+                # Ohne KI-Chip wird nichts gezaehlt - Trainingsbilder gibt es trotzdem
                 self.not_ready = str(e)
                 self.balls, self.moving = [], moving
+                self._auto(warped, moving, [])
                 return None
             self.not_ready = ""
             occluded = self.occlusion.update(warped, balls) > OCCLUSION_LIMIT
             ev = self.monitor.update(balls, moving, occluded)
             self.balls, self.moving, self.occluded = balls, moving, occluded
+            self._auto(warped, moving, balls)
 
             if isinstance(ev, ShotEvent):
                 diff = ev.diff(self.table.ball_radius_px)
@@ -72,21 +84,47 @@ class Pipeline:
                 return ("shot", msg, ev)
             return ev
 
-    def capture_now(self):
-        """Knopf "Bild aufnehmen": aktuelles Bild (mit Vorschlag des KI-Chips, falls bereit)
-        zum Festlegen. Nur so entstehen Trainingsbilder - nichts wird automatisch aufgenommen."""
+    def capture_now(self, source="knopf"):
+        """Knopf "Bild speichern": aktuelles Bild (mit Vorschlag des KI-Chips, falls bereit)
+        zum spaeteren Festlegen. Automatisch nur, wenn auto_capture an ist."""
         with self.lock:
             if self.last_warped is None:
                 return None
-            return self._collect(self.last_warped, list(self.balls))
+            return self._collect(self.last_warped, list(self.balls), source)
 
-    def _collect(self, warped, balls):
-        if self.recorder:
-            engine = getattr(self.detector, "engine", None)
-            st = engine.status() if engine is not None and balls else {}
-            model = f"{st['model']} vom {st['model_time']}" if st.get("model") else None
-            return self.recorder.save_pending(warped, balls, self.table.ball_radius_px,
-                                              [ball_number(b.kind, b.color) for b in balls], model)
+    def _auto(self, warped, moving, balls):
+        """Nach einem Stoss (Bewegung, dann ruhiger Tisch) ein Bild speichern."""
+        if not self.auto_capture:
+            self._motion_start = None
+            return
+        now = self.clock()
+        if moving:
+            if self._motion_start is None:
+                self._motion_start = now
+            self._moved_at = now
+            return
+        if self._motion_start is None or now - self._moved_at < AUTO_SETTLE_S:
+            return
+        long_enough = self._moved_at - self._motion_start >= AUTO_MIN_MOTION_S
+        self._motion_start = None
+        if long_enough and now - self._last_auto >= AUTO_MIN_GAP_S:
+            self._last_auto = now
+            self._collect(warped, balls, "auto")
+
+    def _collect(self, warped, balls, source="knopf"):
+        if not self.recorder:
+            return None
+        engine = getattr(self.detector, "engine", None)
+        st = engine.status() if engine is not None and balls else {}
+        model = f"{st['model']} vom {st['model_time']}" if st.get("model") else None
+        name = self.recorder.save_pending(warped, balls, self.table.ball_radius_px,
+                                          [ball_number(b.kind, b.color) for b in balls], model)
+        if name and self.on_capture:
+            try:
+                self.on_capture(name, source)
+            except Exception as e:      # Rueckmeldung darf die Erkennung nie stoppen
+                print(f"[training] Rueckmeldung fehlgeschlagen: {e}", flush=True)
+        return name
 
     def restart_tracking(self):
         """Nach Spielstart / neuem Rack: der naechste ruhige Tisch ist der neue Ausgangszustand,

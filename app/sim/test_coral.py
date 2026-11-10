@@ -221,14 +221,77 @@ def test_pipeline_without_chip():
         check(pipe.game.shots == 0, "ohne KI-Chip wird nichts gezaehlt")
         show(b[:1] + a[1:], 1)            # Bewegung (Weisse rollt)
         show(b, 25)                       # wieder ruhig
-        check(rec.pending == 0, "nichts wird automatisch aufgenommen")
-        check(pipe.capture_now() is not None and rec.pending == 1, "Bild nur per Knopf 'Bild aufnehmen'")
+        check(rec.pending == 0, "ohne Schalter wird nichts automatisch aufgenommen")
+        got = []
+        pipe.on_capture = lambda name, src: got.append(src)
+        check(pipe.capture_now() is not None and rec.pending == 1 and got == ["knopf"], "Bild per Knopf")
+
+        print("Automatisch nach jedem Stoss (auch ohne KI-Chip)")
+        pipe.auto_capture = True
+
+        def roll(start, end, frames=8):
+            for k in range(1, frames + 1):
+                f = k / frames
+                moved = [SimBall(e.number, s.x + (e.x - s.x) * f, s.y + (e.y - s.y) * f, 1) for s, e in zip(start, end)]
+                show(moved, 1)
+
+        c = [SimBall(0, L * 0.7, W * 0.3, 1), SimBall(5, L * 0.6, W * 0.4, 1)]
+        roll(b, c)
+        show(c, 10)
+        check(rec.pending == 1, "solange die Kugeln noch nicht ruhig sind: kein Bild")
+        show(c, 15)
+        check(rec.pending == 2 and got[-1] == "auto", "Tisch wieder ruhig -> ein Bild")
+        show(c, 30)
+        check(rec.pending == 2, "ruhiger Tisch: nicht noch eins")
+        roll(c, b)
+        show(b, 25)
+        check(rec.pending == 2, "zweiter Stoss zu schnell danach (< 8 s): kein Bild")
+        show(b, 60)
+        show(b[:1] + c[1:], 1)            # nur ein Bild Unruhe (Rauschen, Schatten)
+        show(b, 30)
+        check(rec.pending == 2, "kurzes Flackern ist kein Stoss")
+        roll(b, c)
+        show(c, 25)
+        check(rec.pending == 3, "naechster Stoss -> naechstes Bild")
+        pipe.auto_capture = False
+        roll(c, b)
+        show(b, 100)
+        check(rec.pending == 3, "Schalter aus -> wieder nur per Knopf")
+
+
+def test_claims():
+    print("Spaeter festlegen: mehrere Pruefer, jeder ein anderes Bild")
+    with tempfile.TemporaryDirectory() as d:
+        rec = Recorder(d)
+        t = [1000.0]
+        rec.clock = lambda: t[0]
+        warped = np.zeros((400, 800, 3), np.uint8)
+        names = [rec.save_pending(warped, [Ball(100 + 50 * i, 100, 10, "cue", "")], 10.0, [0]) for i in range(3)]
+        a = rec.next_pending(who="Anna")
+        b = rec.next_pending(who="Ben")
+        check(a["name"] == names[0] and b["name"] == names[1], "Anna und Ben bekommen verschiedene Bilder")
+        check(a["pending"] == 3 and b["free"] == 2, "Zaehler: 3 offen, fuer Ben 2 frei")
+        try:
+            rec.review(a["name"], a["balls"], by="Ben")
+            check(False, "fremdes Bild speichern abgelehnt")
+        except ValueError as e:
+            check("Anna" in str(e), f"fremdes Bild speichern abgelehnt ({e})")
+        check(rec.review(a["name"], a["balls"], by="Anna") == "übernommen", "Anna speichert ihr Bild")
+        with open(os.path.join(rec.ok_lbl, a["name"] + ".json")) as f:
+            check(json.load(f).get("labeled_by") == "Anna", "festgelegt von Anna (steht im Label)")
+        c = rec.next_pending(who="Anna")
+        check(c["name"] == names[2], "Anna bekommt das naechste freie Bild")
+        rec.release("Ben")
+        check(rec.next_pending(who="Clara")["name"] == names[1], "Ben gibt frei -> Clara bekommt es")
+        t[0] += 700
+        check(rec.next_pending(who="Dora")["name"] == names[1], "nach 10 Minuten ohne Speichern wieder frei")
 
 
 if __name__ == "__main__":
     test_training_data()
     test_engine()
     test_pipeline_without_chip()
+    test_claims()
     print()
     if FAILS:
         print(f"{len(FAILS)} FEHLER")
