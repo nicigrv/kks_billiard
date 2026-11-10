@@ -2,7 +2,9 @@
 Tests der Spiellogik:
   Teil 1: Regeln direkt (ohne Bilder)
   Teil 2: komplettes simuliertes Spiel aus gerenderten Kamerabildern durch die
-          echte Pipeline (Erkennung, Stosserkennung, Regeln)
+          echte Pipeline (Bewegung, Verdeckung, Stosserkennung, Regeln). Die Kugeln
+          liefert ein Ersatz fuer den KI-Chip (sim/truth_detector.py) mit Rauschen und
+          gelegentlichen Fehlern.
 
     python3 -m sim.test_game
 """
@@ -16,6 +18,7 @@ from game import Game, pocketed_from_states
 from geometry import Table, TABLE_SIZES
 from pipeline import Pipeline
 from sim.render import DEFAULT_CORNERS, SimBall, rack_positions, random_layout, render_topdown, to_camera
+from sim.truth_detector import TruthDetector
 
 FAILS = []
 
@@ -90,11 +93,14 @@ def test_simulated_game(seed=42):
     L = TABLE_SIZES["8ft"]
     W = L / 2
     clock = FakeClock()
-    pipe = Pipeline(Table(DEFAULT_CORNERS, L), clock=clock)
+    table = Table(DEFAULT_CORNERS, L)
+    det = TruthDetector(table.ball_radius_px, L, W, rng)
+    pipe = Pipeline(table, lambda r: det, clock=clock)
     g = pipe.game
     fps = 12
 
     def show(balls, n_frames=24, occluder=None):
+        det.balls, det.occluder = balls, occluder
         for _ in range(n_frames):
             cam = to_camera(render_topdown(balls, L, W, "gruen", rng, occluder), DEFAULT_CORNERS)
             ev = pipe.process(cam)

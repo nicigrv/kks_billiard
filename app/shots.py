@@ -19,7 +19,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from detector import Ball
+from ballnum import Ball
 
 OBJECT_KINDS = ("solid", "stripe", "eight")
 
@@ -66,6 +66,37 @@ class MotionMeter:
             moving = self.value > self.min_fraction
         self.prev = small
         return moving
+
+
+class OcclusionMeter:
+    """Haengt etwas ueber dem Tisch (Arm, Oberkoerper, Queue auf dem Tuch)?
+    Keine Kugelerkennung: Anteil der Tischflaeche, der weder nach Tuch aussieht noch
+    von einer (vom Coral erkannten) Kugel erklaert wird. Halbe Aufloesung, die Tuchfarbe
+    wird nur alle paar Bilder neu geschaetzt - kostet auf dem Pi nur wenige Millisekunden."""
+
+    def __init__(self, radius, threshold=22.0, scale=0.5):
+        self.r = radius * scale
+        self.scale = scale
+        self.threshold = threshold
+        self._cloth = None
+        self._n = 0
+        self.value = 0.0
+
+    def update(self, warped, balls) -> float:
+        h, w = warped.shape[:2]
+        small = cv2.resize(warped, (int(w * self.scale), int(h * self.scale)), interpolation=cv2.INTER_AREA)
+        lab = cv2.cvtColor(cv2.GaussianBlur(small, (3, 3), 0), cv2.COLOR_BGR2LAB).astype(np.float32)
+        self._n += 1
+        if self._cloth is None or self._n % 15 == 1:
+            self._cloth = np.median(lab[::3, ::3].reshape(-1, 3), axis=0)    # Tuch = groesste Flaeche
+        d = lab - self._cloth
+        dist = (0.55 * d[..., 0]) ** 2 + d[..., 1] ** 2 + d[..., 2] ** 2     # Helligkeit schwach gewichtet
+        mask = (dist > self.threshold ** 2).astype(np.uint8)
+        mask = cv2.medianBlur(mask, 3)                                       # Bildrauschen weg, Linien bleiben
+        for b in balls:
+            cv2.circle(mask, (int(b.x * self.scale), int(b.y * self.scale)), int(self.r * 1.35) + 1, 0, -1)
+        self.value = float(mask.mean())
+        return self.value
 
 
 def stabilize(frames, radius, min_presence=0.6):

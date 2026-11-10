@@ -2,14 +2,15 @@
 
 Ablauf in Kürze:
 
-1. **Bilder sammeln** – läuft von selbst: Nach jedem Spielzug speichert der Pi ein Bild und
-   ordnet alle Kugeln zu.
-2. **Auf dem iPad prüfen** – Portal → „KI-Training: Bilder prüfen“: „Passt alles“, korrigieren
-   oder verwerfen. Nur geprüfte Bilder kommen ins Training.
+1. **Bilder sammeln** – läuft von selbst: Nach jedem Spielzug speichert der Pi ein Bild.
+2. **Kugeln festlegen (iPad)** – Portal → „KI-Training: Kugeln festlegen“: Kugel antippen, Nummer
+   wählen (bzw. mit Modell: Vorschlag prüfen, „Passt alles“). Nur festgelegte Bilder kommen ins
+   Training; jede Kugel braucht ihre Nummer.
 3. **Trainieren** – Portal → „KI-Modell (Coral)“ → „Trainingsdaten laden“ (ZIP), dann eine der
    Varianten unten.
 4. **Hochladen** – die Datei `billard_edgetpu.tflite` im Portal unter „Modell hochladen“.
-   Der Coral nimmt sie sofort, das Portal zeigt „Erkennung läuft mit: Coral“.
+   Der KI-Chip nimmt sie sofort, das Portal zeigt „KI-Chip: bereit“ und mit jedem geprüften Bild,
+   wie oft er richtig lag.
 
 **Wie viele Bilder?** Brauchbar ab etwa 200–300 geprüften Bildern, besser 500+, bei
 verschiedenem Licht (Tag/Abend, Lampen an/aus). Nachtrainieren mit mehr Bildern lohnt sich:
@@ -47,15 +48,13 @@ python train_coral.py billard-training-20261110.zip --no-export
 
 ## Was im Modell steckt
 
-- YOLOv8n (klein), Eingabe 640×640, Klassen: Weiße, 8, Volle, Halbe. Datei ca. 4 MB.
-- Auf dem Coral laufen 216 von 257 Rechenschritten (alle aufwendigen); nur die letzte
+- YOLOv8n (klein), Eingabe 640×640, **16 Klassen = Kugelnummern** (0 = Weiße, 1–15). Datei ca. 4 MB.
+- Auf dem Coral laufen rund 230 von 257 Rechenschritten (alle aufwendigen); nur die letzte
   Auswertung des Netzes läuft auf dem Pi – das ist bei YOLO auf dem Coral normal.
-- Getestet: Training → Umwandlung → Upload → Erkennung über den Coral-Container
-  (mit Simulator-Bildern; der Coral selbst wurde dabei durch den Prozessor ersetzt).
-- Die Kugel**nummer** (Farbe) und die genaue Mitte bestimmt auf dem Pi weiter die klassische
-  Bildverarbeitung; ebenso, ob jemand über dem Tisch hängt.
-- Ohne Modell, ohne Stick oder bei einem Fehler nimmt der Pi automatisch die klassische
-  Erkennung. Im Portal lässt sich das auch fest einstellen („Nur OpenCV“), z. B. zum Vergleichen.
+- Die Kugeln erkennt **nur** dieses Modell. Ohne Stick oder Modell wird nichts gezählt.
+- Ältere Modelle mit 4 Klassen (voll/halb) passen nicht mehr und werden abgelehnt.
+- Ältere festgelegte Bilder werden beim Export übernommen, wenn bei allen Kugeln die Nummer
+  bekannt ist; sonst bleiben sie liegen und werden ausgelassen.
 
 Hinweis: Ultralytics steht unter der AGPL-3.0-Lizenz. Für die private Nutzung am eigenen
 Tisch ist das kein Thema.

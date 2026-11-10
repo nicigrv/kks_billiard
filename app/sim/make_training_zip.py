@@ -13,7 +13,6 @@ import cv2
 import numpy as np
 
 from geometry import TABLE_SIZES, WARP_H, WARP_W, Table
-from recorder import CLASSES
 from sim.render import DEFAULT_CORNERS, rack_positions, random_layout, render_topdown, to_camera
 
 L = TABLE_SIZES["8ft"]
@@ -25,7 +24,8 @@ def main(n=200, path="sim-training.zip", seed=7):
     table = Table(DEFAULT_CORNERS, L)
     r = table.ball_radius_px
     with zipfile.ZipFile(path, "w") as z:
-        z.writestr("classes.txt", "\n".join(CLASSES) + "\n")
+        # Klasse = Kugelnummer (0 = Weisse, 8 = schwarze 8), wie im Admin-Portal-Export
+        z.writestr("classes.txt", "\n".join(str(n) for n in range(16)) + "\n")
         for i in range(n):
             if i % 10 == 0:
                 balls = rack_positions(L, W) + random_layout(rng, [0], L, W)
@@ -38,7 +38,7 @@ def main(n=200, path="sim-training.zip", seed=7):
             ok, jpg = cv2.imencode(".jpg", warped, [cv2.IMWRITE_JPEG_QUALITY, 92])
             name = f"sim-{i:05d}"
             z.writestr(f"images/{name}.jpg", jpg.tobytes())
-            lines = [f"{CLASSES.index(b.kind)} {b.x / L:.5f} {b.y / W:.5f} {2 * r / WARP_W:.5f} {2 * r / WARP_H:.5f}"
+            lines = [f"{b.number} {b.x / L:.5f} {b.y / W:.5f} {2 * r / WARP_W:.5f} {2 * r / WARP_H:.5f}"
                      for b in balls]
             z.writestr(f"labels/{name}.txt", "\n".join(lines) + "\n")
     print(f"{n} Bilder -> {path}")

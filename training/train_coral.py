@@ -9,9 +9,9 @@ Eingabe: die ZIP-Datei aus dem Admin-Portal ("Trainingsdaten laden"), mehrere ZI
 oder entpackte Ordner gehen auch (z. B. von mehreren Abenden). Benutzt werden nur
 Bilder, die auf dem iPad geprueft wurden.
 
-Modell: YOLOv8n (klein, laeuft gut auf dem Coral), 4 Klassen in fester Reihenfolge:
-    0 cue (Weisse), 1 eight (8), 2 solid (Volle), 3 stripe (Halbe)
-Die Kugelfarbe/-nummer bestimmt auf dem Pi weiterhin die klassische Bildverarbeitung.
+Modell: YOLOv8n (klein, laeuft gut auf dem Coral), 16 Klassen = Kugelnummern:
+    0 = Weisse, 1-7 Volle, 8 = schwarze 8, 9-15 Halbe
+Der Coral erkennt damit jede Kugel samt Nummer selbst - der Pi rechnet nichts nach.
 
 Der letzte Schritt (Edge-TPU-Compiler) gibt es nur fuer Linux auf x86 - am einfachsten
 in Google Colab (siehe README.md). Auf Windows/Mac: mit --no-export trainieren und
@@ -27,7 +27,7 @@ import sys
 import zipfile
 from pathlib import Path
 
-CLASSES = ["cue", "eight", "solid", "stripe"]
+CLASSES = ["weiss"] + [str(n) for n in range(1, 16)]      # Klasse = Kugelnummer
 
 
 def collect(sources, work):
