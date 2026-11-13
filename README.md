@@ -2,10 +2,10 @@
 
 ```
 Pi-Kameramodul / USB-Kamera ──▶ Raspberry Pi (Docker: "billard") ──HDMI──▶ Beamer
- (oder Demo ohne Kamera)          │  ├── Spiel-Panel   http://<pi-ip>:8080         PIN 1212 (Spieler)
-                                  │  ├── Admin-Panel   http://<pi-ip>:8080/admin   PIN 1902
-Queue-Gyroskop (optional) ◀─WLAN─▶│  ├── Prüfer        http://<pi-ip>:8080/pruefen  eigener Code
-  Castcode, UDP 5005 + HTTP-API   │  └── Beamerbild    http://<pi-ip>:8080/beamer
+ (oder Demo ohne Kamera)          │  ├── Spiel-Panel   http://<pi-ip>:8089         PIN 1212 (Spieler)
+                                  │  ├── Admin-Panel   http://<pi-ip>:8089/admin   PIN 1902
+Queue-Gyroskop (optional) ◀─WLAN─▶│  ├── Prüfer        http://<pi-ip>:8089/pruefen  eigener Code
+  Castcode, UDP 5005 + HTTP-API   │  └── Beamerbild    http://<pi-ip>:8089/beamer
 ```
 
 **Kugelerkennung:** ausschließlich über den **KI-Chip (Coral USB Accelerator)** – er erkennt jede
@@ -109,7 +109,7 @@ nano docker-compose.yml
 
 | Eintrag | Bedeutung |
 |---|---|
-| `x-web-port: &web_port "8080"` (ganz oben) | Port der Panels. Ist 8080 schon belegt, z. B. `"8090"` |
+| `x-web-port: &web_port "8089"` (ganz oben) | Port der Panels. Ist 8089 schon belegt, z. B. `"8090"` |
 | `x-admin-pin: &admin_pin "1902"` (ganz oben) | PIN fürs Admin-Panel (`/admin`). Leer (`""`) = ohne Anmeldung |
 | `x-game-pin: &game_pin "1212"` (ganz oben) | PIN fürs Spiel-Panel (Startseite). Leer (`""`) = Spiel-Panel offen |
 | `AUDIO_DEVICE` | Lautsprecher für den Ding-Ton, Standard HDMI 0 am Pi 4/5 (`hdmi:CARD=vc4hdmi0,DEV=0`) |
@@ -130,15 +130,15 @@ docker compose ps          # "billard" sollte "running" sein
 docker logs -f billard     # Ausgaben ansehen, beenden mit Strg+C
 ```
 
-In den Ausgaben stehen die Adressen, z. B. `Spiel-Panel http://192.168.88.10:8080/  Admin-Panel
-http://192.168.88.10:8080/admin`. Der QR-Code unten rechts auf dem Beamer führt zum Spiel-Panel.
+In den Ausgaben stehen die Adressen, z. B. `Spiel-Panel http://192.168.88.10:8089/  Admin-Panel
+http://192.168.88.10:8089/admin`. Der QR-Code unten rechts auf dem Beamer führt zum Spiel-Panel.
 
 **Autostart:** Nichts weiter zu tun. Docker startet mit dem Pi, die Container starten von selbst
 (`restart: unless-stopped`). Pi einfach mit dem Beamer zusammen einschalten.
 
 ### 1.7 Einrichten im Admin-Panel
 
-Am iPad `http://<pi-ip>:8080/admin` in Safari öffnen, Admin-PIN **1902** (über „Teilen → Zum
+Am iPad `http://<pi-ip>:8089/admin` in Safari öffnen, Admin-PIN **1902** (über „Teilen → Zum
 Home-Bildschirm“ wie eine App).
 
 1. **Kamera** wählen (Abschnitt 1a).
@@ -188,14 +188,14 @@ Der Container läuft dafür mit `privileged: true` (Zugriff auf HDMI, USB- und P
 
 ## 1b. Beamerbild im Browser
 
-`http://<pi-ip>:8080/beamer` zeigt das komplette Beamerbild live (Kamera, Grafik, Game-Bar) –
+`http://<pi-ip>:8089/beamer` zeigt das komplette Beamerbild live (Kamera, Grafik, Game-Bar) –
 z. B. auf einem Fernseher, Laptop oder zweiten Tablet. Antippen = Vollbild.
 Qualität: `/beamer?q=fhd&fps=8` (`q` = `sd`, `hd`, `fhd`; `fps` 1–10). Jede offene Ansicht kostet
 den Pi etwas Rechenzeit; mehrere Zuschauer teilen sich aber dasselbe Bild.
 
 ## 1c. QR-Code und Meldungen auf dem Beamer
 
-**QR-Code unten rechts:** führt standardmäßig zum Spiel-Panel (`http://<pi-ip>:8080/`), wer ihn
+**QR-Code unten rechts:** führt standardmäßig zum Spiel-Panel (`http://<pi-ip>:8089/`), wer ihn
 scannt, braucht dann noch die Spiel-PIN. Admin-Panel → **„Beamer: QR-Code“**: ein-/ausblenden,
 eigenen Inhalt (z. B. eure Webseite) und die Beschriftung darunter festlegen, mit Vorschau.
 Der Link zum Admin-Panel wird nirgends auf dem Beamer gezeigt.
@@ -220,7 +220,7 @@ Gelb = volle, blau = halbe, weiß = Weiße, grau = 8.
 
 ## 3. Spielen (Spiel-Panel)
 
-Das **Spiel-Panel** ist die Startseite `http://<pi-ip>:8080` (oder QR-Code auf dem Beamer
+Das **Spiel-Panel** ist die Startseite `http://<pi-ip>:8089` (oder QR-Code auf dem Beamer
 scannen), PIN **1212**. Danach bleibt das Gerät 30 Tage angemeldet.
 
 1. Kugeln aufbauen, Weiße hinlegen.
@@ -304,7 +304,7 @@ es gibt keinen eigenen Container mehr. Das Modell erkennt jede Kugel mit ihrer *
    2 Sekunden ruhig ist, wird ein Bild gespeichert (höchstens eins alle 8 Sekunden, geht auch ohne
    KI-Chip). Auf dem Beamer kommt kurz „Bild gespeichert“. Außerdem: Admin-Panel „Jetzt ein Bild
    aufnehmen“ oder Trainingsmodus „Bild aufnehmen“.
-2. **Kugeln festlegen – später, in Ruhe:** Prüfer öffnen `http://<pi-ip>:8080/pruefen` (eigener Code,
+2. **Kugeln festlegen – später, in Ruhe:** Prüfer öffnen `http://<pi-ip>:8089/pruefen` (eigener Code,
    Abschnitt 5a). Läuft gerade keine Prüfrunde, bekommen sie die gespeicherten Bilder – arbeiten
    mehrere gleichzeitig, bekommt jeder ein anderes Bild. „Später“ überspringt, „Unbrauchbar“ legt
    das Bild beiseite. Startet der Admin eine Prüfrunde, geht es nach dem aktuellen Bild dort weiter.
@@ -350,7 +350,7 @@ Damit die Trainingsdaten stimmen, legt jedes Bild mehrere Leute unabhängig vone
 
 1. **Prüfer anlegen (Admin):** Admin-Panel → „Prüfrunde“ → Name eingeben → „Hinzufügen“. Jeder bekommt
    einen 4-stelligen **Code** („Neuer Code“ erzeugt einen anderen, „Entfernen“ meldet ab).
-2. **Prüfer anmelden:** Am eigenen iPad `http://<pi-ip>:8080/pruefen` öffnen, Code eingeben.
+2. **Prüfer anmelden:** Am eigenen iPad `http://<pi-ip>:8089/pruefen` öffnen, Code eingeben.
    Im Admin-Panel leuchtet der Punkt neben dem Namen grün (online).
 3. **Bild an alle Prüfer (Admin):** Der Pi nimmt das aktuelle Kamerabild auf und schickt es an alle
    angemeldeten Prüfer – mit dem Vorschlag des KI-Chips, falls es schon ein Modell gibt.
