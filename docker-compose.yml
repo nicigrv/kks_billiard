@@ -2,16 +2,16 @@
 #
 # Starten (im Ordner ~/billard):   docker compose up -d --build
 # Logs:                             docker logs -f billard
-# Spiel-Panel (PIN unten):          http://<pi-ip>:8080            (Port: x-web-port unten)
-# Admin-Panel (PIN unten):          http://<pi-ip>:8080/admin
-# Beamerbild im Browser:            http://<pi-ip>:8080/beamer
+# Spiel-Panel (PIN unten):          http://<pi-ip>:8089            (Port: x-web-port unten)
+# Admin-Panel (PIN unten):          http://<pi-ip>:8089/admin
+# Beamerbild im Browser:            http://<pi-ip>:8089/beamer
 #
 # Einmalige Werkzeuge (laufen nur auf Befehl):
 #   docker compose exec billard python3 coral_check.py   KI-Chip (Coral-Stick) testen
 #   docker compose --profile sim up -d fake-cue         simulierter Queue (Castcode SMQ234)
 
 # Port der Panels (und der Beamer-Ansicht /beamer). Nur hier aendern, z. B. "8090".
-x-web-port: &web_port "8080"
+x-web-port: &web_port "8089"
 # PIN fuer das Admin-Panel (/admin). Pruefer bekommen eigene Codes (im Admin-Panel unter "Pruefrunde").
 x-admin-pin: &admin_pin "1902"
 # PIN fuer das Spiel-Panel (Startseite): Spiel starten, Korrekturen, Schlagverbesserung, Queue an/aus.
