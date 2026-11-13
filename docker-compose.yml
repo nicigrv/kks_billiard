@@ -38,6 +38,12 @@ services:
       # Gilt nur als Vorgabe, im Admin-Panel unter "Kamera" aenderbar.
       DEMO_IMAGE_URL: ""
       CUE_PORT: "5005"                             # UDP-Port, ueber den der Pi den Queue (Castcode) sucht
+      # Trainingsseite im Netz (training_server/): gespeicherte Bilder automatisch hochladen.
+      # Werte in die Datei .env neben dieser Datei schreiben (nicht ins Git), leer = aus:
+      #   TRAINING_UPLOAD_URL=https://billard.server.greylo.de
+      #   TRAINING_UPLOAD_KEY=<Schluessel vom Server>
+      TRAINING_UPLOAD_URL: ${TRAINING_UPLOAD_URL:-}
+      TRAINING_UPLOAD_KEY: ${TRAINING_UPLOAD_KEY:-}
     # Zugriff auf HDMI-Ausgabe (/dev/dri), Pi-Kameramodul (/dev/media*, /dev/dma_heap) und
     # USB-Kamera (/dev/video*). Einfachste sichere Variante fuer ein Geraet im Heimnetz.
     privileged: true

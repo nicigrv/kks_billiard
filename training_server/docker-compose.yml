@@ -1,0 +1,50 @@
+# Billard-Training im Netz (VPS mit Traefik v3, Netzwerk "proxy", Authelia)
+#
+#   Trainer:  https://billard.server.greylo.de          Anmeldung mit 6-stelligem Code
+#   Admin:    https://billard.server.greylo.de/admin    greylo-Login (Authelia), Gruppe "admins"
+#   Pi:       POST /api/upload mit X-Upload-Key
+#
+# Starten:  docker compose up -d --build
+# UPLOAD_KEY in .env neben dieser Datei (nicht ins Git):  UPLOAD_KEY=<langer Zufallswert>
+services:
+  billard-training:
+    build: .
+    image: billard-training:latest
+    container_name: billard-training
+    restart: unless-stopped
+    environment:
+      UPLOAD_KEY: ${UPLOAD_KEY:?UPLOAD_KEY fehlt in .env}
+      ADMIN_GRUPPEN: admins
+      TZ: Europe/Berlin
+    volumes:
+      - ./data:/data
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    networks: [proxy]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=proxy
+      - traefik.http.services.billard-training.loadbalancer.server.port=8000
+      # Trainer + Upload: offen (eigene Codes bzw. Schluessel). Gefaelschte Authelia-Kopfzeilen werden geleert.
+      - traefik.http.routers.billard-training.rule=Host(`billard.server.greylo.de`)
+      - traefik.http.routers.billard-training.entrypoints=websecure
+      - traefik.http.routers.billard-training.tls.certresolver=letsencrypt
+      - traefik.http.routers.billard-training.middlewares=billard-training-anonym
+      - traefik.http.middlewares.billard-training-anonym.headers.customrequestheaders.Remote-User=
+      - traefik.http.middlewares.billard-training-anonym.headers.customrequestheaders.Remote-Groups=
+      - traefik.http.middlewares.billard-training-anonym.headers.customrequestheaders.Remote-Email=
+      - traefik.http.middlewares.billard-training-anonym.headers.customrequestheaders.Remote-Name=
+      # Admin: nur mit greylo-Login
+      - traefik.http.routers.billard-training-admin.rule=Host(`billard.server.greylo.de`) && (Path(`/admin`) || PathPrefix(`/admin/`) || PathPrefix(`/api/admin/`))
+      - traefik.http.routers.billard-training-admin.priority=1000
+      - traefik.http.routers.billard-training-admin.entrypoints=websecure
+      - traefik.http.routers.billard-training-admin.tls.certresolver=letsencrypt
+      - traefik.http.routers.billard-training-admin.middlewares=authelia@docker
+      - traefik.http.routers.billard-training-admin.service=billard-training
+
+networks:
+  proxy:
+    external: true
