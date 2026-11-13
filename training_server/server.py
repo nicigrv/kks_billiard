@@ -85,6 +85,10 @@ def saubere_kugeln(balls):
         if b.get("changed"):
             d["changed"] = True
         out.append(d)
+    nummern = [b["number"] for b in out]
+    doppelt = sorted({n for n in nummern if nummern.count(n) > 1})
+    if doppelt:
+        raise Fehler("Nummer " + ", ".join("W" if n == 0 else str(n) for n in doppelt) + " ist doppelt vergeben – bitte prüfen")
     return out
 
 
