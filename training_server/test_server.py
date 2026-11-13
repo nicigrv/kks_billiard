@@ -127,6 +127,9 @@ def main():
         check(ben.call("POST", "/api/speichern", {"name": a1["name"], "balls": BALLS})[0] == 409, "Annas offenes Bild kann Ben nicht speichern")
         ohne = [dict(BALLS[0]), {"x": 5, "y": 5, "kind": "solid", "color": ""}]
         check(anna.call("POST", "/api/speichern", {"name": a1["name"], "balls": ohne})[0] == 400, "Kugel ohne Nummer wird abgelehnt")
+        doppelt = [dict(BALLS[0]), dict(BALLS[1]), dict(BALLS[1], x=500.0)]
+        s, r = anna.call("POST", "/api/speichern", {"name": a1["name"], "balls": doppelt})
+        check(s == 400 and "doppelt" in r["error"], "doppelte Nummer wird abgelehnt")
         check(anna.call("POST", "/api/speichern", {"name": a1["name"], "balls": BALLS})[0] == 200, "Anna speichert Runde 1")
         s, a2 = anna.call("GET", "/api/next")
         check(a2["runde"] == 1 and a2["name"] not in (a1["name"], b1["name"]), "Anna: nächstes freies Bild aus Runde 1")
