@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 data/
 cue_sensor/.pio/
+.env

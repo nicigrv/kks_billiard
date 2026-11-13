@@ -337,6 +337,13 @@ Technik: Googles Coral-Paketquelle gibt es nicht mehr. Der Treiber (`libedgetpu`
 `tflite_runtime` für Python 3.11 kommen von den gepflegten Builds unter github.com/feranick
 (beide gegen TensorFlow 2.17.1, im Dockerfile mit Prüfsummen festgelegt).
 
+## 5b. Trainingsseite im Netz: zuhause festlegen
+
+Wenig Zeit am Tisch? Dann nur Bilder sammeln und zuhause festlegen: Der Pi schickt jedes gespeicherte
+Bild automatisch auf den Server (`training_server/`). Jeder Trainer meldet sich dort mit seinem Code an.
+Runde 1: jedes Bild wird einmal festgelegt. Runde 2: eine andere Person kontrolliert es. Die fertige
+Trainings-ZIP gibt es auf der Admin-Seite. Einrichtung: `training_server/README.md`.
+
 ## 5a. Prüfrunde: mehrere Prüfer legen dasselbe Bild fest
 
 Damit die Trainingsdaten stimmen, legt jedes Bild mehrere Leute unabhängig voneinander fest.

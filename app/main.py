@@ -65,6 +65,7 @@ class App:
         self._migrate_config()
         self.reader = make_reader(self.cfg["camera"], config.DATA_DIR).start()
         self.recorder = Recorder(os.path.join(config.DATA_DIR, "dataset"))
+        self.uploader = self._start_uploader()
         self.coral = coral_engine or CoralEngine()          # Kugelerkennung nur ueber den KI-Chip
         table = self._table_for(self.reader)
         self.pipe = Pipeline(table, lambda r: CoralDetector(r, self.coral), recorder=self.recorder)
@@ -498,6 +499,14 @@ class App:
         ki = (" - KI-Vorschlag liegt vor" + ("" if r["show_ai"] else " (Prüfer sehen ihn nicht)")) if model else ""
         return f"Bild {r['no']} an {len(participants)} Prüfer geschickt: {', '.join(participants)}{ki}"
 
+    def _start_uploader(self):
+        """Gespeicherte Bilder zur Trainingsseite im Netz schicken (nur wenn eingerichtet)."""
+        url, key = os.environ.get("TRAINING_UPLOAD_URL", ""), os.environ.get("TRAINING_UPLOAD_KEY", "")
+        if not (url and key):
+            return None
+        from uploader import Uploader
+        return Uploader(self.recorder, url, key).start()
+
     def state_dict(self):
         online = set(self.reviews.online([r["name"] for r in self.reviewer_list()]))
         with self.pipe.lock:
@@ -518,7 +527,8 @@ class App:
             "cloth": self.cfg.get("cloth", "blau"),
             "training": {"pending": self.recorder.pending, "auto_capture": self.pipe.auto_capture,
                          "verified": self.recorder.verified, "discarded": self.recorder.discarded,
-                         "disk_ok": self.recorder.disk_ok(), "quality": self.recorder.model_quality()},
+                         "disk_ok": self.recorder.disk_ok(), "quality": self.recorder.model_quality(),
+                         "upload": self.uploader.status() if self.uploader else None},
             "detector": {"coral": self.coral.status(), "not_ready": self.pipe.not_ready},
             "assist": bool(self.cfg.get("assist")),
             "suggestion": (self.suggestion or {}).get("text"),

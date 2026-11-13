@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Billard-Training – Admin</title>
+<style>
+:root {
+  --bg: #0B1712; --panel: #12241C; --line: #2A4436; --ink: #EFE6D2; --dim: #A9B3A6;
+  --chalk: #6FB3E0; --ok: #7FE0A0; --gold: #FFD180; --bad: #FF8A80; --rail: #5A3520; --foul: #D2453B; --r: 12px;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { width: min(1100px, 100% - 32px); margin: 0 auto; padding: 24px 0 64px; display: grid; gap: 18px; }
+h1 { margin: 0; font-size: 26px; }
+h2 { margin: 0 0 12px; font-size: 18px; }
+.kopf { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; justify-content: space-between; }
+.dim { color: var(--dim); }
+.box { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
+.zahlen { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.zahl { background: var(--bg); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; }
+.zahl b { display: block; font-size: 30px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.zahl span { color: var(--dim); font-size: 14px; }
+.zahl.r1 b { color: var(--chalk); } .zahl.r2 b { color: var(--gold); } .zahl.ok b { color: var(--ok); }
+button, a.btn { font: inherit; font-weight: 700; color: var(--ink); background: var(--rail); border: 0; border-radius: var(--r);
+  min-height: 42px; padding: 8px 14px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+button.primary, a.btn.primary { background: var(--chalk); color: #0A2F25; }
+button.quiet, a.btn.quiet { background: transparent; border: 2px solid var(--line); }
+button.klein { min-height: 34px; padding: 4px 10px; font-size: 14px; }
+button.danger { background: var(--foul); }
+a.btn.aus { opacity: .4; pointer-events: none; }
+:focus-visible { outline: 3px solid var(--chalk); outline-offset: 2px; }
+.reihe { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+input[type=text] { font: inherit; color: var(--ink); background: var(--bg); border: 2px solid var(--line); border-radius: var(--r);
+  padding: 8px 12px; min-height: 42px; min-width: 220px; }
+table { width: 100%; border-collapse: collapse; font-size: 15px; }
+th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+th { color: var(--dim); font-weight: 600; font-size: 13px; }
+td.zahl-z { font-variant-numeric: tabular-nums; }
+.code { font: 700 18px/1 ui-monospace, Menlo, Consolas, monospace; letter-spacing: 3px; color: var(--gold); }
+tr.gesperrt td { opacity: .5; }
+.punkt { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--line); margin-right: 6px; }
+.punkt.an { background: var(--ok); }
+.aktionen { display: flex; gap: 6px; flex-wrap: wrap; }
+.bilder { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+.bild { background: var(--bg); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; font-size: 13px; }
+.bild img { width: 100%; aspect-ratio: 2 / 1; object-fit: cover; display: block; background: #000; }
+.bild div { padding: 6px 8px; display: grid; gap: 2px; }
+.marke { font-weight: 800; font-size: 12px; border-radius: 6px; padding: 1px 6px; justify-self: start; color: #0A2F25; }
+.m-runde1 { background: var(--chalk); } .m-runde2 { background: var(--gold); } .m-fertig { background: var(--ok); } .m-verworfen { background: var(--bad); }
+.hinweis { color: var(--dim); font-size: 14px; margin: 10px 0 0; }
+.neu-code { margin-top: 12px; padding: 12px 14px; border-radius: var(--r); background: #1d3a2c; border: 1px solid var(--ok); }
+.scroll { overflow-x: auto; }
+@media (max-width: 700px) { .zahlen { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <div class="kopf">
+    <h1>🎱 Billard-Training · Admin</h1>
+    <span class="dim" id="eingang"></span>
+  </div>
+
+  <section class="box">
+    <h2>Stand</h2>
+    <div class="zahlen">
+      <div class="zahl r1"><b id="z1">–</b><span>in Runde 1 (noch nie festgelegt)</span></div>
+      <div class="zahl r2"><b id="z2">–</b><span>in Runde 2 (warten auf Kontrolle)</span></div>
+      <div class="zahl ok"><b id="z3">–</b><span>fertig fürs Training</span></div>
+      <div class="zahl"><b id="z4">–</b><span>aussortiert</span></div>
+    </div>
+  </section>
+
+  <section class="box">
+    <h2>Trainingsdaten herunterladen</h2>
+    <div class="reihe">
+      <a class="btn primary" id="zipFertig" href="/api/admin/zip">ZIP laden (fertige Bilder)</a>
+      <a class="btn quiet" id="zipAlle" href="/api/admin/zip?runde1=1">ZIP inkl. Runde 1</a>
+    </div>
+    <p class="hinweis">Die ZIP passt direkt zu <code>training/train_coral.py</code> (Google Colab). „Inkl. Runde 1“ nimmt auch Bilder mit,
+      die erst einmal festgelegt und noch nicht kontrolliert sind – mehr Bilder, aber evtl. mit Fehlern.</p>
+  </section>
+
+  <section class="box">
+    <h2>Trainer und Codes</h2>
+    <form class="reihe" id="neuForm" autocomplete="off">
+      <input type="text" id="neuName" placeholder="Name, z. B. Lukas" maxlength="40" aria-label="Name des Trainers">
+      <button class="primary" type="submit">Hinzufügen</button>
+    </form>
+    <div class="neu-code" id="neuCode" hidden></div>
+    <div class="scroll" style="margin-top:14px">
+      <table>
+        <thead><tr><th>Name</th><th>Code</th><th>Runde 1</th><th>Runde 2</th><th>Aussortiert</th><th>Zuletzt da</th><th></th></tr></thead>
+        <tbody id="personen"></tbody>
+      </table>
+    </div>
+    <p class="hinweis">Link für alle: <b id="link"></b> – jeder meldet sich dort mit seinem Code an. Runde 2 kontrolliert immer eine
+      <i>andere</i> Person als die, die das Bild in Runde 1 festgelegt hat. Willst du selbst mitmachen, leg dich auch als Trainer an.</p>
+  </section>
+
+  <section class="box">
+    <h2>Neueste Bilder</h2>
+    <div class="bilder" id="bilder"></div>
+  </section>
+</main>
+<script src="/notify.js"></script>
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const toast = (t, err) => Notify.show(t, "", err ? "error" : "success");
+  const STATUS = { runde1: "Runde 1", runde2: "Runde 2", fertig: "fertig", verworfen: "aussortiert" };
+  $("link").textContent = location.origin + "/";
+
+  async function post(pfad, daten) {
+    try {
+      const r = await fetch("/api/admin/" + pfad, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(daten || {}) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast(d.error || "Fehler", true); return null; }
+      if (d.message) toast(d.message);
+      laden();
+      return d;
+    } catch (e) { toast("Keine Verbindung", true); return null; }
+  }
+
+  function seit(t) {
+    if (!t) return "noch nie";
+    const s = Date.now() / 1000 - t;
+    if (s < 120) return "gerade eben";
+    if (s < 3600) return "vor " + Math.round(s / 60) + " Min.";
+    if (s < 86400) return "vor " + Math.round(s / 3600) + " Std.";
+    return new Date(t * 1000).toLocaleDateString("de-DE");
+  }
+  function zelle(tr, inhalt, cls) {
+    const td = document.createElement("td");
+    if (cls) td.className = cls;
+    if (inhalt instanceof Node) td.appendChild(inhalt); else td.textContent = inhalt;
+    tr.appendChild(td);
+    return td;
+  }
+  function knopf(text, cls, fn) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "klein " + (cls || "quiet"); b.textContent = text;
+    b.addEventListener("click", fn);
+    return b;
+  }
+
+  function zeigen(d) {
+    const z = d.zaehler;
+    $("z1").textContent = z.runde1; $("z2").textContent = z.runde2; $("z3").textContent = z.fertig; $("z4").textContent = z.verworfen;
+    $("eingang").textContent = (d.upload ? "Upload vom Tisch an" : "Upload vom Tisch AUS (UPLOAD_KEY fehlt)") +
+      " · letztes Bild: " + seit(d.letzter_eingang);
+    $("zipFertig").textContent = "ZIP laden (" + z.fertig + " fertige Bilder)";
+    $("zipFertig").classList.toggle("aus", !z.fertig);
+    $("zipAlle").textContent = "ZIP inkl. Runde 1 (" + (z.fertig + z.runde2) + " Bilder)";
+    $("zipAlle").classList.toggle("aus", !(z.fertig + z.runde2));
+
+    const tb = $("personen");
+    tb.innerHTML = "";
+    if (!d.personen.length) {
+      const tr = document.createElement("tr"); zelle(tr, "Noch keine Trainer – oben einen Namen eingeben.").colSpan = 7; tb.appendChild(tr);
+    }
+    d.personen.forEach((p) => {
+      const tr = document.createElement("tr");
+      if (!p.aktiv) tr.className = "gesperrt";
+      const n = document.createElement("span");
+      const pk = document.createElement("span"); pk.className = "punkt" + (p.zuletzt && Date.now() / 1000 - p.zuletzt < 300 ? " an" : "");
+      n.append(pk, p.name);
+      zelle(tr, n);
+      const c = document.createElement("span"); c.className = "code"; c.textContent = p.code;
+      zelle(tr, c);
+      zelle(tr, String(p.runde1), "zahl-z"); zelle(tr, String(p.runde2), "zahl-z"); zelle(tr, String(p.verworfen), "zahl-z");
+      zelle(tr, p.aktiv ? seit(p.zuletzt) : "gesperrt");
+      const a = document.createElement("div"); a.className = "aktionen";
+      a.append(
+        knopf("Neuer Code", "quiet", () => { if (confirm("Neuen Code für " + p.name + "? Der alte gilt dann nicht mehr.")) post("person/code", { id: p.id }); }),
+        knopf(p.aktiv ? "Sperren" : "Freischalten", "quiet", () => post("person/aktiv", { id: p.id, aktiv: !p.aktiv })),
+        knopf("Entfernen", "danger", () => { if (confirm(p.name + " entfernen? Die festgelegten Bilder bleiben erhalten.")) post("person/loeschen", { id: p.id }); }));
+      zelle(tr, a);
+      tb.appendChild(tr);
+    });
+
+    const box = $("bilder");
+    box.innerHTML = "";
+    if (!d.letzte.length) { box.textContent = "Noch keine Bilder vom Tisch."; box.className = "dim"; return; }
+    box.className = "bilder";
+    d.letzte.forEach((b) => {
+      const el = document.createElement("div"); el.className = "bild";
+      const im = document.createElement("img"); im.loading = "lazy"; im.alt = "";
+      im.src = "/api/admin/bild?name=" + encodeURIComponent(b.name);
+      const t = document.createElement("div");
+      const m = document.createElement("span"); m.className = "marke m-" + b.status;
+      m.textContent = STATUS[b.status] + (b.status === "fertig" && b.korrigiert ? " · korrigiert" : "");
+      const z1 = document.createElement("span"); z1.className = "dim";
+      z1.textContent = b.name.slice(6, 8) + "." + b.name.slice(4, 6) + ". " + b.name.slice(9, 11) + ":" + b.name.slice(11, 13) + " · " + b.kugeln + " Kugeln";
+      t.append(m, z1);
+      const wer = [b.von1 && "R1: " + b.von1, b.von2 && "R2: " + b.von2, b.verworfen_von && "aussortiert: " + b.verworfen_von].filter(Boolean).join(" · ");
+      if (wer) { const w = document.createElement("span"); w.className = "dim"; w.textContent = wer; t.append(w); }
+      if (b.status === "verworfen") t.append(knopf("Zurück in Runde 1", "quiet", () => post("zurueck", { name: b.name })));
+      el.append(im, t);
+      box.appendChild(el);
+    });
+  }
+
+  async function laden() {
+    try {
+      const r = await fetch("/api/admin/stand", { cache: "no-store" });
+      if (!r.ok) { toast("Kein Zugriff (" + r.status + ")", true); return; }
+      zeigen(await r.json());
+    } catch (e) { /* naechster Versuch */ }
+  }
+
+  $("neuForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = $("neuName").value.trim();
+    if (!name) return;
+    const d = await post("person", { name });
+    if (d) {
+      $("neuName").value = "";
+      const box = $("neuCode");
+      box.innerHTML = "";
+      const c = document.createElement("span"); c.className = "code"; c.textContent = d.code;
+      box.append(name + " ist angelegt. Code: ", c, " – zusammen mit dem Link " + location.origin + "/ weitergeben.");
+      box.hidden = false;
+    }
+  });
+
+  laden();
+  setInterval(laden, 20000);
+})();
+</script>
+</body>
+</html>

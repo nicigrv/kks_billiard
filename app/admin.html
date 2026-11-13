@@ -899,6 +899,9 @@ details > div { margin-top: 12px; }
     badge.textContent = t.pending || "";
     $("trainInfo").textContent = (t.pending || 0) + " Bilder offen  ·  " + (t.verified || 0) + " festgelegt (für das Training)  ·  " +
       (t.discarded || 0) + " verworfen (aufgehoben)" + (t.disk_ok === false ? "  ·  SPEICHER FAST VOLL – es wird nichts mehr aufgenommen" : "");
+    const up = t.upload;
+    if (up) $("trainInfo").textContent += "  ·  Trainingsseite: " + (up.error ? up.error + ", " + up.waiting + " warten" :
+      up.waiting ? up.waiting + " werden hochgeladen" : "alles hochgeladen (" + up.sent + ")");
     const q = t.quality;
     $("qualityInfo").textContent = q ? "Der KI-Chip (" + q.model + ") lag bei " + q.percent + " % der Kugeln richtig (letzte " +
       q.images + " Bilder)." + (q.percent >= 95 ? " Das ist gut – Sammeln kann pausieren." : "") :
