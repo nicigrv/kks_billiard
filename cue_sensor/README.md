@@ -47,18 +47,3 @@ neue IP, findet der Pi ihn über den Castcode von selbst wieder.
 dann öffnet er den Hotspot. Oder im WLAN seine Seite `http://<queue-ip>` → „WLAN neu einrichten“.
 Ist das gespeicherte WLAN nicht erreichbar, öffnet er den Hotspot ebenfalls (und versucht es alle
 5 Minuten erneut).
-
-## So reden Pi und Queue
-- **Suche:** Der Pi schickt `{"suche": "<Castcode>"}` per UDP-Broadcast an Port 5005; nur der Queue
-  mit diesem Code antwortet mit seiner IP.
-- **Abfrage:** ca. 25× pro Sekunde `GET http://<queue>/api/lage` mit Kopfzeile `X-Castcode`.
-  Antwort: `{"castcode":"K7P2QM","seq":123,"yaw":37.5,"pitch":-4.1,"still":0,"bat":3.91,"ms":123456}`.
-  Ohne passenden Castcode antwortet der Queue nicht (403).
-- Zusätzlich im Netz als `queue-<castcode>.local` (mDNS).
-
-## Grenzen (ehrlich)
-- Ein Gyroskop misst nur **Drehungen**, keine Position. Der helle Queue wird deshalb immer hinter die
-  Weiße gezeichnet; verglichen wird nur der **Winkel**.
-- Ohne Magnetometer driftet der Winkel langsam (typisch unter 1° pro Minute). Liegt der Queue ruhig,
-  wird nachgeführt. Wird die Abweichung sichtbar: kurz neu kalibrieren.
-- Ohne Hardware testen: `python3 -m sim.fake_cue` (im Ordner `app/`), Castcode `SMQ234` im Admin-Panel eintragen.
