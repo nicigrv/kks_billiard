@@ -18,6 +18,21 @@ So reden Pi und Queue miteinander (alles im WLAN, erkannt am **Castcode**):
 ## Teile
 - Seeed XIAO ESP32-C3 (klein, passt in ein ausgebohrtes Queue-Ende) oder ein anderes ESP32-Board
 - MPU6050-Modul (GY-521)
+- **oder M5Stack Atom** (Atom Lite, Atom Matrix, AtomS3, AtomS3 Lite) mit Gyro-Accelerometer
+  MPU6050 (GY-521) am Grove-Port – Akku und Lader braucht es trotzdem
+
+### M5Stack Atom
+| Grove-Kabel | MPU6050 (GY-521) | Atom Lite / Matrix | AtomS3 / AtomS3 Lite |
+|---|---|---|---|
+| schwarz | GND | GND | GND |
+| rot | VCC | 5V | 5V |
+| gelb | SCL | G32 | G1 |
+| weiß | SDA | G26 | G2 |
+
+Das GY-521 hat einen eigenen Spannungsregler und verträgt die 5 V vom Grove-Port.
+Ist am Grove-Port nichts angeschlossen, nimmt der Atom Matrix bzw. AtomS3 seinen **eingebauten**
+Sensor (MPU6886). Dann zeigt die lange Seite des Atom (X-Achse) zur Queue-Spitze; stimmt die
+Richtung nicht, `AXIS_SIGN_X -1` in `include/config.h`. Nicht unterstützt: der BMI270 im AtomS3R.
 - LiPo-Akku 3,7 V + Lade-/Schutzplatine, Schalter
 
 ## Einbau
@@ -25,7 +40,12 @@ So reden Pi und Queue miteinander (alles im WLAN, erkannt am **Castcode**):
 - Pfeil **X** auf dem MPU6050 zeigt Richtung **Queue-Spitze** (sonst `AXIS_SIGN_X -1` in `include/config.h`).
 
 ## Flashen
-`pio run -e xiao_esp32c3 -t upload` (bzw. `-e esp32dev`). WLAN-Daten müssen **nicht** in den Code –
+`pio run -e xiao_esp32c3 -t upload` (bzw. `-e esp32dev`, `-e m5stack-atom` für Atom Lite/Matrix,
+`-e m5stack-atoms3` für AtomS3).
+
+In **VS Code**: Erweiterung „PlatformIO IDE“ installieren, **nur den Ordner `cue_sensor`** öffnen
+(File > Open Folder). Unten in der blauen Leiste das Board wählen (`env:m5stack-atom` usw.), dann
+Pfeil = Upload, Stecker = serieller Monitor. Dort steht nach dem Start, welcher Sensor gefunden wurde. WLAN-Daten müssen **nicht** in den Code –
 die Einrichtung läuft übers Handy.
 
 ## Einrichten (Captive Portal + Castcode)

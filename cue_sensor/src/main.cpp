@@ -26,6 +26,7 @@
  * der Pi zieht beim "Queue kalibrieren" den Wert an der Bande ab.
  *
  * Verdrahtung MPU6050:  VCC -> 3V3, GND -> GND, SDA -> SDA_PIN, SCL -> SCL_PIN
+ * M5Stack Atom: MPU6050 (GY-521) am Grove-Port, oder der eingebaute IMU (Atom Matrix / AtomS3)
  */
 
 #include <Arduino.h>
@@ -40,7 +41,7 @@
 
 #include "config.h"
 
-static const uint8_t MPU = 0x68;
+static uint8_t MPU = 0x68;               // 0x69, wenn AD0 auf 3V3 liegt
 static const float GYRO_LSB = 65.5f;      // +-500 Grad/s
 static const float ACC_LSB = 16384.0f;    // +-2 g
 static const float DEG2RAD = 0.017453292f;
@@ -74,11 +75,37 @@ static bool readRaw(int16_t* a, int16_t* g) {
   return true;
 }
 
-static bool mpuInit() {
-  Wire.begin(SDA_PIN, SCL_PIN);
+static bool mpuFind(int sda, int scl) {
+  Wire.end();
+  Wire.begin(sda, scl);
   Wire.setClock(400000);
-  Wire.beginTransmission(MPU);
-  if (Wire.endTransmission() != 0) return false;
+  for (uint8_t addr : {(uint8_t)0x68, (uint8_t)0x69}) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() != 0) continue;
+    MPU = addr;
+    Wire.beginTransmission(MPU);
+    Wire.write(0x75);   // WHO_AM_I: 0x68 MPU6050, 0x19 MPU6886, 0x70 MPU6500, 0x71 MPU9250
+    uint8_t who = 0;
+    if (Wire.endTransmission(false) == 0 && Wire.requestFrom((int)MPU, 1) == 1) who = Wire.read();
+    Serial.printf("Sensor an SDA %d / SCL %d, Adresse 0x%02X, WHO_AM_I 0x%02X\n", sda, scl, MPU, who);
+    // MPU6050 und Nachbauten, MPU6500/9250, MPU6886 - alle mit denselben Registern
+    if (who == 0x68 || who == 0x69 || who == 0x70 || who == 0x71 || who == 0x72 || who == 0x73 ||
+        who == 0x98 || who == 0x19)
+      return true;
+    Serial.println("  kein MPU-kompatibler Sensor (z. B. BMI270) - wird nicht unterstuetzt");
+  }
+  return false;
+}
+
+// Erst die Pins aus platformio.ini (Grove-Port), dann der im Atom eingebaute IMU (falls vorhanden)
+static bool mpuInit() {
+  bool found = mpuFind(SDA_PIN, SCL_PIN);
+#ifdef ALT_SDA_PIN
+  if (!found) found = mpuFind(ALT_SDA_PIN, ALT_SCL_PIN);
+#endif
+  if (!found) return false;
+  writeReg(0x6B, 0x80);   // Reset (MPU6886 startet sonst nicht sauber)
+  delay(100);
   writeReg(0x6B, 0x01);   // aufwecken, Takt vom Gyroskop
   delay(50);
   writeReg(0x19, 4);      // 1 kHz / (1+4) = 200 Hz
@@ -385,7 +412,7 @@ void setup() {
   Serial.begin(115200);
   delay(300);
   Serial.println("\nBillard-Queue " FW_VERSION);
-  if (!mpuInit()) Serial.println("MPU6050 nicht gefunden - Verdrahtung pruefen!");
+  if (!mpuInit()) Serial.println("Gyro-Sensor nicht gefunden - Verdrahtung pruefen!");
   calibrateBias();
   // Startlage aus der Schwerkraft, damit der Filter nicht erst einschwingen muss
   beta = 2.0f;
