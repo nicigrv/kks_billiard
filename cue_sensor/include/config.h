@@ -3,10 +3,13 @@
 // Hotspot "Billard-Queue-...", dort WLAN waehlen, Castcode im Admin-Panel eintragen, fertig.
 #pragma once
 
-#define FW_VERSION       "2.2.0"
+#define FW_VERSION       "3.0.0"
 #define SETUP_AP_PREFIX  "Billard-Queue-"   // Hotspot-Name, dahinter die ersten 4 Zeichen des Castcodes
 #define API_PORT         80                 // HTTP-API, ueber die der Pi die Lage abfragt
 #define DISCOVERY_PORT   5005               // Pi sucht den Queue per UDP-Broadcast {"suche": "<castcode>"}
+                                            // und abonniert dort die Lage {"abo": "<castcode>"}
+#define SEND_INTERVAL_MS 20                 // nach dem Abo: Lage alle 20 ms (50x pro Sekunde) an den Pi
+#define ABO_TIMEOUT_MS   3000               // so lange ohne Lebenszeichen vom Pi -> nicht verbunden (LED rot)
 #define CASTCODE_LEN     6
 
 #define SAMPLE_HZ        200                // Sensor-Abtastrate
@@ -28,4 +31,19 @@
 #endif
 #ifndef SCL_PIN
 #define SCL_PIN          22
+#endif
+
+// RGB-LED (WS2812/SK6812) und Knopf. -1 = nicht vorhanden. Die M5Stack-Umgebungen in
+// platformio.ini setzen das passend (Atom Lite/Matrix: LED G27, Knopf G39; AtomS3 Lite: LED G35, Knopf G41).
+#ifndef LED_PIN
+#define LED_PIN          -1
+#endif
+#ifndef LED_COUNT
+#define LED_COUNT        1
+#endif
+#ifndef LED_BRIGHTNESS
+#define LED_BRIGHTNESS   60                 // 0-255; Atom Matrix (25 LEDs) dunkler, sonst wird er warm
+#endif
+#ifndef BTN_PIN
+#define BTN_PIN          -1
 #endif

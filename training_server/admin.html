@@ -158,7 +158,8 @@ tr.gesperrt td { opacity: .5; }
     $("z2t").textContent = "teilweise festgelegt (" + z.offen_je.slice(1).map((n, i) => n + "× " + (i + 1) + "/" + z.ziel).join(", ") + ")";
     $("z3t").textContent = "fertig (" + z.ziel + "× festgelegt), davon " + z.einig + " einstimmig";
     $("eingang").textContent = (d.upload ? "Upload vom Tisch an" : "Upload vom Tisch AUS (UPLOAD_KEY fehlt)") +
-      " · letztes Bild: " + seit(d.letzter_eingang);
+      " · letztes Bild: " + seit(d.letzter_eingang) +
+      (z.einzel ? " · Einzelkugel-Bilder: " + z.einzel + ", davon " + z.einzel_erkannt + " von der Bilderkennung festgelegt" : "");
     $("zipFertig").textContent = "ZIP laden (" + z.fertig + " fertige Bilder)";
     $("zipFertig").classList.toggle("aus", !z.fertig);
     $("zipEinig").textContent = "nur einstimmige (" + z.einig + ")";
@@ -198,7 +199,7 @@ tr.gesperrt td { opacity: .5; }
     d.letzte.forEach((b) => {
       const el = document.createElement("div"); el.className = "bild";
       const im = document.createElement("img"); im.loading = "lazy"; im.alt = "";
-      im.src = "/api/admin/bild?name=" + encodeURIComponent(b.name);
+      im.src = "/api/admin/bild?kreis=1&name=" + encodeURIComponent(b.name);
       const t = document.createElement("div");
       const m = document.createElement("span");
       m.className = "marke m-" + (b.status === "offen" && b.festlegungen ? "teil" : b.status);
@@ -207,7 +208,9 @@ tr.gesperrt td { opacity: .5; }
       const z1 = document.createElement("span"); z1.className = "dim";
       z1.textContent = b.name.slice(6, 8) + "." + b.name.slice(4, 6) + ". " + b.name.slice(9, 11) + ":" + b.name.slice(11, 13) + " · " + b.kugeln + " Kugeln";
       t.append(m, z1);
-      const wer = [b.wer.length && b.wer.join(", "), b.verworfen_von && "aussortiert: " + b.verworfen_von].filter(Boolean).join(" · ");
+      const einzel = b.einzel === null || b.einzel === undefined ? "" :
+        "Einzelkugel " + (b.einzel === 0 ? "Weiße" : b.einzel) + (b.erkennung === "gefunden" ? "" : " – Bilderkennung: " + b.erkennung + ", Trainer legen fest");
+      const wer = [einzel, b.wer.length && b.wer.join(", "), b.verworfen_von && "aussortiert: " + b.verworfen_von].filter(Boolean).join(" · ");
       if (wer) { const w = document.createElement("span"); w.className = "dim"; w.textContent = wer; t.append(w); }
       if (b.status === "verworfen") t.append(knopf("Wieder freigeben", "quiet", () => post("zurueck", { name: b.name })));
       el.append(im, t);

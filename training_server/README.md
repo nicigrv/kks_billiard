@@ -24,6 +24,15 @@ Admin           ──▶ https://billard.server.greylo.de/admin  greylo-Login, 
 Am Tisch schon festgelegte Bilder werden genauso dreimal online festgelegt; die Kugeln vom Tisch bleiben nur
 in der Datenbank stehen. Wie oft jedes Bild festgelegt wird, stellt `FESTLEGUNGEN` ein (Standard 3).
 
+**Einzelkugel-Bilder** (am Pi im Admin-Panel → KI-Training → Einzelkugel-Serie → „Bild jetzt aufnehmen“):
+Der Pi schickt das Bild mit der dort gewählten Kugelnummer und dem Bild des leeren Tisches. Eine einfache
+Bilderkennung hier auf dem Server (`einzelkugel.py`: was sich gegenüber dem leeren Tisch verändert hat und
+so groß wie eine Kugel ist) zieht den Kreis. Genau eine Kugel gefunden → das Bild ist sofort **fertig**
+(festgelegt von „Bilderkennung“) und kommt in die ZIP. Keine oder mehrere Kugeln (Hand im Bild …) → das Bild
+legen die Trainer wie gewohnt fest. Auf der Admin-Seite sind die Kreise in den Vorschaubildern eingezeichnet.
+Braucht Pillow und numpy – das Dockerfile installiert beides (nach dem Update einmal neu bauen:
+`docker compose up -d --build`).
+
 Tastatur: Enter = speichern, Ziffern = Nummer (zweistellig schnell hintereinander: 1, 2 = 12),
 W = Weiße, Entf = Kugel entfernen, Esc = abwählen.
 

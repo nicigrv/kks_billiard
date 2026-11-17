@@ -6,14 +6,33 @@ auf dem Beamer den hellen Queue (echte Lage) neben dem dunklen (optimale Lage) u
 **Optional:** Ohne Queue läuft alles andere genauso. Ist einer gekoppelt, lässt er sich im
 Spiel-Panel mit dem Schalter „Queue mit Gyroskop“ ein- und ausschalten (aus = der Pi sucht und fragt nichts ab).
 
-So reden Pi und Queue miteinander (alles im WLAN, erkannt am **Castcode**):
+So reden Pi und Queue miteinander (alles im WLAN per UDP, erkannt am **Castcode**):
 
 | Wer | Was |
 |---|---|
 | Pi → alle | UDP-Broadcast an Port 5005: `{"suche": "K7P2QM"}` |
 | Queue → Pi | nur der Queue mit diesem Castcode antwortet: `{"castcode": "K7P2QM", "ip": "192.168.88.57", "port": 80}` |
-| Pi → Queue | ca. 25× pro Sekunde `GET http://<queue>/api/lage` mit Kopfzeile `X-Castcode: K7P2QM` |
-| Queue → Pi | `{"castcode": "K7P2QM", "seq": 123, "yaw": 37.5, "pitch": -4.2, "still": 0, "bat": 3.91}` (falscher Castcode: 403) |
+| Pi → Queue | **Abo** an Port 5005: `{"abo": "K7P2QM", "farbe": null}` (während eines Spiels die Teamfarbe, z. B. `[0, 90, 255]`) |
+| Queue → Pi | ab dann **von selbst** ca. 50× pro Sekunde: `{"castcode": "K7P2QM", "seq": 123, "yaw": 37.5, "pitch": -4.2, "still": 0, "bat": 3.91, "rssi": -55, "knopf": 0}` |
+| Pi → Queue | jede Sekunde das Abo erneut (Lebenszeichen), bei Zugwechsel sofort mit der neuen Farbe |
+
+Kommt 3 s kein Lebenszeichen, hört der Queue auf zu senden (LED rot). Kommen 3 s keine Daten, sucht der
+Pi den Queue neu (z. B. neue IP nach Neustart). Zum Nachschauen gibt es weiterhin `GET http://<queue>/api/lage`.
+
+## LED und Knopf (M5Stack Atom)
+
+| LED | Bedeutung |
+|---|---|
+| weiß | Start: Gyroskop-Nullpunkt, Queue ruhig liegen lassen |
+| rot blinkend | Einrichtungs-Hotspot offen |
+| **rot** | keine Verbindung zum Pi |
+| **grün** | verbunden, es läuft kein Spiel |
+| **blau** / **orange** | Spiel läuft: Team A (blau) bzw. Team B (orange) ist dran |
+
+**Knopf** (auf dem Atom gedrückt), wenn die LED **grün** ist: Der Pi startet ein Spiel **Team A gegen
+Team B**, Team A bricht an. Während eines Spiels oder ohne Verbindung macht der Knopf nichts.
+Atom Lite/Matrix: LED G27, Knopf G39. AtomS3 Lite: LED G35, Knopf G41. Andere Boards:
+`LED_PIN`/`BTN_PIN` in `platformio.ini` setzen (WS2812-LED, Knopf gegen GND).
 
 ## Teile
 - Seeed XIAO ESP32-C3 (klein, passt in ein ausgebohrtes Queue-Ende) oder ein anderes ESP32-Board
@@ -45,7 +64,7 @@ Richtung nicht, `AXIS_SIGN_X -1` in `include/config.h`. Nicht unterstützt: der 
 
 In **VS Code**: Erweiterung „PlatformIO IDE“ installieren, **nur den Ordner `cue_sensor`** öffnen
 (File > Open Folder). Unten in der blauen Leiste das Board wählen (`env:m5stack-atom` usw.), dann
-Pfeil = Upload, Stecker = serieller Monitor. Dort steht nach dem Start, welcher Sensor gefunden wurde. WLAN-Daten müssen **nicht** in den Code –
+Pfeil = Upload, Stecker = serieller Monitor. Die LED-Bibliothek (Adafruit NeoPixel) lädt PlatformIO selbst. Dort steht nach dem Start, welcher Sensor gefunden wurde. WLAN-Daten müssen **nicht** in den Code –
 die Einrichtung läuft übers Handy.
 
 ## Einrichten (Captive Portal + Castcode)

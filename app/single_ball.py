@@ -11,6 +11,11 @@ Ablauf (Admin-Panel, KI-Training):
      Schritt 2 -> das Bild landet direkt bei den festgelegten Bildern (dataset/geprueft/).
      Ist die Position unsicher, kommt das Bild zu den offenen Bildern (mit Vorschlag) und wird
      wie gewohnt festgelegt.
+
+Schneller: "Bild jetzt aufnehmen" (Knopf, jederzeit) - sofort ein Bild, ohne Warten und ohne
+Erkennung am Pi. Es geht mit Nummer und Bild des leeren Tisches zur Trainingsseite (VPS), dort
+zieht eine einfache Bilderkennung den Kreis (training_server/einzelkugel.py). Ohne Trainingsseite
+findet der Pi die Kugel selbst wie bei der Serie.
 """
 
 import math
@@ -35,7 +40,7 @@ class SingleBall:
     STEADY_PX = 2.5          # Kugel gilt als ruhend, wenn sie sich zwischen zwei Blicken weniger bewegt
     MAX_COUNT = 500
 
-    def __init__(self, pipe, recorder, notes=None, clock=time.monotonic):
+    def __init__(self, pipe, recorder, notes=None, clock=time.monotonic, has_upload=None):
         self.pipe = pipe
         self.recorder = recorder
         self.notes = notes
@@ -43,7 +48,10 @@ class SingleBall:
         self.lock = threading.Lock()
         self.enabled = False
         self.number = None
+        self.has_upload = has_upload or (lambda: False)   # Trainingsseite eingerichtet?
         self.ref = None                 # leerer Tisch (Lab, float32, geglaettet)
+        self.ref_jpg = None             # leerer Tisch als JPEG (geht mit den Knopf-Bildern zum VPS)
+        self.shots = 0                  # Bilder per Knopf in dieser Sitzung
         self.ref_time = None
         self.active = False
         self.target = 0
@@ -94,12 +102,15 @@ class SingleBall:
         for _ in range(5):
             img, _ = self._grab()
             if img is not None:
-                frames.append(self._lab(img))
+                frames.append(img)
             time.sleep(0.12)
         if not frames:
             raise ValueError("Kein Kamerabild - ist der Tisch eingerichtet?")
+        empty = np.median(np.stack(frames), axis=0).astype(np.uint8)
+        ok, jpg = cv2.imencode(".jpg", empty, [cv2.IMWRITE_JPEG_QUALITY, 92])
         with self.lock:
-            self.ref = np.median(np.stack(frames), axis=0).astype(np.float32)
+            self.ref = self._lab(empty)
+            self.ref_jpg = jpg.tobytes() if ok else None
             self.ref_time = time.strftime("%H:%M:%S")
             self.last_pos = None
         return "Leerer Tisch gemerkt - jetzt die Kugel hinlegen und die Serie starten"
@@ -121,12 +132,12 @@ class SingleBall:
         n, _, stats, cents = cv2.connectedComponentsWithStats(mask, 8)
         h, w = mask.shape
         area_ball = math.pi * radius * radius
+        parts = [(int(stats[i][4]), float(cents[i][0]), float(cents[i][1]), int(stats[i][2]), int(stats[i][3]))
+                 for i in range(1, n) if stats[i][4] >= 0.05 * area_ball]
         balls, big = [], 0
-        for i in range(1, n):
-            x0, y0, bw, bh, area = stats[i]
+        for area, cx, cy, bw, bh in self._merge(parts, radius):
             if area < 0.3 * area_ball:
                 continue                                   # Rauschen
-            cx, cy = cents[i]
             if area > 3.0 * area_ball or bw > 4.5 * radius or bh > 4.5 * radius:
                 big += 1                                   # Hand, Arm, Queue ...
                 continue
@@ -143,6 +154,57 @@ class SingleBall:
         elif len(balls) > 1:
             why = f"{len(balls)} Kugeln gefunden - es darf nur eine auf dem Tisch liegen"
         return (balls if not big else []), why
+
+    @staticmethod
+    def _merge(parts, radius):
+        """Teile einer Kugel zusammenfassen (halbe Kugel, deren Band so aussieht wie das Tuch)."""
+        groups = []
+        for f in parts:
+            for g in groups:
+                if any(math.dist((f[1], f[2]), (q[1], q[2])) < 1.6 * radius for q in g):
+                    g.append(f)
+                    break
+            else:
+                groups.append([f])
+        out = []
+        for g in groups:
+            a = sum(f[0] for f in g)
+            cx = sum(f[0] * f[1] for f in g) / a
+            cy = sum(f[0] * f[2] for f in g) / a
+            bw = max(f[1] + f[3] / 2 for f in g) - min(f[1] - f[3] / 2 for f in g)
+            bh = max(f[2] + f[4] / 2 for f in g) - min(f[2] - f[4] / 2 for f in g)
+            out.append((a, cx, cy, bw, bh))
+        return out
+
+    # ------------------------------------------------------------- Knopf: sofort ein Bild
+    def shot(self):
+        """Sofort ein Bild der gewaehlten Kugel - ohne Warten. Mit Trainingsseite: Kreis zieht der VPS."""
+        with self.lock:
+            if not self.enabled:
+                raise ValueError("Einzelkugel-Modus ist aus")
+            if self.number is None:
+                raise ValueError("Zuerst die Kugel wählen")
+        img, r = self._grab()
+        if img is None or not r:
+            raise ValueError("Kein Kamerabild - ist der Tisch eingerichtet?")
+        if self.has_upload():
+            name = self.recorder.save_single(img, self.number, r, self.ref_jpg)
+            if name is None:
+                raise ValueError("Speicher fast voll - es wird nichts mehr aufgenommen")
+            where = "geht zur Trainingsseite, dort wird der Kreis gezogen"
+            ok, jpg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            if ok:
+                self.preview = jpg.tobytes()
+        else:
+            balls, why = self.locate(img, r)
+            if len(balls) != 1:
+                raise ValueError(f"Nicht gespeichert: {why} (ohne Trainingsseite sucht der Pi die Kugel selbst)")
+            self._save(img, r, balls[0])
+            self.saved -= 1                                 # zaehlt als Knopf-Bild, nicht zur Serie
+            where = "Kugel am Pi gefunden und festgelegt"
+        self.shots += 1
+        self.message = f"Knopf-Bild {self.shots}: {ball_name(self.number)} - {where}"
+        return f"Bild {self.shots} von {ball_name(self.number)} aufgenommen"
 
     # ------------------------------------------------------------- Serie
     def start(self, count, interval, only_new=True):
@@ -250,4 +312,6 @@ class SingleBall:
                 "empty": self.ref_time, "active": self.active, "target": self.target,
                 "saved": self.saved, "saved_open": self.saved_open, "skipped": self.skipped,
                 "interval": self.interval, "only_new": self.only_new, "message": self.message,
-                "preview": self.preview is not None}
+                "preview": self.preview is not None, "shots": self.shots, "upload": bool(self.has_upload()),
+                "stored": self.recorder.single if self.recorder else 0,
+                "preview_id": self.shots * 100000 + self.saved}

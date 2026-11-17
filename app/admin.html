@@ -241,6 +241,7 @@ details > div { margin-top: 12px; }
       </div>
       <p class="statusline" id="cueStatus">-</p>
       <p class="hint">Koppeln: Queue einschalten, am Handy mit dem WLAN <b>„Billard-Queue-…“</b> verbinden. Auf der Seite, die sich öffnet, euer WLAN wählen. Der Queue zeigt dann seinen <b>Castcode</b> – hier eintragen, dort den Haken setzen und „Verbinden“. Danach finden sich Pi und Queue über das Netzwerk von selbst.</p>
+      <p class="hint">LED am Queue (M5Stack Atom): <b>rot</b> = keine Verbindung zum Pi, <b>grün</b> = verbunden, kein Spiel. Knopf drücken, wenn sie grün ist: Spiel <b>Team A</b> (blau) gegen <b>Team B</b> (orange) startet. Die LED zeigt dann die Farbe des Teams, das dran ist.</p>
       <form class="addrow" id="cuePairForm" autocomplete="off">
         <input type="text" id="cueCode" maxlength="9" placeholder="Castcode, z. B. K7P2QM" aria-label="Castcode des Queues" autocapitalize="characters" spellcheck="false" style="text-transform:uppercase;letter-spacing:3px">
         <button type="submit" class="primary">Koppeln</button>
@@ -324,6 +325,9 @@ details > div { margin-top: 12px; }
         <p class="statusline" id="singleEmptyInfo" style="margin-top:6px"></p>
         <p class="hint" style="margin:10px 0 0">Kugel</p>
         <div class="chips" id="singleChips"></div>
+        <button type="button" class="primary" id="singleShotBtn" style="width:100%;min-height:64px;font-size:19px;margin-top:14px">Bild jetzt aufnehmen</button>
+        <p class="hint" id="singleShotHint" style="margin:6px 0 4px"></p>
+        <p class="hint" style="margin:14px 0 4px"><b>Oder automatisch als Serie</b> (der Pi wartet jeweils, bis genau eine ruhende Kugel zu sehen ist):</p>
         <div class="grid two" style="margin-top:12px">
           <div><label for="singleCount">Anzahl Bilder</label><input type="number" id="singleCount" min="1" max="500" value="50"></div>
           <div><label for="singleInterval">Abstand (Sekunden)</label><input type="number" id="singleInterval" min="0.3" max="30" step="0.1" value="1"></div>
@@ -608,6 +612,8 @@ details > div { margin-top: 12px; }
       add("Winkel: ", fmtNum(c.angle, 1) + "°");
       if (c.err !== null && c.err !== undefined) add("Abweichung: ", fmtNum(c.err, 1) + "°", c.ok ? "good" : "");
       if (c.battery) add("Akku: ", fmtNum(c.battery, 2) + " V");
+      if (c.rate) add("Empfang: ", fmtNum(c.rate, 0) + " Pakete/s" + (c.lost ? ", " + c.lost + " verloren" : ""));
+      if (c.rssi) add("WLAN: ", c.rssi + " dBm", c.rssi < -75 ? "bad" : "");
     }
     $("cueCalib").disabled = !c.connected;
     $("cueFlip").classList.toggle("on", !!c.flip);
@@ -918,7 +924,7 @@ details > div { margin-top: 12px; }
   const SINGLE_HEX = { 0: ["#f4f1e8", "#222"], 8: ["#111", "#fff"] };
   [["#F5C314", 1], ["#2355CD", 2], ["#D72D28", 3], ["#7837A0", 4], ["#F07A1E", 5], ["#1F8A4C", 6], ["#7A1F2B", 7]]
     .forEach(([hex, n]) => { SINGLE_HEX[n] = [hex, "#fff"]; SINGLE_HEX[n + 8] = [hex, "#fff", true]; });
-  let singleSaved = -1;
+  let singlePreview = -1;
   (function buildSingleChips() {
     const box = $("singleChips");
     for (let n = 0; n <= 15; n++) {
@@ -948,11 +954,16 @@ details > div { margin-top: 12px; }
     $("singleEmptyBtn").disabled = !!g.active;
     $("singleStartBtn").disabled = !!g.active || g.number === null || g.number === undefined;
     $("singleStopBtn").disabled = !g.active;
+    $("singleShotBtn").disabled = g.number === null || g.number === undefined;
+    $("singleShotHint").textContent = (g.upload
+      ? "Sofort ein Bild, ohne Warten – geht mit der Nummer zur Trainingsseite, dort zieht die Bilderkennung den Kreis. "
+      : "Sofort ein Bild – ohne Trainingsseite sucht der Pi die Kugel selbst. ") +
+      (g.shots ? g.shots + " Knopf-Bilder in dieser Sitzung" + (g.upload ? ", " + g.stored + " auf dem Pi." : ".") : "");
     $("singleInfo").textContent = (g.number === null || g.number === undefined) ? "Zuerst die Kugel wählen" :
       g.name + (g.active ? "  ·  " + g.saved + "/" + g.target + " gespeichert" : "") +
       (g.message ? "  ·  " + g.message : "");
-    if (g.preview && g.saved !== singleSaved) {
-      singleSaved = g.saved;
+    if (g.preview && g.preview_id !== singlePreview) {
+      singlePreview = g.preview_id;
       $("singleImg").src = "/api/single.jpg?t=" + Date.now();
       $("singleImg").hidden = false;
     }
@@ -965,6 +976,12 @@ details > div { margin-top: 12px; }
     only_new: $("singleOnlyNew").checked,
   }));
   $("singleStopBtn").addEventListener("click", () => post("single_stop", {}));
+  $("singleShotBtn").addEventListener("click", async () => {
+    const b = $("singleShotBtn");
+    b.disabled = true;                       // kein Doppel-Tippen
+    await post("single_shot", {});
+    b.disabled = false;
+  });
   setInterval(async () => {
     if (!(state && state.single && state.single.active)) return;
     try {
