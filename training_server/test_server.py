@@ -2,7 +2,7 @@
 Tests fuer die Trainingsseite (ohne Netz, ohne Docker):
   * Pi laedt hoch (echter Uploader aus app/) -> Runde 1
   * Anmeldung mit Code, Sperre nach Fehlversuchen
-  * Runde 1 zuerst, Runde 2 nie vom selben, "Spaeter", Unbrauchbar
+  * jedes Bild 3x von verschiedenen Personen, ohne Vorschlaege; Mehrheit in der ZIP
   * Admin nur mit Authelia-Kopfzeilen, Trainings-ZIP im Format des Pi
 
     python3 test_server.py
@@ -93,16 +93,16 @@ def main():
             json.dump({"width": 800, "height": 400, "radius": 10.0, "balls": BALLS, "labeled_by": "Admin"}, f)
         falsch = Uploader(rec, base, "falsch")
         falsch.run_once()
-        check(falsch.error == "Server antwortet 403" and daten.zaehler()["runde1"] == 0, "falscher Schlüssel wird abgelehnt")
+        check(falsch.error == "Server antwortet 403" and daten.zaehler()["offen"] == 0, "falscher Schlüssel wird abgelehnt")
         up = Uploader(rec, base, "test-schluessel-123")
         check(up.run_once() == 4, "4 Bilder hochgeladen")
         check(up.run_once() == 0, "beim nächsten Mal nichts doppelt")
         check(Uploader(rec, base, "test-schluessel-123").run_once() == 0, "auch nach Neustart nichts doppelt (hochgeladen.txt)")
         z = daten.zaehler()
-        check(z["runde1"] == 3 and z["runde2"] == 1, "offene -> Runde 1, am Tisch festgelegte -> Runde 2")
+        check(z["offen"] == 4 and z["offen_je"] == [4, 0, 0], "alle 4 Bilder offen, auch das am Tisch festgelegte")
 
         print("Anmeldung")
-        anna, ben = Client(base), Client(base)
+        anna, ben, carl = Client(base), Client(base), Client(base)
         check(anna.call("GET", "/api/next")[0] == 401, "ohne Code kein Bild")
         check(admin.call("POST", "/api/admin/person", {"name": "Anna"})[0] == 200, "Admin legt Anna an")
         code_a = admin.call("GET", "/api/admin/stand")[1]["personen"][0]["code"]
@@ -118,49 +118,53 @@ def main():
         check(dieb.call("POST", "/api/login", {"code": code_a})[0] == 429, "nach 8 Fehlversuchen kurz gesperrt")
         check(anna.call("POST", "/api/login", {"code": code_a}) == (200, {"name": "Anna"}), "Anna meldet sich an")
         check(ben.call("POST", "/api/login", {"code": code_b})[0] == 200, "Ben meldet sich an")
+        code_c = admin.call("POST", "/api/admin/person", {"name": "Carl"})[1]["code"]
+        check(carl.call("POST", "/api/login", {"code": code_c})[0] == 200, "Carl meldet sich an")
 
-        print("Runde 1 und 2")
+        print("Dreimal festlegen, ohne Vorschlaege")
         s, a1 = anna.call("GET", "/api/next")
-        check(s == 200 and a1["runde"] == 1, "Anna bekommt zuerst Runde 1")
-        s, b1 = ben.call("GET", "/api/next")
-        check(b1["runde"] == 1 and b1["name"] != a1["name"], "Ben bekommt gleichzeitig ein anderes Bild")
-        check(ben.call("POST", "/api/speichern", {"name": a1["name"], "balls": BALLS})[0] == 409, "Annas offenes Bild kann Ben nicht speichern")
+        check(s == 200 and a1["balls"] == [] and a1["durchgang"] == 1 and a1["ziel"] == 3, "Anna bekommt ein Bild ohne Vorschlag (1 von 3)")
         ohne = [dict(BALLS[0]), {"x": 5, "y": 5, "kind": "solid", "color": ""}]
         check(anna.call("POST", "/api/speichern", {"name": a1["name"], "balls": ohne})[0] == 400, "Kugel ohne Nummer wird abgelehnt")
         doppelt = [dict(BALLS[0]), dict(BALLS[1]), dict(BALLS[1], x=500.0)]
         s, r = anna.call("POST", "/api/speichern", {"name": a1["name"], "balls": doppelt})
         check(s == 400 and "doppelt" in r["error"], "doppelte Nummer wird abgelehnt")
-        check(anna.call("POST", "/api/speichern", {"name": a1["name"], "balls": BALLS})[0] == 200, "Anna speichert Runde 1")
+        s, r = anna.call("POST", "/api/speichern", {"name": a1["name"], "balls": BALLS})
+        check(s == 200 and "2 weitere" in r["message"], "Anna speichert, noch 2 weitere")
+        check(anna.call("POST", "/api/speichern", {"name": a1["name"], "balls": BALLS})[0] == 409, "dasselbe Bild nicht zweimal von Anna")
         s, a2 = anna.call("GET", "/api/next")
-        check(a2["runde"] == 1 and a2["name"] not in (a1["name"], b1["name"]), "Anna: nächstes freies Bild aus Runde 1")
-        s, a3 = anna.call("GET", "/api/next?after=" + a2["name"])
-        check(s == 200 and a3["runde"] == 2, "„Später“: keine weiteren freien Bilder in Runde 1 -> Runde 2")
-        check(a3["name"] != a1["name"] and a3["von"] == "am Tisch (Admin)", "Runde 2 nie das eigene Bild (hier: am Tisch festgelegt)")
-        korr = [dict(BALLS[0]), dict(BALLS[1], x=360.0, changed=True)]
-        s, r = anna.call("POST", "/api/speichern", {"name": a3["name"], "balls": korr})
-        check(s == 200 and "Korrigiert" in r["message"], "Runde 2 mit Korrektur -> fertig, als korrigiert vermerkt")
-        check(ben.call("POST", "/api/speichern", {"name": b1["name"], "discard": True})[0] == 200, "Ben sortiert sein Bild aus")
-        s, b2 = ben.call("GET", "/api/next")
-        if b2.get("runde") == 1:
-            ben.call("POST", "/api/speichern", {"name": b2["name"], "balls": BALLS})
-            s, b2 = ben.call("GET", "/api/next")
-        check(b2.get("runde") == 2 and b2["von"] == "Anna" and b2["balls"][1]["number"] == 3, "Ben kontrolliert Annas Bild, sieht ihre Kugeln")
-        s, r = ben.call("POST", "/api/speichern", {"name": b2["name"], "balls": b2["balls"]})
-        check(s == 200 and "Bestätigt" in r["message"], "unverändert -> bestätigt")
-        s, a4 = anna.call("GET", "/api/next")
-        check(s == 200 and a4["runde"] == 2 and a4["von"] == "Ben", "Anna kontrolliert Bens Bild")
-        check(ben.call("GET", "/api/next")[0] == 404, "Ben: Rest aus Runde 2 ist sein eigenes -> nichts für ihn")
-        anna.call("POST", "/api/speichern", {"name": a4["name"], "balls": a4["balls"]})
-        check(anna.call("GET", "/api/next")[0] == 404, "alles erledigt -> 404")
+        check(a2["name"] != a1["name"], "Anna bekommt ihr Bild nicht nochmal")
+        s, b1 = ben.call("GET", "/api/next")
+        check(b1["name"] == a1["name"] and b1["durchgang"] == 2 and b1["balls"] == [], "Ben bekommt zuerst das angefangene Bild, ohne Annas Kugeln")
+        s, c1 = carl.call("GET", "/api/next")
+        check(c1["name"] == a1["name"] and c1["durchgang"] == 2, "Carl darf gleichzeitig ran (1 fertig + Ben dran < 3)")
+        dave = Client(base)
+        code_d = admin.call("POST", "/api/admin/person", {"name": "Dave"})[1]["code"]
+        dave.call("POST", "/api/login", {"code": code_d})
+        s, d1 = dave.call("GET", "/api/next")
+        check(d1["name"] != a1["name"], "Dave nicht: schon 1 fertig und 2 dran")
+        check(ben.call("POST", "/api/speichern", {"name": a1["name"], "balls": BALLS})[0] == 200, "Ben speichert (2 von 3)")
+        abweichend = [dict(BALLS[0]), dict(BALLS[1], x=360.0)]          # Kugel 3 weit daneben
+        s, r = carl.call("POST", "/api/speichern", {"name": a1["name"], "balls": abweichend})
+        check(s == 200 and "fertig" in r["message"], "Carl speichert als Dritter -> fertig")
+        check(dave.call("POST", "/api/speichern", {"name": a1["name"], "balls": BALLS})[0] == 409, "fertiges Bild nimmt nichts mehr an")
+        kugeln, einig = server.konsens([BALLS, BALLS, abweichend], 10.0)
+        check(not einig and len(kugeln) == 2 and next(k for k in kugeln if k["number"] == 3)["x"] == 300.0,
+              "Mehrheit: Kugel 3 an der Stelle, die 2 von 3 gesetzt haben")
+        check(server.konsens([BALLS, abweichend], 10.0)[0] == [dict(BALLS[0], stimmen=2, x=100.0)], "bei 2 Festlegungen zählt nur, was beide gleich haben")
+        check(ben.call("POST", "/api/speichern", {"name": b1["name"] if b1["name"] != a1["name"] else a2["name"], "discard": True})[0] == 200,
+              "Ben sortiert ein Bild aus")
         z = daten.zaehler()
-        check(z == {"runde1": 0, "runde2": 0, "fertig": 3, "verworfen": 1}, f"Stand stimmt ({z})")
+        check(z["fertig"] == 1 and z["verworfen"] == 1 and z["einig"] == 0, f"Stand stimmt ({z['fertig']} fertig, {z['einig']} einstimmig)")
 
         print("Admin")
         s, st = admin.call("GET", "/api/admin/stand")
         anna_p = next(p for p in st["personen"] if p["name"] == "Anna")
-        check(anna_p["runde1"] == 1 and anna_p["runde2"] == 2, "Zähler je Trainer")
+        check(anna_p["festgelegt"] == 1, "Zähler je Trainer")
+        b = next(b for b in st["letzte"] if b["name"] == a1["name"])
+        check(b["festlegungen"] == 3 and b["einig"] is False and b["wer"] == ["Anna", "Ben", "Carl"], "Admin sieht wer festgelegt hat")
         verworfen = next(b for b in st["letzte"] if b["status"] == "verworfen")
-        check(admin.call("POST", "/api/admin/zurueck", {"name": verworfen["name"]})[0] == 200, "aussortiertes Bild zurück in Runde 1")
+        check(admin.call("POST", "/api/admin/zurueck", {"name": verworfen["name"]})[0] == 200, "aussortiertes Bild wieder offen")
         admin.call("POST", "/api/admin/person/aktiv", {"id": anna_p["id"], "aktiv": False})
         check(anna.call("GET", "/api/next")[0] == 401, "gesperrt -> abgemeldet")
         neu = admin.call("POST", "/api/admin/person/code", {"id": anna_p["id"]})[1]["code"]
@@ -173,13 +177,22 @@ def main():
         s, raw = admin.call("GET", "/api/admin/zip")
         z = zipfile.ZipFile(io.BytesIO(raw))
         namen = z.namelist()
-        check("classes.txt" in namen and sum(n.startswith("images/") for n in namen) == 3, "ZIP: 3 fertige Bilder + classes.txt")
-        txt = [n for n in namen if n.endswith(".txt") and n.startswith("labels/")]
-        zeile = z.read(txt[0]).decode().splitlines()
-        check(len(zeile) == 2 and zeile[0].startswith("0 0.12500 0.12500 0.02500 0.05000"), "YOLO-Zeilen wie am Pi")
-        s, raw = admin.call("GET", "/api/admin/zip?runde1=1")
-        check(sum(n.startswith("images/") for n in zipfile.ZipFile(io.BytesIO(raw)).namelist()) == 3, "inkl. Runde 1: auch 3 (keins wartet)")
+        check("classes.txt" in namen and sum(n.startswith("images/") for n in namen) == 1, "ZIP: 1 fertiges Bild + classes.txt")
+        zeile = z.read(f"labels/{a1['name']}.txt").decode().splitlines()
+        check(len(zeile) == 2 and zeile[0].startswith("0 0.12500 0.12500 0.02500 0.05000"), "YOLO-Zeilen wie am Pi (Mehrheit)")
+        info = json.loads(z.read(f"labels/{a1['name']}.json"))
+        check(info["festlegungen"] == 3 and info["einig"] is False, "json: 3 Festlegungen, nicht einstimmig")
+        check(admin.call("GET", "/api/admin/zip?modus=einig")[0] == 404, "nur einstimmige: keins da -> Hinweis statt leerer ZIP")
+        s, raw = admin.call("GET", "/api/admin/zip?modus=alle")
+        check(sum(n.startswith("images/") for n in zipfile.ZipFile(io.BytesIO(raw)).namelist()) == 1, "inkl. unfertige: nur Bilder mit Festlegung")
         check(Client(base).call("GET", "/api/admin/zip")[0] == 403, "ZIP nur für Admins")
+
+        print("Umstellung alter Daten")
+        alt = server.Daten(os.path.join(d, "alt"))
+        alt.db.execute("INSERT INTO bilder (name, eingang, breite, hoehe, radius, vorschlag, status) VALUES ('20261101-100000-000', 1, 800, 400, 10, '[]', 'runde2')")
+        alt.db.commit()
+        alt2 = server.Daten(os.path.join(d, "alt"))
+        check(alt2.zaehler()["offen"] == 1, "alte Runde-2-Bilder werden beim Start zu offen")
         srv.shutdown()
 
     print()

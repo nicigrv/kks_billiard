@@ -65,7 +65,7 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
 .box h2 { font-size: 14px; margin: 0 0 8px; color: var(--dim); font-weight: 600; }
 .auftrag { font-size: 15px; }
 .auftrag b { color: var(--ink); }
-.auftrag.r2 { border-color: #7a6a3d; }
+.auftrag .leise { display: block; margin-top: 6px; font-size: 13px; opacity: .75; }
 #zoom { width: 100%; max-width: 26vh; aspect-ratio: 1; display: block; margin: 0 auto; background: #000; border-radius: 8px; touch-action: manipulation; cursor: crosshair; }
 .hint { color: var(--dim); font-size: 13px; margin: 6px 0 0; }
 .chips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
@@ -327,17 +327,13 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
 
   function update() {
     const m = missing();
-    const changed = !!item && item.balls.some((b) => b.changed);
-    const r2 = item && item.runde === 2;
     const sb = $("saveBtn");
     const dd = doubles();
     sb.disabled = !item || m > 0 || dd.length > 0;
-    sb.className = "big " + (r2 && !changed ? "ok" : "primary");
-    sb.textContent = !item ? "Passt alles" : m ? m + " Nummer(n) fehlen" :
+    sb.className = "big primary";
+    sb.textContent = !item ? "Speichern & weiter" : m ? m + " Nummer(n) fehlen" :
       dd.length ? "Nummer " + dd.map(nrText).join(", ") + " doppelt – prüfen" :
-      !item.balls.length ? "Ohne Kugeln speichern" :
-      r2 ? (changed ? "Korrigiert – speichern" : "✓ Stimmt – bestätigen") :
-      changed ? "Speichern & weiter" : "Passt alles";
+      !item.balls.length ? "Ohne Kugeln speichern" : "Speichern & weiter";
     $("skipBtn").disabled = !item;
     $("discardBtn").disabled = !item;
     $("undoBtn").disabled = !history.length;
@@ -355,8 +351,7 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
       const b = document.createElement("b"); b.textContent = val; if (cls) b.className = cls;
       el.append(b, document.createTextNode(" " + txt));
     };
-    add(s.runde1, "in Runde 1");
-    add(s.fuer_mich2, "zum Kontrollieren");
+    add(s.fuer_mich, "für dich offen");
     add(s.fertig, "fertig", "q");
     if (s.ich) add(s.ich, "von dir");
   }
@@ -371,8 +366,8 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
     const h = document.createElement("div"); h.style.fontSize = "22px"; h.style.color = "var(--ink)";
     h.textContent = "Alles erledigt 🎉";
     const p = document.createElement("div");
-    p.textContent = stand && stand.runde2 > stand.fuer_mich2
-      ? "Die restlichen Bilder aus Runde 2 hast du selbst festgelegt – die kontrolliert jemand anderes."
+    p.textContent = stand && stand.offen > 0
+      ? "Die restlichen offenen Bilder hast du schon festgelegt – die legen jetzt andere fest."
       : "Gerade gibt es keine Bilder. Sobald am Tisch neue entstehen, erscheinen sie hier von selbst.";
     e.append(h, p);
     e.classList.add("show");
@@ -400,25 +395,19 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
       const cap = $("caption");
       cap.innerHTML = "";
       const rd = document.createElement("span");
-      rd.className = "runde r" + data.runde;
-      rd.textContent = data.runde === 1 ? "Runde 1 · festlegen" : "Runde 2 · kontrollieren";
+      rd.className = "runde r1";
+      rd.textContent = "Festlegung " + data.durchgang + " von " + data.ziel;
       const t = document.createElement("span");
       t.textContent = "Bild vom " + data.name.slice(6, 8) + "." + data.name.slice(4, 6) + ". " + data.name.slice(9, 11) + ":" + data.name.slice(11, 13) + " Uhr";
       cap.append(rd, t);
-      if (data.runde === 1 && data.model) {
-        const k = document.createElement("span"); k.textContent = "Vorschlag vom KI-Chip"; cap.append(k);
-      }
       cap.hidden = false;
       const a = $("auftrag");
       a.innerHTML = "";
-      if (data.runde === 1) {
-        a.className = "box auftrag";
-        a.append("Lege alle Kugeln fest: Kugel antippen → Nummer wählen. Fehlt eine, tippe auf die freie Stelle.");
-      } else {
-        a.className = "box auftrag r2";
-        const b = document.createElement("b"); b.textContent = data.von || "jemand";
-        a.append("Festgelegt von ", b, ". Stimmen alle Nummern und Kreise? Dann bestätigen – sonst korrigieren.");
-      }
+      a.className = "box auftrag";
+      a.append("Lege alle Kugeln fest: auf jede Kugel im Bild tippen → Nummer wählen. ");
+      const hint = document.createElement("span"); hint.className = "leise";
+      hint.textContent = "Jedes Bild legen " + data.ziel + " Personen unabhängig voneinander fest – deshalb siehst du keine Vorschläge.";
+      a.append(hint);
       img.src = "/api/bild?name=" + encodeURIComponent(data.name);
       update();
       const dd = doubles();
@@ -507,7 +496,7 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
         if (r.ok) {
           const s = await r.json();
           renderStats(s);
-          if (s.runde1 || s.fuer_mich2) load();
+          if (s.fuer_mich) load();
         }
       }
     } catch (e) { /* naechster Versuch */ }

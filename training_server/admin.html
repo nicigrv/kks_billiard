@@ -49,7 +49,7 @@ tr.gesperrt td { opacity: .5; }
 .bild img { width: 100%; aspect-ratio: 2 / 1; object-fit: cover; display: block; background: #000; }
 .bild div { padding: 6px 8px; display: grid; gap: 2px; }
 .marke { font-weight: 800; font-size: 12px; border-radius: 6px; padding: 1px 6px; justify-self: start; color: #0A2F25; }
-.m-runde1 { background: var(--chalk); } .m-runde2 { background: var(--gold); } .m-fertig { background: var(--ok); } .m-verworfen { background: var(--bad); }
+.m-offen { background: var(--chalk); } .m-teil { background: var(--gold); } .m-fertig { background: var(--ok); } .m-verworfen { background: var(--bad); }
 .hinweis { color: var(--dim); font-size: 14px; margin: 10px 0 0; }
 .neu-code { margin-top: 12px; padding: 12px 14px; border-radius: var(--r); background: #1d3a2c; border: 1px solid var(--ok); }
 .scroll { overflow-x: auto; }
@@ -66,9 +66,9 @@ tr.gesperrt td { opacity: .5; }
   <section class="box">
     <h2>Stand</h2>
     <div class="zahlen">
-      <div class="zahl r1"><b id="z1">–</b><span>in Runde 1 (noch nie festgelegt)</span></div>
-      <div class="zahl r2"><b id="z2">–</b><span>in Runde 2 (warten auf Kontrolle)</span></div>
-      <div class="zahl ok"><b id="z3">–</b><span>fertig fürs Training</span></div>
+      <div class="zahl r1"><b id="z1">–</b><span>noch nie festgelegt</span></div>
+      <div class="zahl r2"><b id="z2">–</b><span id="z2t">teilweise festgelegt</span></div>
+      <div class="zahl ok"><b id="z3">–</b><span id="z3t">fertig fürs Training</span></div>
       <div class="zahl"><b id="z4">–</b><span>aussortiert</span></div>
     </div>
   </section>
@@ -77,10 +77,13 @@ tr.gesperrt td { opacity: .5; }
     <h2>Trainingsdaten herunterladen</h2>
     <div class="reihe">
       <a class="btn primary" id="zipFertig" href="/api/admin/zip">ZIP laden (fertige Bilder)</a>
-      <a class="btn quiet" id="zipAlle" href="/api/admin/zip?runde1=1">ZIP inkl. Runde 1</a>
+      <a class="btn quiet" id="zipEinig" href="/api/admin/zip?modus=einig">nur einstimmige</a>
+      <a class="btn quiet" id="zipAlle" href="/api/admin/zip?modus=alle">inkl. unfertige</a>
     </div>
-    <p class="hinweis">Die ZIP passt direkt zu <code>training/train_coral.py</code> (Google Colab). „Inkl. Runde 1“ nimmt auch Bilder mit,
-      die erst einmal festgelegt und noch nicht kontrolliert sind – mehr Bilder, aber evtl. mit Fehlern.</p>
+    <p class="hinweis">Die ZIP passt direkt zu <code>training/train_coral.py</code> (Google Colab). Jedes Bild legen mehrere Personen
+      unabhängig voneinander fest. In die ZIP kommt je Kugel die Mehrheit: gleiche Nummer an fast gleicher Stelle.
+      „Nur einstimmige“ nimmt nur Bilder, bei denen alle dasselbe festgelegt haben. „Inkl. unfertige“ nimmt auch Bilder mit,
+      die erst teilweise festgelegt sind – mehr Bilder, aber evtl. mit Fehlern.</p>
   </section>
 
   <section class="box">
@@ -92,12 +95,13 @@ tr.gesperrt td { opacity: .5; }
     <div class="neu-code" id="neuCode" hidden></div>
     <div class="scroll" style="margin-top:14px">
       <table>
-        <thead><tr><th>Name</th><th>Code</th><th>Runde 1</th><th>Runde 2</th><th>Aussortiert</th><th>Zuletzt da</th><th></th></tr></thead>
+        <thead><tr><th>Name</th><th>Code</th><th>Festgelegt</th><th>Aussortiert</th><th>Zuletzt da</th><th></th></tr></thead>
         <tbody id="personen"></tbody>
       </table>
     </div>
-    <p class="hinweis">Link für alle: <b id="link"></b> – jeder meldet sich dort mit seinem Code an. Runde 2 kontrolliert immer eine
-      <i>andere</i> Person als die, die das Bild in Runde 1 festgelegt hat. Willst du selbst mitmachen, leg dich auch als Trainer an.</p>
+    <p class="hinweis">Link für alle: <b id="link"></b> – jeder meldet sich dort mit seinem Code an. Jedes Bild legen
+      verschiedene Personen fest, ohne die Ergebnisse der anderen oder Vorschläge zu sehen. Willst du selbst mitmachen,
+      leg dich auch als Trainer an.</p>
   </section>
 
   <section class="box">
@@ -111,7 +115,7 @@ tr.gesperrt td { opacity: .5; }
   "use strict";
   const $ = (id) => document.getElementById(id);
   const toast = (t, err) => Notify.show(t, "", err ? "error" : "success");
-  const STATUS = { runde1: "Runde 1", runde2: "Runde 2", fertig: "fertig", verworfen: "aussortiert" };
+  const STATUS = { offen: "offen", fertig: "fertig", verworfen: "aussortiert" };
   $("link").textContent = location.origin + "/";
 
   async function post(pfad, daten) {
@@ -149,18 +153,23 @@ tr.gesperrt td { opacity: .5; }
 
   function zeigen(d) {
     const z = d.zaehler;
-    $("z1").textContent = z.runde1; $("z2").textContent = z.runde2; $("z3").textContent = z.fertig; $("z4").textContent = z.verworfen;
+    const teil = z.offen_je.slice(1).reduce((a, b) => a + b, 0);
+    $("z1").textContent = z.offen_je[0]; $("z2").textContent = teil; $("z3").textContent = z.fertig; $("z4").textContent = z.verworfen;
+    $("z2t").textContent = "teilweise festgelegt (" + z.offen_je.slice(1).map((n, i) => n + "× " + (i + 1) + "/" + z.ziel).join(", ") + ")";
+    $("z3t").textContent = "fertig (" + z.ziel + "× festgelegt), davon " + z.einig + " einstimmig";
     $("eingang").textContent = (d.upload ? "Upload vom Tisch an" : "Upload vom Tisch AUS (UPLOAD_KEY fehlt)") +
       " · letztes Bild: " + seit(d.letzter_eingang);
     $("zipFertig").textContent = "ZIP laden (" + z.fertig + " fertige Bilder)";
     $("zipFertig").classList.toggle("aus", !z.fertig);
-    $("zipAlle").textContent = "ZIP inkl. Runde 1 (" + (z.fertig + z.runde2) + " Bilder)";
-    $("zipAlle").classList.toggle("aus", !(z.fertig + z.runde2));
+    $("zipEinig").textContent = "nur einstimmige (" + z.einig + ")";
+    $("zipEinig").classList.toggle("aus", !z.einig);
+    $("zipAlle").textContent = "inkl. unfertige (" + (z.fertig + teil) + ")";
+    $("zipAlle").classList.toggle("aus", !(z.fertig + teil));
 
     const tb = $("personen");
     tb.innerHTML = "";
     if (!d.personen.length) {
-      const tr = document.createElement("tr"); zelle(tr, "Noch keine Trainer – oben einen Namen eingeben.").colSpan = 7; tb.appendChild(tr);
+      const tr = document.createElement("tr"); zelle(tr, "Noch keine Trainer – oben einen Namen eingeben.").colSpan = 6; tb.appendChild(tr);
     }
     d.personen.forEach((p) => {
       const tr = document.createElement("tr");
@@ -171,7 +180,7 @@ tr.gesperrt td { opacity: .5; }
       zelle(tr, n);
       const c = document.createElement("span"); c.className = "code"; c.textContent = p.code;
       zelle(tr, c);
-      zelle(tr, String(p.runde1), "zahl-z"); zelle(tr, String(p.runde2), "zahl-z"); zelle(tr, String(p.verworfen), "zahl-z");
+      zelle(tr, String(p.festgelegt), "zahl-z"); zelle(tr, String(p.verworfen), "zahl-z");
       zelle(tr, p.aktiv ? seit(p.zuletzt) : "gesperrt");
       const a = document.createElement("div"); a.className = "aktionen";
       a.append(
@@ -191,14 +200,16 @@ tr.gesperrt td { opacity: .5; }
       const im = document.createElement("img"); im.loading = "lazy"; im.alt = "";
       im.src = "/api/admin/bild?name=" + encodeURIComponent(b.name);
       const t = document.createElement("div");
-      const m = document.createElement("span"); m.className = "marke m-" + b.status;
-      m.textContent = STATUS[b.status] + (b.status === "fertig" && b.korrigiert ? " · korrigiert" : "");
+      const m = document.createElement("span");
+      m.className = "marke m-" + (b.status === "offen" && b.festlegungen ? "teil" : b.status);
+      m.textContent = b.status === "verworfen" ? STATUS.verworfen : b.festlegungen + "/" + b.ziel +
+        (b.status === "fertig" ? (b.einig ? " · einstimmig" : " · Mehrheit") : "");
       const z1 = document.createElement("span"); z1.className = "dim";
       z1.textContent = b.name.slice(6, 8) + "." + b.name.slice(4, 6) + ". " + b.name.slice(9, 11) + ":" + b.name.slice(11, 13) + " · " + b.kugeln + " Kugeln";
       t.append(m, z1);
-      const wer = [b.von1 && "R1: " + b.von1, b.von2 && "R2: " + b.von2, b.verworfen_von && "aussortiert: " + b.verworfen_von].filter(Boolean).join(" · ");
+      const wer = [b.wer.length && b.wer.join(", "), b.verworfen_von && "aussortiert: " + b.verworfen_von].filter(Boolean).join(" · ");
       if (wer) { const w = document.createElement("span"); w.className = "dim"; w.textContent = wer; t.append(w); }
-      if (b.status === "verworfen") t.append(knopf("Zurück in Runde 1", "quiet", () => post("zurueck", { name: b.name })));
+      if (b.status === "verworfen") t.append(knopf("Wieder freigeben", "quiet", () => post("zurueck", { name: b.name })));
       el.append(im, t);
       box.appendChild(el);
     });

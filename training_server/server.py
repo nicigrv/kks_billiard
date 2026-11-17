@@ -2,11 +2,11 @@
 Billard-Training im Netz (VPS): Bilder vom Tisch zuhause festlegen.
 
   Pi am Tisch ──(gespeicherte Bilder, Schluessel)──▶ POST /api/upload
-  Jeder Trainer meldet sich mit seinem Code an (/), legt Kugeln fest:
-    Runde 1: jedes Bild wird einmal festgelegt (wer ein Bild offen hat, haelt es 10 Minuten)
-    Runde 2: eine ANDERE Person kontrolliert das Ergebnis - "Passt alles" oder korrigieren
-    -> fertig, kommt in die Trainings-ZIP
-  Erst wenn kein Bild mehr in Runde 1 frei ist, gibt es Bilder aus Runde 2.
+  Jeder Trainer meldet sich mit seinem Code an (/) und legt Kugeln fest:
+    Jedes Bild legen FESTLEGUNGEN (3) verschiedene Personen unabhaengig voneinander fest,
+    ohne Vorschlaege (weder KI noch andere Personen). Wer ein Bild offen hat, haelt es 10 Minuten.
+    Bilder, denen nur noch wenig fehlt, kommen zuerst.
+    -> fertig; die Trainings-ZIP nimmt je Kugel die Mehrheit (gleiche Nummer an fast gleicher Stelle).
   Admin (/admin, hinter Authelia): Trainer und Codes, Stand, ZIP fuer training/train_coral.py.
 
 Nur Standardbibliothek. Daten in DATA_DIR: billard.sqlite, bilder/<name>.jpg, geheim.key.
@@ -36,6 +36,7 @@ NAME_RE = re.compile(r"[0-9]{8}-[0-9]{6}-[0-9]{3}")
 CLASSES = ["weiss"] + [str(n) for n in range(1, 16)]
 COLOR_NUMBER = {"gelb": 1, "blau": 2, "rot": 3, "violett": 4, "orange": 5, "gruen": 6, "weinrot": 7}
 CLAIM_S = 600                     # so lange gehoert ein geoeffnetes Bild dem, der es festlegt
+ZIEL = max(1, int(os.environ.get("FESTLEGUNGEN", "3")))   # so oft wird jedes Bild festgelegt
 COOKIE = "billard_training"
 MAX_AGE = 120 * 24 * 3600
 MAX_UPLOAD = 8_000_000
@@ -101,6 +102,32 @@ def yolo_lines(balls, radius, w, h):
     return "\n".join(out) + ("\n" if out else "")
 
 
+def konsens(listen, radius):
+    """Mehrheit aus unabhaengigen Festlegungen: eine Kugel zaehlt, wenn mehr als die Haelfte sie mit
+    derselben Nummer an fast derselben Stelle (0,8 Radien) gesetzt hat. Position = Mittelwert.
+    Liefert (kugeln, einig) - einig: alle Festlegungen sagen dasselbe."""
+    if not listen:
+        return [], False
+    noetig = len(listen) // 2 + 1
+    tol2 = (0.8 * radius) ** 2
+    out, einig = [], True
+    for n in sorted({ball_num(b) for l in listen for b in l}):
+        pts = [b for l in listen for b in l if ball_num(b) == n]
+        best = []
+        for p in pts:
+            nah = [q for q in pts if (q["x"] - p["x"]) ** 2 + (q["y"] - p["y"]) ** 2 <= tol2]
+            if len(nah) > len(best):
+                best = nah
+        if len(best) < len(listen) or len(pts) != len(listen):
+            einig = False
+        if len(best) >= noetig:
+            out.append({"x": round(sum(q["x"] for q in best) / len(best), 1),
+                        "y": round(sum(q["y"] for q in best) / len(best), 1),
+                        "kind": best[0].get("kind", ""), "color": best[0].get("color", ""),
+                        "number": n, "stimmen": len(best)})
+    return out, einig
+
+
 def gleich(a, b, radius):
     """Gleiche Kugeln an (fast) gleicher Stelle? Dann hat Runde 2 nichts korrigiert."""
     if len(a) != len(b):
@@ -123,7 +150,7 @@ class Daten:
         os.makedirs(self.bilder, exist_ok=True)
         self.clock = clock
         self.lock = threading.RLock()
-        self.claims = {}                       # Bildname -> (person_id, seit)
+        self.claims = {}                       # Bildname -> {person_id: seit}
         self.fehlversuche = {}                 # IP -> [Zeitpunkte]
         self.db = sqlite3.connect(os.path.join(data_dir, "billard.sqlite"), check_same_thread=False)
         self.db.row_factory = sqlite3.Row
@@ -135,12 +162,20 @@ class Daten:
             CREATE TABLE IF NOT EXISTS bilder (
                 name TEXT PRIMARY KEY, eingang REAL NOT NULL, breite INTEGER NOT NULL, hoehe INTEGER NOT NULL,
                 radius REAL NOT NULL, modell TEXT, vorschlag TEXT NOT NULL,
-                status TEXT NOT NULL,                          -- runde1 | runde2 | fertig | verworfen
+                status TEXT NOT NULL,                          -- offen | fertig | verworfen (frueher runde1|runde2)
                 kugeln1 TEXT, von1 INTEGER, von1_name TEXT, zeit1 REAL,
                 kugeln2 TEXT, von2 INTEGER, zeit2 REAL, korrigiert INTEGER,
                 verworfen_von INTEGER, verworfen_runde INTEGER);
             CREATE INDEX IF NOT EXISTS bilder_status ON bilder(status, name);
+            CREATE TABLE IF NOT EXISTS festlegungen (
+                bild TEXT NOT NULL, person INTEGER NOT NULL, person_name TEXT NOT NULL,
+                kugeln TEXT NOT NULL, zeit REAL NOT NULL, UNIQUE (bild, person));
+            CREATE INDEX IF NOT EXISTS festlegungen_person ON festlegungen(person);
         """)
+        # Umstellung auf "jedes Bild mehrfach, ohne Vorschlaege": alte Runden werden zu "offen".
+        # Am Tisch festgelegte Kugeln bleiben in kugeln1 stehen, zaehlen aber nicht als Festlegung.
+        self.db.execute("""UPDATE bilder SET status = 'offen' WHERE status IN ('runde1', 'runde2', 'fertig')
+                           AND name NOT IN (SELECT bild FROM festlegungen)""")
         self.db.commit()
         key_path = os.path.join(data_dir, "geheim.key")
         if not os.path.exists(key_path):
@@ -205,8 +240,7 @@ class Daten:
         with self.lock:
             rows = [dict(r) for r in self.db.execute("SELECT * FROM personen ORDER BY lower(name)")]
             for p in rows:
-                p["runde1"] = self.db.execute("SELECT COUNT(*) FROM bilder WHERE von1 = ?", (p["id"],)).fetchone()[0]
-                p["runde2"] = self.db.execute("SELECT COUNT(*) FROM bilder WHERE von2 = ?", (p["id"],)).fetchone()[0]
+                p["festgelegt"] = self.db.execute("SELECT COUNT(*) FROM festlegungen WHERE person = ?", (p["id"],)).fetchone()[0]
                 p["verworfen"] = self.db.execute("SELECT COUNT(*) FROM bilder WHERE verworfen_von = ?", (p["id"],)).fetchone()[0]
         return rows
 
@@ -277,80 +311,91 @@ class Daten:
             os.replace(tmp, os.path.join(self.bilder, name + ".jpg"))
             festgelegt = bool(d.get("festgelegt")) and all(ball_num(b) is not None for b in balls)
             if festgelegt:
-                # am Tisch schon festgelegt -> zaehlt als Runde 1, jetzt kontrolliert jemand anderes
+                # am Tisch schon festgelegt -> wird aufgehoben, zaehlt aber nicht: online legen trotzdem alle neu fest
                 kugeln = [{"x": float(b["x"]), "y": float(b["y"]), "kind": b.get("kind", ""),
                            "color": b.get("color", "") or "", "number": ball_num(b)} for b in balls]
                 von = "am Tisch" + (f" ({str(d['von'])[:30]})" if d.get("von") else "")
                 self.db.execute("""INSERT INTO bilder (name, eingang, breite, hoehe, radius, modell, vorschlag, status,
-                                   kugeln1, von1_name, zeit1) VALUES (?,?,?,?,?,?,?, 'runde2', ?, ?, ?)""",
+                                   kugeln1, von1_name, zeit1) VALUES (?,?,?,?,?,?,?, 'offen', ?, ?, ?)""",
                                 (name, self.clock(), w, h, radius, meta.get("model"), json.dumps(balls),
                                  json.dumps(kugeln), von, self.clock()))
             else:
                 self.db.execute("""INSERT INTO bilder (name, eingang, breite, hoehe, radius, modell, vorschlag, status)
-                                   VALUES (?,?,?,?,?,?,?, 'runde1')""",
+                                   VALUES (?,?,?,?,?,?,?, 'offen')""",
                                 (name, self.clock(), w, h, radius, meta.get("model"), json.dumps(balls)))
             self.db.commit()
         return True
 
     # --------------------------------------------------------------- Festlegen
-    def _belegt_von_anderem(self, name, pid, now):
-        c = self.claims.get(name)
-        return c and c[0] != pid and now - c[1] < CLAIM_S
+    def _andere_dran(self, name, pid, now):
+        """Wie viele ANDERE haben dieses Bild gerade offen?"""
+        return sum(1 for q, t in self.claims.get(name, {}).items() if q != pid and now - t < CLAIM_S)
 
     def freigeben(self, pid):
         with self.lock:
-            for n in [n for n, c in self.claims.items() if c[0] == pid]:
-                del self.claims[n]
+            for n in list(self.claims):
+                self.claims[n].pop(pid, None)
+                if not self.claims[n]:
+                    del self.claims[n]
+
+    def _anzahl(self, name):
+        return self.db.execute("SELECT COUNT(*) FROM festlegungen WHERE bild = ?", (name,)).fetchone()[0]
+
+    def festlegungen(self, name):
+        with self.lock:
+            return [dict(r) for r in self.db.execute("SELECT * FROM festlegungen WHERE bild = ? ORDER BY zeit", (name,))]
 
     def zaehler(self, pid=None):
         with self.lock:
             return self._zaehler(pid)
 
     def _zaehler(self, pid):
-        z = {s: 0 for s in ("runde1", "runde2", "fertig", "verworfen")}
+        z = {s: 0 for s in ("offen", "fertig", "verworfen")}
         for r in self.db.execute("SELECT status, COUNT(*) n FROM bilder GROUP BY status"):
             z[r["status"]] = r["n"]
+        z["ziel"] = ZIEL
+        z["festlegungen"] = self.db.execute("SELECT COUNT(*) FROM festlegungen").fetchone()[0]
         if pid is not None:
-            z["fuer_mich2"] = self.db.execute(
-                "SELECT COUNT(*) FROM bilder WHERE status = 'runde2' AND (von1 IS NULL OR von1 != ?)", (pid,)).fetchone()[0]
+            z["fuer_mich"] = self.db.execute(
+                """SELECT COUNT(*) FROM bilder b WHERE status = 'offen'
+                   AND NOT EXISTS (SELECT 1 FROM festlegungen f WHERE f.bild = b.name AND f.person = ?)""", (pid,)).fetchone()[0]
             z["ich"] = self.db.execute(
-                "SELECT (SELECT COUNT(*) FROM bilder WHERE von1 = ?) + (SELECT COUNT(*) FROM bilder WHERE von2 = ?)"
-                " + (SELECT COUNT(*) FROM bilder WHERE verworfen_von = ?)", (pid, pid, pid)).fetchone()[0]
+                "SELECT (SELECT COUNT(*) FROM festlegungen WHERE person = ?) + (SELECT COUNT(*) FROM bilder WHERE verworfen_von = ?)",
+                (pid, pid)).fetchone()[0]
+        else:
+            je = {k: 0 for k in range(ZIEL)}
+            for r in self.db.execute("""SELECT (SELECT COUNT(*) FROM festlegungen f WHERE f.bild = b.name) n
+                                        FROM bilder b WHERE status = 'offen'"""):
+                je[min(r["n"], ZIEL - 1)] += 1
+            z["offen_je"] = [je[k] for k in range(ZIEL)]
+            z["einig"] = sum(1 for r in self.db.execute("SELECT name, radius FROM bilder WHERE status = 'fertig'")
+                             if self._ergebnis(r["name"], r["radius"])[1])
         return z
 
+    def _ergebnis(self, name, radius):
+        listen = [json.loads(r["kugeln"]) for r in self.db.execute("SELECT kugeln FROM festlegungen WHERE bild = ?", (name,))]
+        return konsens(listen, radius)
+
     def naechstes(self, pid, nach=None):
-        """Runde 1 zuerst (aeltestes freies Bild), dann Runde 2 - nie das eigene Bild aus Runde 1.
-        'nach' = Bild, das die Person gerade mit "Spaeter" uebersprungen hat."""
+        """Ein offenes Bild, das diese Person noch nicht festgelegt hat - Bilder, denen am wenigsten fehlt, zuerst.
+        Nie mehr Leute gleichzeitig an einem Bild, als noch Festlegungen fehlen. Ohne Vorschlaege.
+        'nach' = Bild, das die Person gerade mit "Spaeter" uebersprungen hat (kommt ganz zum Schluss)."""
         now = self.clock()
         with self.lock:
-            kandidaten = []
-            for runde, sql, args in (
-                    (1, "SELECT * FROM bilder WHERE status = 'runde1' ORDER BY name", ()),
-                    (2, "SELECT * FROM bilder WHERE status = 'runde2' AND (von1 IS NULL OR von1 != ?) ORDER BY name", (pid,))):
-                rows = [r for r in self.db.execute(sql, args) if not self._belegt_von_anderem(r["name"], pid, now)]
-                if nach:          # erst die danach, dann die davor - das uebersprungene ganz zum Schluss
-                    rows = ([r for r in rows if r["name"] > nach] + [r for r in rows if r["name"] < nach],
-                            [r for r in rows if r["name"] == nach])
-                else:
-                    rows = (rows, [])
-                kandidaten.append((runde, rows))
-            reihenfolge = [(rd, r) for rd, (vorne, _) in kandidaten for r in vorne] + \
-                          [(rd, r) for rd, (_, hinten) in kandidaten for r in hinten]
-            if not reihenfolge:
+            rows = [r for r in self.db.execute(
+                """SELECT b.*, (SELECT COUNT(*) FROM festlegungen f WHERE f.bild = b.name) n FROM bilder b
+                   WHERE status = 'offen' AND NOT EXISTS (SELECT 1 FROM festlegungen f WHERE f.bild = b.name AND f.person = ?)
+                   ORDER BY n DESC, name""", (pid,))
+                if r["n"] + self._andere_dran(r["name"], pid, now) < ZIEL]
+            if nach:
+                rows = [r for r in rows if r["name"] != nach] + [r for r in rows if r["name"] == nach]
+            if not rows:
                 return None
-            runde, r = reihenfolge[0]
+            r = rows[0]
             self.freigeben(pid)
-            self.claims[r["name"]] = (pid, now)
-            vorschlag = json.loads(r["vorschlag"]) if runde == 1 else json.loads(r["kugeln1"])
-            von = None
-            if runde == 2:
-                von = r["von1_name"]
-                if r["von1"] is not None:
-                    p = self.person(r["von1"])
-                    von = p["name"] if p else von
+            self.claims.setdefault(r["name"], {})[pid] = now
             return {"name": r["name"], "width": r["breite"], "height": r["hoehe"], "radius": r["radius"],
-                    "runde": runde, "von": von, "model": r["modell"] if runde == 1 else None,
-                    "balls": vorschlag, "stand": self.zaehler(pid)}
+                    "durchgang": r["n"] + 1, "ziel": ZIEL, "balls": [], "stand": self._zaehler(pid)}
 
     def speichern(self, pid, name, balls, verwerfen=False):
         if not NAME_RE.fullmatch(name or ""):
@@ -360,31 +405,30 @@ class Daten:
             r = self.db.execute("SELECT * FROM bilder WHERE name = ?", (name,)).fetchone()
             if not r:
                 raise Fehler("Bild nicht gefunden", 404)
-            if r["status"] not in ("runde1", "runde2"):
+            if r["status"] != "offen":
                 self.claims.pop(name, None)
                 raise Fehler("Dieses Bild ist schon fertig – weiter mit dem nächsten", 409)
-            if self._belegt_von_anderem(name, pid, now):
-                raise Fehler("Jemand anderes legt dieses Bild gerade fest", 409)
-            runde = 1 if r["status"] == "runde1" else 2
-            if runde == 2 and r["von1"] == pid:
-                raise Fehler("Dein eigenes Bild aus Runde 1 kontrolliert jemand anderes", 409)
+            if self.db.execute("SELECT 1 FROM festlegungen WHERE bild = ? AND person = ?", (name, pid)).fetchone():
+                raise Fehler("Dieses Bild hast du schon festgelegt – weiter mit dem nächsten", 409)
+            n = self._anzahl(name)
             if verwerfen:
                 self.db.execute("UPDATE bilder SET status = 'verworfen', verworfen_von = ?, verworfen_runde = ? WHERE name = ?",
-                                (pid, runde, name))
+                                (pid, n + 1, name))
                 text = "Bild als unbrauchbar aussortiert"
             else:
                 kugeln = saubere_kugeln(balls)
-                if runde == 1:
-                    self.db.execute("UPDATE bilder SET status = 'runde2', kugeln1 = ?, von1 = ?, zeit1 = ? WHERE name = ?",
-                                    (json.dumps(kugeln), pid, now, name))
-                    text = "Gespeichert – jemand anderes kontrolliert es in Runde 2"
+                p = self.person(pid)
+                self.db.execute("INSERT INTO festlegungen (bild, person, person_name, kugeln, zeit) VALUES (?,?,?,?,?)",
+                                (name, pid, p["name"] if p else "?", json.dumps(kugeln), now))
+                if n + 1 >= ZIEL:
+                    self.db.execute("UPDATE bilder SET status = 'fertig' WHERE name = ?", (name,))
+                    text = f"Gespeichert – Bild ist jetzt {ZIEL}× festgelegt und fertig"
                 else:
-                    korrigiert = not gleich(json.loads(r["kugeln1"]), kugeln, r["radius"])
-                    self.db.execute("UPDATE bilder SET status = 'fertig', kugeln2 = ?, von2 = ?, zeit2 = ?, korrigiert = ? WHERE name = ?",
-                                    (json.dumps(kugeln), pid, now, int(korrigiert), name))
-                    text = "Korrigiert – fertig fürs Training" if korrigiert else "Bestätigt – fertig fürs Training"
+                    rest = ZIEL - n - 1
+                    text = "Gespeichert – noch " + ("eine weitere Person legt" if rest == 1 else f"{rest} weitere Personen legen") + " es fest"
             self.db.commit()
-            self.claims.pop(name, None)
+            if name in self.claims:
+                self.claims[name].pop(pid, None)
         return text
 
     def bild_pfad(self, name):
@@ -394,10 +438,9 @@ class Daten:
         return p if os.path.isfile(p) else None
 
     def zurueck_in_runde1(self, name):
-        """Admin: verworfenes Bild doch wieder festlegen lassen."""
+        """Admin: verworfenes Bild doch wieder festlegen lassen (vorhandene Festlegungen bleiben)."""
         with self.lock:
-            if not self.db.execute("""UPDATE bilder SET status = 'runde1', kugeln1 = NULL, von1 = NULL, von1_name = NULL,
-                                      zeit1 = NULL, verworfen_von = NULL, verworfen_runde = NULL
+            if not self.db.execute("""UPDATE bilder SET status = 'offen', verworfen_von = NULL, verworfen_runde = NULL
                                       WHERE name = ? AND status = 'verworfen'""", (name,)).rowcount:
                 raise Fehler("Bild nicht gefunden", 404)
             self.db.commit()
@@ -407,33 +450,38 @@ class Daten:
         namen = {p["id"]: p["name"] for p in self.personen()}
         with self.lock:
             rows = list(self.db.execute("SELECT * FROM bilder ORDER BY name DESC LIMIT ?", (n,)))
-        for r in rows:
-            out.append({"name": r["name"], "status": r["status"], "korrigiert": r["korrigiert"],
-                        "von1": namen.get(r["von1"], r["von1_name"]), "von2": namen.get(r["von2"]),
-                        "verworfen_von": namen.get(r["verworfen_von"]),
-                        "kugeln": len(json.loads(r["kugeln2"] or r["kugeln1"] or r["vorschlag"]))})
+            for r in rows:
+                fl = [dict(f) for f in self.db.execute("SELECT person, person_name, kugeln FROM festlegungen WHERE bild = ? ORDER BY zeit", (r["name"],))]
+                kugeln, einig = konsens([json.loads(f["kugeln"]) for f in fl], r["radius"])
+                out.append({"name": r["name"], "status": r["status"], "festlegungen": len(fl), "ziel": ZIEL,
+                            "wer": [namen.get(f["person"], f["person_name"]) for f in fl],
+                            "einig": einig if len(fl) >= 2 else None,
+                            "verworfen_von": namen.get(r["verworfen_von"]), "kugeln": len(kugeln)})
         return out
 
     # --------------------------------------------------------------- Export
-    def zip_bauen(self, ziel, mit_runde1=False):
+    def zip_bauen(self, ziel, modus="fertig"):
         """Trainings-ZIP wie am Pi ("Trainingsdaten laden"): classes.txt, images/, labels/ (YOLO + json).
-        Fertig = Runde 2 kontrolliert. mit_runde1: auch Bilder, die erst einmal festgelegt sind."""
-        stati = ("fertig", "runde2") if mit_runde1 else ("fertig",)
+        modus fertig: alle ZIEL-mal festgelegten Bilder (Mehrheit je Kugel)
+              einig:  nur fertige, bei denen alle Festlegungen uebereinstimmen
+              alle:   auch Bilder, die erst 1-2-mal festgelegt sind (Mehrheit der vorhandenen)"""
+        stati = ("fertig", "offen") if modus == "alle" else ("fertig",)
         with self.lock:
             rows = list(self.db.execute(f"SELECT * FROM bilder WHERE status IN ({','.join('?' * len(stati))}) ORDER BY name", stati))
+            ergebnisse = {r["name"]: (self._anzahl(r["name"]), *self._ergebnis(r["name"], r["radius"])) for r in rows}
         n = 0
         with zipfile.ZipFile(ziel, "w", zipfile.ZIP_STORED) as z:
             z.writestr("classes.txt", "\n".join(CLASSES) + "\n")
             for r in rows:
-                kugeln = json.loads(r["kugeln2"] or r["kugeln1"] or "null")
+                anzahl, kugeln, einig = ergebnisse[r["name"]]
                 jpg = self.bild_pfad(r["name"])
-                if kugeln is None or not jpg:
+                if not anzahl or not jpg or (modus == "einig" and not einig):
                     continue
                 z.write(jpg, f"images/{r['name']}.jpg")
                 z.writestr(f"labels/{r['name']}.txt", yolo_lines(kugeln, r["radius"], r["breite"], r["hoehe"]))
                 z.writestr(f"labels/{r['name']}.json", json.dumps({
                     "radius": r["radius"], "width": r["breite"], "height": r["hoehe"], "balls": kugeln,
-                    "runde": 2 if r["status"] == "fertig" else 1, "korrigiert": bool(r["korrigiert"])}))
+                    "festlegungen": anzahl, "einig": einig}))
                 n += 1
         return n
 
@@ -566,14 +614,16 @@ def make_handler(daten: Daten):
                 jpg = daten.bild_pfad((q.get("name") or [""])[0])
                 return self._datei(jpg, "image/jpeg") if jpg else self._send(404, {"error": "Bild nicht gefunden"})
             if pfad == "/api/admin/zip":
-                mit1 = (q.get("runde1") or ["0"])[0] == "1"
+                modus = (q.get("modus") or ["alle" if (q.get("runde1") or ["0"])[0] == "1" else "fertig"])[0]
+                if modus not in ("fertig", "einig", "alle"):
+                    modus = "fertig"
                 fd, tmp = tempfile.mkstemp(suffix=".zip", dir=daten.dir)
                 os.close(fd)
                 try:
-                    n = daten.zip_bauen(tmp, mit1)
+                    n = daten.zip_bauen(tmp, modus)
                     if not n:
                         return self._send(404, {"error": "Noch keine fertigen Bilder"})
-                    name = time.strftime("billard-training-%Y%m%d-%H%M") + ("-mit-runde1" if mit1 else "") + ".zip"
+                    name = time.strftime("billard-training-%Y%m%d-%H%M") + ("" if modus == "fertig" else "-" + modus) + ".zip"
                     size = os.path.getsize(tmp)
                     self.send_response(200)
                     self.send_header("Content-Type", "application/zip")
