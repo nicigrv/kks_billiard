@@ -488,7 +488,9 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
   });
 
   // Ruhig nachschauen, ob neue Bilder da sind
+  let pollTimer = null;
   async function poll() {
+    clearTimeout(pollTimer);
     try {
       if (!item && me) {
         const r = await fetch("/api/stand", { cache: "no-store" });
@@ -500,18 +502,16 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
         }
       }
     } catch (e) { /* naechster Versuch */ }
-    setTimeout(poll, 15000);
+    pollTimer = setTimeout(poll, 15000);
   }
 
-  let started = false;
   function start(name) {
     me = name;
     $("who").textContent = name;
     $("logoutBtn").hidden = false;
-    if (started) { load(); return; }
-    started = true;
     load();
-    setTimeout(poll, 15000);
+    clearTimeout(pollTimer);                 // nach erneuter Anmeldung wieder abfragen, nie doppelt
+    pollTimer = setTimeout(poll, 15000);
   }
 
   // Beim Verlassen das offene Bild freigeben, damit es jemand anderes bekommt

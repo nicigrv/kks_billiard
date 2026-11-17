@@ -81,6 +81,8 @@ a.link { color: var(--chalk); font-weight: 700; }
 .teams { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .team { padding: 6px 8px 8px; border-radius: 10px; transition: background .3s; }
 .team.active { background: rgba(111, 179, 224, 0.12); }
+.team.winner { background: rgba(242, 183, 5, 0.14); box-shadow: inset 0 0 0 2px rgba(242, 183, 5, .55); }
+.team.winner .name::after { content: " \2605"; color: var(--solid); }
 .team .name {
   font: 700 clamp(26px, 7vw, 34px)/1.05 var(--display);
   overflow-wrap: anywhere;
@@ -547,6 +549,7 @@ details > div { margin-top: 12px; }
         grp ? g.group_names[i] + ", noch " + g.remaining[grp] : "Tisch offen";
       rack($("rack" + i), idle ? null : grp, grp ? g.remaining[grp] : 0);
       $("team" + i).classList.toggle("active", g.phase === "playing" && g.turn === i);
+      $("team" + i).classList.toggle("winner", g.phase === "finished" && g.winner === i);
     }
     const cb = $("cueball");
     cb.classList.toggle("hidden", g.phase !== "playing");
@@ -815,9 +818,10 @@ details > div { margin-top: 12px; }
   });
   $("deleteAllBtn").addEventListener("click", async () => {
     const t = (state && state.training) || {};
-    const n = (t.pending || 0) + (t.verified || 0) + (t.discarded || 0);
+    const single = ((state && state.single) || {}).stored || 0;
+    const n = (t.pending || 0) + (t.verified || 0) + (t.discarded || 0) + single;
     if (!n) { toast("Es gibt keine Bilder zum Löschen"); return; }
-    if (!confirm("ALLE " + n + " Trainingsbilder löschen (offene, festgelegte und verworfene)?\n\nDas kann nicht rückgängig gemacht werden. Das KI-Modell bleibt erhalten.")) return;
+    if (!confirm("ALLE " + n + " Trainingsbilder löschen (offene, festgelegte, verworfene" + (single ? ", Einzelkugel" : "") + ")?\n\nDas kann nicht rückgängig gemacht werden. Das KI-Modell bleibt erhalten.")) return;
     if (await post("delete_images", { confirm: true })) loadEditor();
   });
 
@@ -1087,9 +1091,10 @@ details > div { margin-top: 12px; }
     if (res) loadSnapshot();
   });
 
-  let polling = false;
+  let polling = false, pollTimer = null;
   async function poll() {
     if (polling) return;
+    clearTimeout(pollTimer);                 // nach erneuter Anmeldung nicht doppelt abfragen
     polling = true;
     try {
       const r = await fetch("/api/state", { cache: "no-store" });
@@ -1100,7 +1105,7 @@ details > div { margin-top: 12px; }
     }
     polling = false;
     const live = state && state.assist && state.cue && state.cue.connected;
-    setTimeout(poll, live ? 600 : 1500);
+    pollTimer = setTimeout(poll, live ? 600 : 1500);
   }
 
   // ---------------- Live-Ansicht ----------------

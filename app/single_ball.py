@@ -26,6 +26,7 @@ import cv2
 import numpy as np
 
 from ballnum import kind_of_number, color_of_number
+from recorder import SINGLE_MODEL
 
 NAMES = {0: "Weiße", 8: "schwarze 8"}
 
@@ -293,7 +294,7 @@ class SingleBall:
                 raise RuntimeError("Speicher fast voll")
         else:
             # ohne leeren Tisch ist die Position nicht sicher genug -> zum Nachpruefen
-            name = self.recorder.save_pending(img, [ball], r, [n], model="Einzelkugel-Serie")
+            name = self.recorder.save_pending(img, [ball], r, [n], model=SINGLE_MODEL)
             if name is None:
                 raise RuntimeError("Speicher fast voll")
             self.saved_open += 1

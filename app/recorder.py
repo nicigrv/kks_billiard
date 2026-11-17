@@ -37,6 +37,9 @@ from ballnum import ball_number
 CLASSES = ["weiss"] + [str(n) for n in range(1, 16)]      # Index = Kugelnummer
 NAME_RE = re.compile(r"[0-9]{8}-[0-9]{6}-[0-9]{3}")
 CLAIM_S = 600             # so lange gehoert ein geoeffnetes Bild dem, der es pruefen will
+# Vorschlag der Einzelkugel-Serie (Position aus dem Bildvergleich, Nummer vom Admin) - kein KI-Chip,
+# zaehlt deshalb nicht in die Trefferquote des Modells
+SINGLE_MODEL = "Einzelkugel-Serie"
 
 
 def ball_num(b):
@@ -125,8 +128,8 @@ class Recorder:
         ms = int(now * 1000) % 1000
         while True:
             name = f"{stamp}-{ms:03d}"
-            if not any(os.path.exists(os.path.join(d, name + ext)) for d, ext in
-                       ((self.pending_dir, ".jpg"), (self.ok_img, ".jpg"))):
+            if not any(os.path.exists(os.path.join(d, name + ".jpg")) for d in
+                       (self.pending_dir, self.ok_img, self.single_dir)):
                 return name
             ms += 1
             if ms > 999:
@@ -233,8 +236,8 @@ class Recorder:
     def _score(self, meta, final):
         """Vorschlag des Modells mit dem gepruefte Ergebnis vergleichen: richtig ist eine
         Kugel, wenn das Modell sie an derselben Stelle mit derselben Nummer gefunden hat."""
-        if not meta.get("model"):
-            return                                  # ohne Modell gab es keinen Vorschlag
+        if not meta.get("model") or meta["model"] == SINGLE_MODEL:
+            return                                  # ohne Modell gab es keinen Vorschlag des KI-Chips
         r = meta["radius"]
         sugg = [dict(b, number=ball_num(b)) for b in meta.get("balls", [])]
         used, correct = set(), 0

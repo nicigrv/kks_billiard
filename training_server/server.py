@@ -87,7 +87,7 @@ def saubere_kugeln(balls):
         try:
             x, y = float(b["x"]), float(b["y"])
         except (KeyError, TypeError, ValueError):
-            raise Fehler("Kugel ohne Position")
+            raise Fehler("Kugel ohne Position") from None
         d = {"x": round(x, 1), "y": round(y, 1), "kind": str(b.get("kind", ""))[:10],
              "color": str(b.get("color", "") or "")[:10]}
         d["number"] = ball_num({"kind": d["kind"], "color": d["color"]})
@@ -248,7 +248,7 @@ class Daten:
 
     def person(self, pid):
         with self.lock:
-                r = self.db.execute("SELECT * FROM personen WHERE id = ?", (pid,)).fetchone()
+            r = self.db.execute("SELECT * FROM personen WHERE id = ?", (pid,)).fetchone()
         return dict(r) if r else None
 
     def personen(self):
@@ -308,14 +308,14 @@ class Daten:
         try:
             jpg = base64.b64decode(d.get("image", ""), validate=True)
         except (ValueError, TypeError):
-            raise Fehler("Bild")
+            raise Fehler("Bild") from None
         if not jpg.startswith(b"\xff\xd8") or len(jpg) > MAX_UPLOAD:
             raise Fehler("Bild ist kein JPEG")
         meta = d.get("meta") or {}
         try:
             w, h, radius = int(meta["width"]), int(meta["height"]), float(meta["radius"])
         except (KeyError, TypeError, ValueError):
-            raise Fehler("Bildangaben fehlen")
+            raise Fehler("Bildangaben fehlen") from None
         balls = [b for b in meta.get("balls", []) if isinstance(b, dict)]
         einzel = d.get("einzelkugel")
         if einzel is not None:
@@ -356,7 +356,7 @@ class Daten:
         try:
             leer = base64.b64decode(leer_b64, validate=True)
         except (ValueError, TypeError):
-            raise Fehler("Bild des leeren Tisches")
+            raise Fehler("Bild des leeren Tisches") from None
         if not leer.startswith(b"\xff\xd8") or len(leer) > MAX_UPLOAD:
             raise Fehler("Bild des leeren Tisches ist kein JPEG")
         pfad = os.path.join(self.bilder, "leer", hashlib.sha256(leer).hexdigest()[:20] + ".jpg")
@@ -632,13 +632,18 @@ def make_handler(daten: Daten):
         def _json(self):
             if not self.headers.get("Content-Type", "").startswith("application/json"):
                 raise Fehler("Falsches Format", 415)
-            n = int(self.headers.get("Content-Length") or 0)
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                raise Fehler("Ungültige Länge") from None
+            if n < 0:
+                raise Fehler("Ungültige Länge")
             if n > MAX_UPLOAD * 1.4:
                 raise Fehler("Zu groß", 413)
             try:
                 d = json.loads(self.rfile.read(n) or b"{}")
             except ValueError:
-                raise Fehler("Ungültige Anfrage")
+                raise Fehler("Ungültige Anfrage") from None
             if not isinstance(d, dict):
                 raise Fehler("Ungültige Anfrage")
             return d
@@ -726,9 +731,10 @@ def make_handler(daten: Daten):
                     self.send_header("Content-Disposition", f'attachment; filename="{name}"')
                     self.send_header("Cache-Control", "no-store")
                     self.end_headers()
-                    with open(tmp, "rb") as f:
-                        while chunk := f.read(1 << 20):
-                            self.wfile.write(chunk)
+                    if self.command != "HEAD":
+                        with open(tmp, "rb") as f:
+                            while chunk := f.read(1 << 20):
+                                self.wfile.write(chunk)
                 finally:
                     os.remove(tmp)
                 return None

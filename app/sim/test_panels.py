@@ -109,7 +109,7 @@ def main():
 
 def run_panels(d):
     with open(os.path.join(d, "config.json")) as f:
-        cfg = json.load(f)
+        json.load(f)                          # config.json ist lesbar
     code, body, _ = req("/")
     check(code == 200 and b"Spiel-PIN" in body, "Startseite = Spiel-Panel")
     code, body, _ = req("/admin")
@@ -240,11 +240,41 @@ def run_panels(d):
           "Prüfer darf sonst nichts")
     check(req("/api/review/next", cookie=game)[0] == 403, "Spiel-PIN darf nicht festlegen")
     check(req("/api/review_release", {}, cookie=anna)[0] == 200, "Prüfer gibt sein Bild frei")
+    check(req("/api/review_release", {}, cookie=admin)[0] == 200, "Admin gibt sein Bild frei")
+    check(req("/api/review_release", {}, cookie=game)[0] == 403, "Spiel-PIN: keine Bilder freigeben")
+
+    code, body, _ = req("/api/new_rack", {"breaker": "1"}, cookie=game)
+    g = json.loads(body).get("state", {}).get("game", {}) if code == 200 else {}
+    check(g.get("turn") == 1 and g.get("phase") == "playing", f"Neues Rack mit Anstoß als Text ({code})")
+    code, body, _ = req("/api/new_rack", {"breaker": "x"}, cookie=game)
+    check(code == 400 and req("/api/game", cookie=game)[0] == 200, "ungültiger Anstoß abgelehnt, Spielstand heil")
+    check(req("/api/reviewer_add", {"name": "admin"}, cookie=admin)[0] == 400, "Prüfer-Name „Admin“ ist vergeben")
+    r = urllib.request.Request(BASE + "/api/assist", data=b"[1]", method="POST",
+                               headers={"Content-Type": "application/json", "Cookie": game})
+    try:
+        urllib.request.urlopen(r, timeout=10)
+        code = 200
+    except urllib.error.HTTPError as e:
+        code = e.code
+    check(code == 400, "Befehl ohne JSON-Objekt abgelehnt")
 
     code, data, _ = login("0000")
     check(code == 401, "falsche PIN abgelehnt")
     req("/api/logout", {}, cookie=game)
     check(req("/api/game", cookie=game)[0] == 401, "nach Abmelden gesperrt")
+
+    # Admin-PIN als Kopfzeile (fuer Skripte): richtig geht, Durchprobieren wird gesperrt
+    def with_pin(pin):
+        r = urllib.request.Request(BASE + "/api/state", headers={"X-Admin-Pin": pin})
+        try:
+            with urllib.request.urlopen(r, timeout=10) as resp:
+                return resp.status
+        except urllib.error.HTTPError as e:
+            return e.code
+    check(with_pin("1902") == 200, "PIN-Kopfzeile: richtige Admin-PIN geht")
+    for pin in ("1000", "1001", "1002", "1003", "1004"):
+        with_pin(pin)
+    check(with_pin("1902") == 401, "PIN-Kopfzeile: nach 5 Fehlversuchen gesperrt (kein Durchprobieren)")
 
 
 if __name__ == "__main__":

@@ -124,7 +124,7 @@ def test_rounds():
         rm.submit("Anna", r3["id"], [b(50, 50, 1)])
         res = rm.finish()
         check(res["names"] == ["Anna"] and rec.verified == 2, "Admin schliesst mit den bisherigen ab")
-        r4 = rm.start(img, [], R, None, ["Anna"])
+        rm.start(img, [], R, None, ["Anna"])
         rm.cancel()
         check(not rm.status()["active"] and rm.count == 4, "abbrechen, Zaehler laeuft weiter")
 
