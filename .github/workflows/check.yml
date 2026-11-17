@@ -1,0 +1,88 @@
+# Prüft bei jedem Pull Request und jedem Push auf main, ob alles noch passt:
+#   Python (Syntax + Tests), Firmware (baut sie), Skripte, docker-compose, JavaScript, Workflows
+# Ein rotes X am Pull Request zeigt, welcher Teil fehlschlägt (Details unter "Details").
+name: Prüfung
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python (Syntax + Tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"          # wie im Container auf dem Pi (Debian bookworm)
+          cache: pip
+          cache-dependency-path: .github/workflows/check.yml
+      - name: Pakete
+        run: pip install -q ruff numpy opencv-python-headless==4.10.0.84 pillow pygame
+      - name: Syntax und undefinierte Namen (ruff)
+        run: ruff check --select E9,F63,F7,F82 --output-format github app training_server training
+      - name: Alle Dateien kompilieren
+        run: python -m compileall -q app training_server training
+      - name: Tests Pi-Programm
+        working-directory: app
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_AUDIODRIVER: dummy
+        run: |
+          for t in game features coral merkmale review cue_link panels; do
+            echo "::group::sim.test_$t"
+            python -m sim.test_$t
+            echo "::endgroup::"
+          done
+      - name: Tests Trainingsserver
+        working-directory: training_server
+        run: python test_server.py
+
+  firmware:
+    name: Firmware (PlatformIO)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ hashFiles('cue_sensor/platformio.ini', 'koe_messgeraet/platformio.ini') }}
+      - run: pip install -q platformio
+      - name: Queue (alle Boards)
+        run: pio run -d cue_sensor
+      - name: Kö-Messgerät
+        run: pio run -d koe_messgeraet
+
+  sonstiges:
+    name: Skripte, docker-compose, JavaScript, Workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell-Skripte (shellcheck)
+        run: shellcheck -S warning scripts/*.sh
+      - name: docker-compose.yml (Pi und Server)
+        run: |
+          docker compose -f docker-compose.yml config -q
+          UPLOAD_KEY=test docker compose -f training_server/docker-compose.yml config -q
+      - name: JavaScript (.js und in den HTML-Seiten)
+        run: |
+          for f in $(git ls-files '*.js'); do node --check "$f"; done
+          python3 scripts/check_html_js.py $(git ls-files '*.html')
+      - name: Workflows (actionlint)
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color
