@@ -202,7 +202,7 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
       if (!PRUEFER && data.role !== "admin") { showLogin("Hier braucht es die Admin-PIN."); return; }
       $("login").hidden = true;
       me = { role: data.role, name: data.name, pin_required: true };
-      start();
+      if (started) resume(); else start();
     } catch (err) { showLogin("Tisch nicht erreichbar"); }
   });
   $("logoutBtn").addEventListener("click", async () => {
@@ -443,7 +443,7 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
   let counts = 0;
   $("deleteAllBtn").addEventListener("click", async () => {
     if (!counts) { toast("Es gibt keine Bilder zum Löschen"); return; }
-    if (!confirm("ALLE " + counts + " Trainingsbilder löschen (offene, festgelegte und verworfene)?\n\nDas kann nicht rückgängig gemacht werden. Das KI-Modell bleibt erhalten.")) return;
+    if (!confirm("ALLE " + counts + " Trainingsbilder löschen (offene, festgelegte, verworfene und Einzelkugel)?\n\nDas kann nicht rückgängig gemacht werden. Das KI-Modell bleibt erhalten.")) return;
     if (await post("delete_images", { confirm: true })) load();
   });
   $("captureBtn").addEventListener("click", async () => {
@@ -495,7 +495,7 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
   // ---------------- Zaehler ----------------
   function renderStats(s) {
     const t = s.training || {};
-    counts = (t.pending || 0) + (t.verified || 0) + (t.discarded || 0);
+    counts = (t.pending || 0) + (t.verified || 0) + (t.discarded || 0) + ((s.single || {}).stored || 0);
     const el = $("stats");
     el.innerHTML = "";
     const add = (txt, val, cls) => {
@@ -615,7 +615,9 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
     roundTimer = setTimeout(pollRound, 1500);
   }
   function pollRoundNow() { pollRound(); }
+  let pollTimer = null;
   async function poll() {
+    clearTimeout(pollTimer);
     try {
       const r = await fetch("/api/state", { cache: "no-store" });
       if (r.status === 401 || r.status === 403) { showLogin(); return; }
@@ -625,8 +627,19 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
         if (!item && (s.training || {}).pending) load();
       }
     } catch (e) { /* naechster Versuch */ }
-    setTimeout(poll, 4000);
+    pollTimer = setTimeout(poll, 4000);
   }
+
+  // Nach erneuter Anmeldung (Sitzung abgelaufen): Abfragen wieder anwerfen
+  function resume() {
+    if (PRUEFER) { pollRound(); return; }
+    if (!item) load();
+    poll();
+  }
+  // Seite verlassen: offenes Bild sofort freigeben, damit andere es bekommen
+  window.addEventListener("pagehide", () => {
+    if (item && mode !== "round" && navigator.sendBeacon) navigator.sendBeacon("/api/review_release");
+  });
 
   let started = false;
   function start() {

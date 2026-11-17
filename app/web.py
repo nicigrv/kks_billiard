@@ -22,8 +22,14 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from auth import Auth, LoginError
 from config import UserError
 
+
+class BeamerNotReady(OSError):
+    """Das Beamerbild ist gerade nicht verfuegbar (HDMI-Bild kommt kurz nicht)."""
+
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 MAX_MODEL_BYTES = 64 * 1024 * 1024
+MAX_JSON_BYTES = 2 * 1024 * 1024                         # Befehle und Festlegungen sind klein
 BEAMER_SIZES = {"sd": (960, 540), "hd": (1280, 720), "fhd": (1920, 1080)}
 
 
@@ -36,6 +42,7 @@ PRUEFER_GET = {"/api/round", "/api/round/image"}
 STORED_GET = {"/api/review/next", "/api/review/image"}   # gespeicherte Bilder: Admin und Pruefer
 PUBLIC_POST = {"/api/login", "/api/logout"}
 PRUEFER_POST = {"/api/round/submit", "/api/review_save", "/api/review_release"}
+STREAM_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError)
 # Diese Befehle darf auch das Spiel-Panel (PIN 1212); alle anderen nur der Admin
 GAME_COMMANDS = {"start", "new_rack", "abort", "foul", "switch_turn", "undo", "undo_shot", "set_group",
                  "adjust", "winner", "assist", "record_round", "cue_use", "cue_calibrate",
@@ -124,16 +131,23 @@ def make_handler(app, auth: Auth):
             try:
                 while True:
                     t0 = time.monotonic()
-                    jpg = app.beamer_jpeg(size)
+                    try:
+                        jpg = app.beamer_jpeg(size)
+                    except BeamerNotReady:
+                        # HDMI-Bild kurz nicht da (z. B. Kamera wird umgestellt): Strom offen lassen,
+                        # sonst bleibt im Browser das letzte Bild stehen
+                        time.sleep(0.5)
+                        continue
                     self.wfile.write(f"--{boundary}\r\nContent-Type: image/jpeg\r\n"
                                      f"Content-Length: {len(jpg)}\r\n\r\n".encode() + jpg + b"\r\n")
                     self.wfile.flush()
                     time.sleep(max(0.0, 1 / fps - (time.monotonic() - t0)))
-            except (BrokenPipeError, ConnectionResetError, OSError):
+            except OSError:                              # Browser zu, Netz weg
                 return None
 
         def _who(self):
-            return auth.who(self.headers.get("Cookie", ""), self.headers.get("X-Admin-Pin", ""))
+            return auth.who(self.headers.get("Cookie", ""), self.headers.get("X-Admin-Pin", ""),
+                            self.client_address[0])
 
         def _denied(self, who, need="admin"):
             if who["role"] is None:
@@ -141,9 +155,22 @@ def make_handler(app, auth: Auth):
             text = {"admin": "Nur für den Admin", "spiel": "Nur mit der Spiel-PIN"}.get(need, "Keine Berechtigung")
             return self._send(403, {"error": text, "login": True})
 
+        def _length(self, limit):
+            """Content-Length pruefen: ungueltig, negativ oder zu gross -> ValueError."""
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                raise ValueError("Ungültige Länge") from None
+            if not 0 <= n <= limit:
+                raise ValueError("Daten fehlen oder sind zu groß")
+            return n
+
         def _read_json(self):
-            n = int(self.headers.get("Content-Length", "0"))
-            return json.loads(self.rfile.read(n) or b"{}") if n else {}
+            n = self._length(MAX_JSON_BYTES)
+            data = json.loads(self.rfile.read(n) or b"{}") if n else {}
+            if not isinstance(data, dict):
+                raise ValueError("Ungültige Daten")
+            return data
 
         def do_GET(self):
             url = urlsplit(self.path)
@@ -190,7 +217,10 @@ def make_handler(app, auth: Auth):
             if path in ("/api/beamer.jpg", "/api/beamer.mjpg"):
                 size = BEAMER_SIZES.get(query.get("q", ["hd"])[0], BEAMER_SIZES["hd"])
                 if path.endswith(".jpg"):
-                    return self._send(200, app.beamer_jpeg(size), "image/jpeg")
+                    try:
+                        return self._send(200, app.beamer_jpeg(size), "image/jpeg")
+                    except BeamerNotReady as e:
+                        return self._send(503, {"error": str(e)})
                 try:
                     fps = min(10.0, max(1.0, float(query.get("fps", ["5"])[0])))
                 except ValueError:
@@ -236,7 +266,7 @@ def make_handler(app, auth: Auth):
                         return self._send(404, {"error": "Noch keine Bilder"})
                     return self._send_file(tmp, "application/zip",
                                            filename=time.strftime("billard-alle-bilder-%Y%m%d.zip"))
-                except (BrokenPipeError, ConnectionResetError):
+                except STREAM_GONE:
                     return None
                 finally:
                     if os.path.exists(tmp):
@@ -250,7 +280,7 @@ def make_handler(app, auth: Auth):
                         return self._send(404, {"error": "Noch keine geprüften Bilder"})
                     return self._send_file(tmp, "application/zip",
                                            filename=time.strftime("billard-training-%Y%m%d.zip"))
-                except (BrokenPipeError, ConnectionResetError):
+                except STREAM_GONE:
                     return None
                 finally:
                     if os.path.exists(tmp):
@@ -261,7 +291,7 @@ def make_handler(app, auth: Auth):
                     return self._send(404, {"error": "Video nicht gefunden"})
                 try:
                     return self._send_file(fpath, "video/mp4")
-                except (BrokenPipeError, ConnectionResetError):
+                except STREAM_GONE:
                     return None
             if path in ("/api/frame.jpg", "/api/view.jpg", "/api/warped.jpg"):
                 jpg = app.jpeg(path.rsplit("/", 1)[1].split(".")[0])
@@ -284,14 +314,14 @@ def make_handler(app, auth: Auth):
             if path == "/api/logout":
                 auth.logout(Auth.token_from(self.headers.get("Cookie", "")))
                 return self._send(200, {"ok": True}, headers={"Set-Cookie": Auth.clear_cookie()})
-            if path in ("/api/review_save", "/api/review_release") and who["role"] == "pruefer":
+            if path == "/api/review_release" and who["role"] in ("pruefer", "admin"):
+                # Bild, das man offen hatte, wieder freigeben (Seite verlassen, Wechsel in eine Pruefrunde)
+                app.recorder.release(who["name"])
+                return self._send(200, {"ok": True})
+            if path == "/api/review_save" and who["role"] == "pruefer":
                 # Pruefer legt ein gespeichertes Bild fest (spaeter, in Ruhe)
                 try:
-                    data = self._read_json()
-                    if path.endswith("release"):
-                        app.recorder.release(who["name"])
-                        return self._send(200, {"ok": True})
-                    msg = app.review_as(data, who["name"])
+                    msg = app.review_as(self._read_json(), who["name"])
                 except UserError as e:
                     return self._send(400, {"error": str(e)})
                 except (KeyError, ValueError, TypeError) as e:
@@ -311,8 +341,11 @@ def make_handler(app, auth: Auth):
                 return self._denied(who, need)
             if path == "/api/model":
                 # Coral-Modell hochladen (Datei roh im Body)
-                n = int(self.headers.get("Content-Length", "0"))
-                if not 0 < n <= MAX_MODEL_BYTES:
+                try:
+                    n = self._length(MAX_MODEL_BYTES)
+                except ValueError:
+                    n = 0
+                if not n:
                     return self._send(400, {"error": "Datei fehlt oder ist zu groß"})
                 data = self.rfile.read(n)
                 try:
@@ -321,8 +354,7 @@ def make_handler(app, auth: Auth):
                     return self._send(400, {"error": str(e)})
                 return self._send(200, {"ok": True, "message": msg, "state": app.state_dict()})
             try:
-                n = int(self.headers.get("Content-Length", "0"))
-                payload = json.loads(self.rfile.read(n) or b"{}") if n else {}
+                payload = self._read_json()
             except ValueError:
                 return self._send(400, {"error": "Ungültige Daten"})
             try:
@@ -355,5 +387,5 @@ def start(app, port=8080):
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, name="web", daemon=True).start()
     print(f"[web] Spiel-Panel auf Port {port} " + ("(mit PIN)" if game_pin else "(OHNE PIN)") +
-          f", Admin-Panel unter /admin " + ("(mit PIN)" if pin else "(OHNE PIN)"), flush=True)
+          ", Admin-Panel unter /admin " + ("(mit PIN)" if pin else "(OHNE PIN)"), flush=True)
     return server

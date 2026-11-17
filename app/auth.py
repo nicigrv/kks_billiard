@@ -13,6 +13,7 @@ ueberleben einen Neustart (data/sitzungen.json). Zu viele Fehlversuche von einem
 sperren die Anmeldung kurz.
 """
 
+import hmac
 import json
 import os
 import secrets
@@ -21,6 +22,13 @@ import time
 
 COOKIE = "billard"
 MAX_AGE = 30 * 24 * 3600
+MAX_FAILS = 5             # so viele Fehlversuche je Geraet ...
+FAIL_WINDOW_S = 60        # ... innerhalb dieser Zeit sperren die Anmeldung kurz
+
+
+def same(a, b):
+    """Vergleich ohne Zeitunterschied je nach Zeichen (PIN nicht per Stoppuhr erratbar)."""
+    return bool(a) and hmac.compare_digest(str(a).encode(), str(b).encode())
 
 
 class LoginError(ValueError):
@@ -64,17 +72,17 @@ class Auth:
         secret = str(secret or "").strip()
         now = self.clock()
         with self.lock:
-            recent = [t for t in self.fails.get(ip, []) if now - t < 60]
-            if len(recent) >= 5:
+            recent = self._recent_fails(ip, now)
+            if len(recent) >= MAX_FAILS:
                 raise LoginError("Zu viele Fehlversuche - bitte eine Minute warten")
             sess = None
-            if self.pin and secret == self.pin:
+            if self.pin and same(secret, self.pin):
                 sess = {"role": "admin", "name": "Admin"}
-            elif self.game_pin and secret == self.game_pin:
+            elif self.game_pin and same(secret, self.game_pin):
                 sess = {"role": "spiel", "name": "Spiel"}
             else:
                 for r in self.reviewers():
-                    if secret and secret == str(r.get("code")):
+                    if same(secret, r.get("code")):
                         sess = {"role": "pruefer", "name": r["name"]}
                         break
             if sess is None:
@@ -85,6 +93,15 @@ class Auth:
             self.sessions[token] = dict(sess, t=now)
             self._save()
             return sess, token
+
+    def _recent_fails(self, ip, now):
+        """Fehlversuche dieses Geraets in der letzten Minute (alte Eintraege werden vergessen)."""
+        recent = [t for t in self.fails.get(ip, []) if now - t < FAIL_WINDOW_S]
+        if recent:
+            self.fails[ip] = recent
+        else:
+            self.fails.pop(ip, None)
+        return recent
 
     def logout(self, token):
         with self.lock:
@@ -101,14 +118,20 @@ class Auth:
                 self._save()
 
     # --------------------------------------------------------------- Abfrage
-    def who(self, cookie_header, pin_header=""):
-        """-> {"role": "admin"|"spiel"|"pruefer"|None, "name": ...} fuer eine Anfrage."""
+    def who(self, cookie_header, pin_header="", ip=""):
+        """-> {"role": "admin"|"spiel"|"pruefer"|None, "name": ...} fuer eine Anfrage.
+        pin_header: Admin-PIN als Kopfzeile X-Admin-Pin (fuer Skripte, z. B. sim/fake_cue.py) -
+        Fehlversuche zaehlen wie bei der Anmeldung, sonst liesse sich die PIN durchprobieren."""
         if not self.pin:
             return {"role": "admin", "name": "Admin", "open": True}
-        if pin_header and pin_header == self.pin:
-            return {"role": "admin", "name": "Admin"}
         token = self.token_from(cookie_header)
         with self.lock:
+            if pin_header:
+                now = self.clock()
+                recent = self._recent_fails(ip, now)
+                if len(recent) < MAX_FAILS and same(pin_header, self.pin):
+                    return {"role": "admin", "name": "Admin"}
+                self.fails[ip] = recent + [now]
             s = self.sessions.get(token)
             if s is not None and s["role"] == "pruefer" and \
                     not any(r["name"] == s["name"] for r in self.reviewers()):

@@ -336,8 +336,9 @@ seinem **Castcode**:
 2. Admin-Panel → „Queue mit Gyroskop“ → Castcode eintragen → „Koppeln“.
 3. Am Handy den Haken „Castcode ist eingetragen“ setzen → „Verbinden“.
 4. Der Pi sucht den Queue im WLAN (UDP-Broadcast an Port 5005 mit dem Castcode, nur dieser Queue
-   antwortet) und fragt dann ca. 25× pro Sekunde seine Lage über die HTTP-API ab
-   (`GET http://<queue>/api/lage`, Kopfzeile `X-Castcode`). Neue IP nach Neustart: findet er von selbst.
+   antwortet) und abonniert dann seine Lage: Der Queue schickt sie ca. 50× pro Sekunde per UDP an den Pi,
+   der Pi wiederholt das Abo jede Sekunde (Lebenszeichen + Teamfarbe für die LED). Neue IP nach
+   Neustart: findet er von selbst. Zum Nachschauen gibt es weiterhin `GET http://<queue>/api/lage`.
 5. Einmal kalibrieren: Queue an die lange Bande legen, Spitze zeigt in der Grafik nach rechts →
    „Queue kalibrieren“ (Spiel- oder Admin-Panel). Dreht er sich falsch herum: „Drehrichtung umkehren“.
 
@@ -419,13 +420,6 @@ Technik: Googles Coral-Paketquelle gibt es nicht mehr. Der Treiber (`libedgetpu`
 `tflite_runtime` für Python 3.11 kommen von den gepflegten Builds unter github.com/feranick
 (beide gegen TensorFlow 2.17.1, im Dockerfile mit Prüfsummen festgelegt).
 
-## 5b. Trainingsseite im Netz: zuhause festlegen
-
-Wenig Zeit am Tisch? Dann nur Bilder sammeln und zuhause festlegen: Der Pi schickt jedes gespeicherte
-Bild automatisch auf den Server (`training_server/`). Jeder Trainer meldet sich dort mit seinem Code an.
-Runde 1: jedes Bild wird einmal festgelegt. Runde 2: eine andere Person kontrolliert es. Die fertige
-Trainings-ZIP gibt es auf der Admin-Seite. Einrichtung: `training_server/README.md`.
-
 ## 5a. Prüfrunde: mehrere Prüfer legen dasselbe Bild fest
 
 Damit die Trainingsdaten stimmen, legt jedes Bild mehrere Leute unabhängig voneinander fest.
@@ -461,6 +455,14 @@ Danach wird das Ergebnis der Prüfer mit der KI verglichen:
 **Ding-Ton:** „Ding testen (HDMI)“ im Admin-Panel. Kommt nichts: am Beamer Lautstärke prüfen; anderer
 Ausgang über `AUDIO_DEVICE` in `docker-compose.yml` (Liste: `docker compose exec billard aplay -L`,
 für HDMI 1 z. B. `hdmi:CARD=vc4hdmi1,DEV=0`).
+
+## 5b. Trainingsseite im Netz: zuhause festlegen
+
+Wenig Zeit am Tisch? Dann nur Bilder sammeln und zuhause festlegen: Der Pi schickt jedes gespeicherte
+Bild automatisch auf den Server (`training_server/`). Jeder Trainer meldet sich dort mit seinem Code an.
+Jedes Bild legen mehrere Personen (Standard 3, `FESTLEGUNGEN`) unabhängig voneinander fest, ohne
+Vorschläge zu sehen; je Kugel zählt die Mehrheit. Einzelkugel-Bilder findet dort eine Bilderkennung
+von selbst. Die fertige Trainings-ZIP gibt es auf der Admin-Seite. Einrichtung: `training_server/README.md`.
 
 ## 6. Tests
 

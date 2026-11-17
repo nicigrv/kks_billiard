@@ -27,7 +27,6 @@ die Datei best.pt in Colab umwandeln (--export-only best.pt).
 
 import argparse
 import hashlib
-import os
 import platform
 import shutil
 import sys

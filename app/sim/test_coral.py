@@ -22,7 +22,7 @@ from ballnum import Ball
 from coral_detector import CoralDetector, CoralEngine, CoralNotReady, letterbox
 from geometry import TABLE_SIZES, WARP_H, WARP_W, Table
 from pipeline import Pipeline
-from recorder import Recorder
+from recorder import SINGLE_MODEL, Recorder
 from sim.render import DEFAULT_CORNERS, SimBall, render_topdown, to_camera
 
 FAILS = []
@@ -103,6 +103,11 @@ def test_training_data():
         check(k == 5 and rec.pending == 0 and rec.verified == 0 and rec.discarded == 0
               and rec.model_quality() is None, f"Alle Bilder loeschen ({k} Bilder, Trefferquote zurueckgesetzt)")
         check(rec.save_pending(img, [], 10.0) is not None and rec.pending == 1, "danach geht Aufnehmen wieder")
+
+        # Einzelkugel-Serie (Vorschlag aus dem Bildvergleich, nicht vom KI-Chip): zaehlt nicht in die Trefferquote
+        ns = rec.save_pending(img, [Ball.from_number(200, 100, 10, 5)], 10.0, model=SINGLE_MODEL)
+        rec.review(ns, [{"x": 200, "y": 100, "kind": "solid", "color": "orange"}])
+        check(rec.model_quality() is None, "Einzelkugel-Serie verfaelscht die Trefferquote des KI-Chips nicht")
 
 
 # ------------------------------------------------------------------ KI-Chip

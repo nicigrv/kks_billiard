@@ -92,7 +92,6 @@ def _draw_ball(img, cx, cy, r, number, rng):
         return
     fx, fy = xx + (int(cx) - cx), yy + (int(cy) - cy)
     dist = np.sqrt(fx ** 2 + fy ** 2)
-    inside = dist <= r
     white = np.array((235, 235, 230), np.float32)
 
     base = np.zeros((h, w, 3), np.float32)

@@ -116,6 +116,7 @@ class App:
         self.display_active = False
         self._snapshots = {}
         self._snap_id = 0
+        self._snap_lock = threading.Lock()
         self._stop = threading.Event()
         threading.Thread(target=self._process_loop, name="erkennung", daemon=True).start()
 
@@ -307,8 +308,9 @@ class App:
         if not ok:
             probs.append(("speicher", "warning", "Speicher fast voll",
                           "Es werden keine Trainingsbilder mehr aufgenommen.", 0.0))
-        if self.rounds.status().get("error"):
-            probs.append(("video", "warning", "Spielaufzeichnung", self.rounds.status()["error"], 0.0))
+        rec_error = self.rounds.status().get("error")
+        if rec_error:
+            probs.append(("video", "warning", "Spielaufzeichnung", rec_error, 0.0))
         return self.notes.current(probs)
 
     def graphic_jpeg(self, size=(1280, 720)):
@@ -336,7 +338,7 @@ class App:
                 self._beamer_cond.wait_for(
                     lambda: b["jpg"] is not None and b["size"] == size and b["t"] >= now, timeout=2.0)
             if b["jpg"] is None or b["size"] != size:
-                raise OSError("Beamerbild noch nicht bereit")   # Stream wird beendet, Browser laedt neu
+                raise web.BeamerNotReady("Beamerbild noch nicht bereit")
             return b["jpg"]
 
     def offer_beamer(self, screen, max_age=0.15):
@@ -407,18 +409,20 @@ class App:
             r = self.pipe.table.ball_radius_px
         if warped is None:
             return None
-        self._snap_id += 1
-        sid = self._snap_id
-        self._snapshots[sid] = (warped.copy(), r)
-        for k in sorted(self._snapshots)[:-3]:
-            del self._snapshots[k]
+        with self._snap_lock:
+            self._snap_id += 1
+            sid = self._snap_id
+            self._snapshots[sid] = (warped.copy(), r)
+            for k in sorted(self._snapshots)[:-3]:      # nur die letzten 3 aufheben
+                del self._snapshots[k]
         h, w = warped.shape[:2]
         return {"id": sid, "width": w, "height": h, "radius": r,
                 "balls": [{"x": round(float(b.x), 1), "y": round(float(b.y), 1), "kind": b.kind,
                            "color": b.color or "", "number": ball_number(b.kind, b.color)} for b in balls]}
 
     def snapshot_jpeg(self, sid):
-        snap = self._snapshots.get(sid)
+        with self._snap_lock:
+            snap = self._snapshots.get(sid)
         if snap is None:
             return None
         ok, jpg = cv2.imencode(".jpg", snap[0], [cv2.IMWRITE_JPEG_QUALITY, 85])
@@ -426,7 +430,8 @@ class App:
 
     def _train_correction(self, p):
         from ballnum import Ball
-        snap = self._snapshots.get(int(p["id"]))
+        with self._snap_lock:
+            snap = self._snapshots.get(int(p["id"]))
         if snap is None:
             raise config.UserError("Bild ist veraltet, bitte neu laden")
         warped, r = snap
@@ -588,6 +593,8 @@ class App:
         if name == "reviewer_add":
             if not who:
                 raise config.UserError("Name fehlt")
+            if who.lower() == "admin":
+                raise config.UserError("„Admin“ ist schon vergeben - bitte einen anderen Namen")
             if any(r["name"].lower() == who.lower() for r in revs):
                 raise config.UserError(f"{who} gibt es schon")
             code = self._new_code()
@@ -851,7 +858,8 @@ class App:
                 g.start_match(str(p.get("team_a", "")), str(p.get("team_b", "")), int(p.get("breaker", 0)) % 2)
                 self.pipe.restart_tracking()
             elif name == "new_rack":
-                g.new_rack(p.get("breaker"))
+                b = p.get("breaker")
+                g.new_rack(None if b is None else int(b) % 2)
                 self.pipe.restart_tracking()
             elif name == "abort":
                 g.abort()
