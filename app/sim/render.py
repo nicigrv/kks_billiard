@@ -158,8 +158,9 @@ def render_topdown(balls, length_m, width_m, cloth="gruen", rng=None, occluder=N
     return img
 
 
-def to_camera(topdown, corners, cam_size=(800, 600), border_color=(30, 50, 90)):
-    """Draufsicht schraeg ins Kamerabild projizieren, Bande + Rauschen + JPEG-Artefakte."""
+def to_camera(topdown, corners, cam_size=(800, 600), border_color=(30, 50, 90), rng=None):
+    """Draufsicht schraeg ins Kamerabild projizieren, Bande + Rauschen + JPEG-Artefakte.
+    rng: Zufallsgenerator fuers Rauschen (fuer reproduzierbare Tests), sonst zufaellig."""
     W, H = cam_size
     src = np.float32([[0, 0], [TOP_W, 0], [TOP_W, TOP_H], [0, TOP_H]])
     M = cv2.getPerspectiveTransform(src, np.float32(corners))
@@ -173,7 +174,7 @@ def to_camera(topdown, corners, cam_size=(800, 600), border_color=(30, 50, 90)):
     warped = cv2.warpPerspective(topdown, M, (W, H), flags=cv2.INTER_AREA)
     mask = cv2.warpPerspective(np.full((TOP_H, TOP_W), 255, np.uint8), M, (W, H))
     cam[mask > 0] = warped[mask > 0]
-    noise = np.random.default_rng().normal(0, 3, cam.shape)
+    noise = (rng or np.random.default_rng()).normal(0, 3, cam.shape)
     cam = np.clip(cam.astype(np.float32) + noise, 0, 255).astype(np.uint8)
     ok, jpg = cv2.imencode(".jpg", cam, [cv2.IMWRITE_JPEG_QUALITY, 75])
     return cv2.imdecode(jpg, cv2.IMREAD_COLOR)

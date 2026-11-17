@@ -22,15 +22,18 @@ TARGET = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))
 
 
 def sim_samples(n, seed, jitter=0.0):
-    """Simulator-Draufsichten mit bekannten Kugeln: (bild, [(x, y, nummer)], radius)."""
+    """Simulator-Draufsichten mit bekannten Kugeln: (bild, [(x, y, nummer)], radius).
+    Gleicher seed = gleiche Bilder (Tests sind reproduzierbar)."""
     rng = np.random.default_rng(seed)
     table = Table(DEFAULT_CORNERS, L)
     r = table.ball_radius_px
     for i in range(n):
         nums = [0, 8] + list(rng.choice([j for j in range(1, 16) if j != 8], 10, replace=False))
         balls = random_layout(rng, nums, L, W, cluster_prob=0.3)
+        for b in balls:                       # Aussehen (Drehung, Streifen) aus demselben Seed
+            b.look = int(rng.integers(1 << 30))
         warped = table.warp(to_camera(render_topdown(balls, L, W, "blau" if i % 3 else "gruen", rng),
-                                      DEFAULT_CORNERS))
+                                      DEFAULT_CORNERS, rng=rng))
         yield warped, [(b.x / L * WARP_W + rng.normal(0, jitter), b.y / W * WARP_H + rng.normal(0, jitter),
                         int(b.number)) for b in balls], r
 
