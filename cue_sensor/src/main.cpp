@@ -12,6 +12,9 @@
  *   3. Der Queue zeigt seinen CASTCODE (6 Zeichen). Diesen im Admin-Panel des Pi unter
  *      "Queue mit Gyroskop" eintragen.
  *   4. Haken setzen "Castcode ist eingetragen" -> "Verbinden": der Queue verbindet sich mit dem WLAN.
+ *   Ganz oben auf der Einrichtungsseite laeuft eine DEMO-ANZEIGE: Draufsicht auf den Tisch mit dem
+ *   Queue (dreht sich live mit), Neigung von der Seite und der gruene Haken wie auf dem Beamer.
+ *   Grossansicht: http://192.168.4.1/demo (im WLAN: http://<queue-ip>/demo).
  *   Neu einrichten: Queue beim Einschalten SENKRECHT halten (Spitze nach oben) oder auf
  *   seiner Statusseite "WLAN neu einrichten".
  *
@@ -19,6 +22,7 @@
  *   GET  /api/lage   Lage als JSON (Kopfzeile X-Castcode oder ?code=... noetig)
  *        {"castcode":"K7P2QM","seq":123,"yaw":37.52,"pitch":-4.1,"still":0,"bat":3.91,"ms":123456}
  *   GET  /api/info   Geraet + Firmware (ohne Castcode)
+ *   GET  /demo       Demo-Anzeige (auch im Hotspot), Messwerte dazu: GET /demo/lage (ohne Castcode)
  *   UDP  5005        Suche: {"suche":"K7P2QM"} -> Antwort {"castcode":"K7P2QM","ip":"...","port":80}
  *   mDNS             queue-k7p2qm.local
  *
@@ -54,6 +58,7 @@ static float beta = 0.08f;
 static float bias[3] = {0, 0, 0};
 static uint32_t stillSince = 0;
 static bool still = false;
+static uint32_t lastGoodRead = 0;          // zuletzt Werte vom Sensor bekommen (Demo: "Sensor fehlt")
 
 
 static void writeReg(uint8_t reg, uint8_t val) {
@@ -238,6 +243,64 @@ static void sendPage(const String& body) {
   server.send(200, "text/html; charset=utf-8", String(PAGE_HEAD) + body + "</body></html>");
 }
 
+// ---- Demo-Anzeige: so sieht der Pi den Queue (laeuft im Hotspot, ohne WLAN und ohne Pi)
+// Draufsicht: Tisch mit Weisser, der helle Queue dreht sich mit (Richtung), der dunkle ist das Ziel.
+// Liegt der Queue bis +-2 Grad auf dem Ziel, kommt der gruene Haken - wie auf dem Beamer.
+// Seitenansicht: Neigung. Die Seite fragt ca. 15x pro Sekunde /demo/lage ab.
+static const char DEMO_WIDGET[] = R"HTML(<style>
+.demo{background:#fff;border:2px solid #0E3F31;border-radius:14px;padding:10px 12px;margin:10px 0 18px}
+.demo h2{font-size:17px;margin:2px 0 8px}.demo svg{display:block;width:100%;height:auto}
+.dv{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;text-align:center;margin:8px 0}
+.dv small{display:block;font-size:12px;color:#666}.dv b{font:700 22px/1.2 ui-monospace,monospace}
+.demo button{margin:6px 0 4px}.demo p{margin:4px 0;font-size:13px;color:#555}
+</style><div class=demo><h2>Demo: so sieht der Pi den Queue</h2>
+<svg viewBox="-112 -62 224 124" aria-label="Draufsicht auf den Tisch mit dem Queue">
+<rect x=-110 y=-60 width=220 height=120 rx=10 fill="#5A3520"/><rect x=-100 y=-50 width=200 height=100 fill="#1C5496"/>
+<g fill="#111"><circle cx=-100 cy=-50 r=5.5 /><circle cx=0 cy=-52 r=5 /><circle cx=100 cy=-50 r=5.5 />
+<circle cx=-100 cy=50 r=5.5 /><circle cx=0 cy=52 r=5 /><circle cx=100 cy=50 r=5.5 /></g>
+<g id=dtg opacity=.75><polygon points="-9,-.9 -98,-2.4 -98,2.4 -9,.9" fill="#3a2414"/></g>
+<g id=dcu><polygon points="-9,-.9 -98,-2.4 -98,2.4 -9,.9" fill="#E9D3A8" stroke="#7a5a32" stroke-width=.4 />
+<rect x=-12 y=-1 width=3 height=2 fill="#4FA3E0"/></g>
+<circle cx=0 cy=0 r=3.6 fill="#F6F4EC" stroke="#999" stroke-width=.3 />
+<g id=dok visibility=hidden><circle cx=78 cy=-32 r=14 fill="#0C2014" stroke="#50DC78" stroke-width=2.5 />
+<path d="M71 -32 l5 5 l10 -11" fill=none stroke="#50DC78" stroke-width=3.5 stroke-linecap=round stroke-linejoin=round /></g></svg>
+<div class=dv><div><small>Richtung</small><b id=dy>-</b></div><div><small>Neigung</small><b id=dp>-</b></div>
+<div><small>Sensor</small><b id=ds>-</b></div></div>
+<svg viewBox="-62 -16 124 32" aria-label="Seitenansicht: Neigung des Queues"><rect x=-60 y=4 width=120 height=4 fill="#1C5496"/>
+<g id=dsi><polygon points="40,-.7 -55,-2 -55,2 40,.7" fill="#E9D3A8" stroke="#7a5a32" stroke-width=.4 /></g>
+<circle cx=44 cy=1.5 r=2.5 fill="#F6F4EC" stroke="#999" stroke-width=.3 /></svg>
+<button type=button id=dz>Richtung hier auf 0 setzen</button>
+<p>Queue flach halten, Spitze nach rechts (wie an der Bande), dann „auf 0 setzen“. Danach auf den dunklen Queue drehen: bis &plusmn;2&deg; kommt der grüne Haken – wie später auf dem Beamer.</p>
+</div><script>(function(){var z=null,y0=0,$=function(i){return document.getElementById(i)};
+function nm(a){a=((a+180)%360+360)%360-180;return a}
+function f(v){return(v>=0?'+':'')+v.toFixed(1).replace('.',',')+'°'}
+try{var s=localStorage.getItem('qz');if(s!==null)z=parseFloat(s)}catch(e){}
+$('dz').onclick=function(){z=y0;try{localStorage.setItem('qz',z)}catch(e){}};
+function poll(){var x=new XMLHttpRequest();x.open('GET','/demo/lage?t='+Date.now());x.timeout=1500;
+x.onload=function(){try{var d=JSON.parse(x.responseText);y0=d.yaw;var r=nm(d.yaw-(z===null?0:z));
+$('dcu').setAttribute('transform','rotate('+(-r).toFixed(2)+')');
+$('dsi').setAttribute('transform','rotate('+(-d.pitch).toFixed(2)+' 40 0)');
+$('dy').textContent=z===null?f(nm(d.yaw)):f(r);$('dp').textContent=f(d.pitch);
+$('ds').textContent=!d.sensor?'fehlt!':d.still?'ruhig':'bewegt';$('ds').style.color=d.sensor?'#080':'#b00';
+$('dtg').setAttribute('visibility',z===null?'hidden':'visible');
+$('dok').setAttribute('visibility',z!==null&&Math.abs(r)<=2?'visible':'hidden');}catch(e){}setTimeout(poll,60)};
+x.onerror=x.ontimeout=function(){$('ds').textContent='getrennt';$('ds').style.color='#b00';setTimeout(poll,500)};x.send()}
+poll()})();</script>)HTML";
+
+static void demoLage() {
+  char buf[140];
+  bool ok = millis() - lastGoodRead < 500;
+  snprintf(buf, sizeof(buf), "{\"yaw\":%.2f,\"pitch\":%.2f,\"still\":%d,\"sensor\":%d,\"bat\":%.2f}",
+           curYaw, curPitch, still ? 1 : 0, ok ? 1 : 0, curBat);
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json", buf);
+}
+
+static void demoPage() {
+  sendPage(String("<h1>Billard-Queue: Demo</h1>") + DEMO_WIDGET +
+           (portal ? "<p><a href='/'>Zur Einrichtung (WLAN)</a></p>" : "<p><a href='/'>Zur Statusseite</a></p>"));
+}
+
 static void scanWifi() {
   int n = WiFi.scanNetworks();
   scanOptions = "";
@@ -251,7 +314,9 @@ static void scanWifi() {
 
 // ---- Captive Portal: Schritt 1 (WLAN), Schritt 2 (Castcode + Haken)
 static void portalRoot() {
-  String h = "<h1>Billard-Queue einrichten</h1>";
+  String h = "<h1>Billard-Queue</h1>";
+  h += DEMO_WIDGET;
+  h += "<h2>Einrichten</h2>";
   if (ssid.length()) h += "<p class=bad>WLAN \"" + esc(ssid) + "\" war nicht erreichbar. Bitte pruefen:</p>";
   h += "<form method=post action='/wlan'><label>WLAN</label><select name=ssid>" + scanOptions +
        "</select><label>oder Name von Hand</label><input name=ssid2 placeholder='(nur wenn nicht in der Liste)'>"
@@ -314,6 +379,8 @@ static void startPortal() {
   server.on("/scan", HTTP_GET, []() { scanWifi(); server.sendHeader("Location", "/"); server.send(302); });
   server.on("/wlan", HTTP_POST, portalWlan);
   server.on("/verbinden", HTTP_POST, portalConnect);
+  server.on("/demo", HTTP_GET, demoPage);
+  server.on("/demo/lage", HTTP_GET, demoLage);
   // Erkennung der Handys/Laptops ("Anmeldung im Netzwerk erforderlich") -> Einrichtungsseite
   for (const char* u : {"/generate_204", "/gen_204", "/hotspot-detect.html", "/library/test/success.html",
                         "/connecttest.txt", "/ncsi.txt", "/fwlink", "/redirect", "/canonical.html"})
@@ -345,7 +412,8 @@ static void staRoot() {
   String h = "<h1>Billard-Queue</h1><p class=ok>Verbunden mit <b>" + esc(ssid) + "</b>, IP <b>" +
              WiFi.localIP().toString() + "</b>, Signal " + String(WiFi.RSSI()) + " dBm</p>"
              "<p>Castcode</p><div class=code>" + castcode + "</div>"
-             "<p>Richtung " + String(curYaw, 1) + "&deg;, Neigung " + String(curPitch, 1) + "&deg;</p>"
+             "<p>Richtung " + String(curYaw, 1) + "&deg;, Neigung " + String(curPitch, 1) + "&deg; &middot; "
+             "<a href='/demo'>Demo-Anzeige (live)</a></p>"
              "<form method=post action='/einrichten' onsubmit=\"return confirm('WLAN neu einrichten? Der Queue oeffnet danach wieder den Hotspot.')\">"
              "<button>WLAN neu einrichten</button></form><p><small>Firmware " FW_VERSION "</small></p>";
   sendPage(h);
@@ -355,6 +423,8 @@ static void startStation() {
   portal = false;
   server.on("/", HTTP_GET, staRoot);
   server.on("/api/lage", HTTP_GET, apiLage);
+  server.on("/demo", HTTP_GET, demoPage);
+  server.on("/demo/lage", HTTP_GET, demoLage);
   server.on("/api/info", HTTP_GET, []() {
     server.send(200, "application/json", "{\"geraet\":\"billard-queue\",\"fw\":\"" FW_VERSION "\"}");
   });
@@ -455,6 +525,7 @@ void loop() {
 
   int16_t a[3], g[3];
   if (!readRaw(a, g)) return;
+  lastGoodRead = ms;
   float gd[3];
   for (int i = 0; i < 3; i++) gd[i] = g[i] / GYRO_LSB - bias[i];
 

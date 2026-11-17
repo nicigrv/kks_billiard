@@ -63,6 +63,22 @@ die Einrichtung läuft übers Handy.
 Der Castcode bleibt für immer gleich (auch nach Neustart oder WLAN-Wechsel). Bekommt der Queue eine
 neue IP, findet der Pi ihn über den Castcode von selbst wieder.
 
+## Demo-Anzeige (im Hotspot, ohne Pi)
+Ganz oben auf der Einrichtungsseite läuft eine **Live-Demo**, damit man den Queue sofort ausprobieren
+kann – auch ganz ohne WLAN und ohne Pi:
+
+- **Draufsicht:** Tisch mit Weißer, der **helle Queue dreht sich mit** (Richtung).
+- **„Richtung hier auf 0 setzen“:** Queue flach halten, Spitze nach rechts, drücken. Danach erscheint
+  der **dunkle Ziel-Queue**. Liegt der Queue bis ±2° darauf, kommt der **grüne Haken** – wie später
+  auf dem Beamer.
+- **Seitenansicht:** Neigung (Spitze nach unten = negativ).
+- **Sensor:** „ruhig“ / „bewegt“, „fehlt!“ wenn keine Werte vom Gyro-Sensor kommen (Verkabelung prüfen).
+
+Großansicht: `http://192.168.4.1/demo`. Im WLAN gibt es dieselbe Anzeige unter `http://<queue-ip>/demo`
+(Link auf der Statusseite). Der Nullpunkt gilt nur für die Demo auf diesem Handy, der Pi kalibriert
+selbst („Queue kalibrieren“). Ist die Drehrichtung falsch herum (Queue dreht in der Anzeige entgegengesetzt),
+die Platine andersherum einbauen oder `AXIS_SIGN_X` in `include/config.h` umdrehen.
+
 **Neu einrichten** (anderes WLAN): Queue beim Einschalten **senkrecht halten** (Spitze nach oben) –
 dann öffnet er den Hotspot. Oder im WLAN seine Seite `http://<queue-ip>` → „WLAN neu einrichten“.
 Ist das gespeicherte WLAN nicht erreichbar, öffnet er den Hotspot ebenfalls (und versucht es alle
