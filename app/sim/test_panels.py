@@ -144,6 +144,36 @@ def run_panels(d):
     check(req("/api/game", cookie=admin)[0] == 200, "Admin darf auch ins Spiel-Panel")
     code, body, _ = req("/api/camera", {"source": "demo"}, cookie=admin)
     check(code == 200, "Admin: Demo-Kamera")
+
+    # Stufe 2 + 3 (gestreift? Farbe?): Datei hochladen, Status, loeschen
+    st = json.loads(req("/api/state", cookie=admin)[1])
+    f0 = st["detector"]["features"]
+    check(f0["ready"] and not f0["own"], f"Farben: Startwerte aktiv ({f0['model']})")
+    start = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models",
+                              "start_merkmale.json"), "rb").read()
+
+    def upload(data):
+        r = urllib.request.Request(BASE + "/api/model", data=data, method="POST",
+                                   headers={"Content-Type": "application/octet-stream", "Cookie": admin})
+        try:
+            with urllib.request.urlopen(r, timeout=10) as resp:
+                return resp.status, json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read())
+
+    code, res = upload(start)
+    check(code == 200 and "Farben" in res["message"] and os.path.isfile(os.path.join(d, "models", "billard_merkmale.json")),
+          f"billard_merkmale.json hochgeladen ({res.get('message')})")
+    code, res = upload(b'{"format": "etwas anderes"}')
+    check(code == 400 and "billard_merkmale" in res["error"], "falsche JSON-Datei abgelehnt")
+    time.sleep(2.2)
+    st = json.loads(req("/api/state", cookie=admin)[1])
+    check(st["detector"]["features"]["own"], "hochgeladene Farben werden benutzt")
+    code, body, _ = req("/api/learn_features", {}, cookie=admin)
+    check(code == 400 and "festgelegten" in json.loads(body)["error"], "Farben lernen ohne festgelegte Bilder: Hinweis")
+    code, body, _ = req("/api/reset_features", {}, cookie=admin)
+    check(code == 200 and not os.path.exists(os.path.join(d, "models", "billard_merkmale.json")),
+          "gelernte Farben loeschen -> Startwerte")
     code, body, _ = req("/api/qr_settings", {"text": "https://example.org/billard", "label": "Webseite"}, cookie=admin)
     check(code == 200 and json.loads(body)["state"]["qr"]["url"] == "https://example.org/billard", "Admin: eigener QR-Inhalt")
     check(req("/api/qr_settings", {"text": "x" * 400}, cookie=admin)[0] == 400, "zu langer QR-Inhalt abgelehnt")

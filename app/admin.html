@@ -375,14 +375,18 @@ details > div { margin-top: 12px; }
     <summary>KI-Modell (Coral)</summary>
     <div>
       <p class="statusline" id="modelStatus">-</p>
-      <p class="hint">Die Kugeln (mit Nummer) erkennt ausschließlich der KI-Chip. Solange noch kein eigenes Modell trainiert ist, zählt der Pi nichts selbst – er nimmt nur Bilder auf, und ihr legt die Kugeln fest. Alle Bilder bleiben auf dem Pi gespeichert, auch verworfene.</p>
-      <p class="hint">So kommt ein eigenes Modell auf den Coral: 1. Trainingsdaten laden. 2. Am PC oder in Google Colab trainieren (Anleitung: training/README.md). 3. Die Datei <b>billard_edgetpu.tflite</b> hier hochladen. Der Coral übernimmt sie sofort.</p>
+      <p class="hint">Die Erkennung läuft in drei Stufen: <b>1. Kugeln finden</b> (KI-Chip), <b>2. gestreift oder nicht</b> und <b>3. Farbe</b> (beides auf dem Pi, mit gelernten Werten). Aus Art und Farbe ergibt sich die Nummer. Ohne KI-Chip und Modell zählt der Pi nichts – er nimmt nur Bilder auf, und ihr legt die Kugeln fest. Alle Bilder bleiben auf dem Pi gespeichert, auch verworfene.</p>
+      <p class="hint">Stufe 1 auf den Coral: 1. Trainingsdaten laden. 2. Am PC oder in Google Colab trainieren (Anleitung: training/README.md). 3. <b>billard_edgetpu.tflite</b> und <b>billard_merkmale.json</b> hier hochladen (beide Dateien auf einmal auswählen). Ältere Modelle mit 16 Kugelnummern gehen weiter – davon wird nur „hier ist eine Kugel“ benutzt.</p>
+      <p class="hint">Stufe 2 + 3 lernen geht auch direkt hier, in einigen Sekunden: „Farben lernen“ nimmt alle festgelegten Bilder auf dem Pi (z. B. aus der Einzelkugel-Serie). Nach Änderungen am Licht neu lernen.</p>
       <div class="grid two">
         <a class="btnlink" id="datasetLink" href="/api/dataset.zip" download>Trainingsdaten laden</a>
-        <button type="button" id="modelUploadBtn">Modell hochladen</button>
+        <button type="button" id="modelUploadBtn">Modell / Farben hochladen</button>
+        <button type="button" id="learnFeaturesBtn">Farben aus festgelegten Bildern lernen</button>
+        <button type="button" id="resetFeaturesBtn" style="background:transparent;border:2px solid var(--rail-light)">Gelernte Farben löschen</button>
         <a class="btnlink span2" id="allImagesLink" href="/api/all-images.zip" download style="background:transparent;border:2px solid var(--rail-light)">Alle Bilder laden (auch offene und verworfene)</a>
       </div>
-      <input type="file" id="modelFile" accept=".tflite" hidden>
+      <p class="hint" id="learnResult" hidden style="white-space:pre-line"></p>
+      <input type="file" id="modelFile" accept=".tflite,.json" multiple hidden>
     </div>
   </details>
 
@@ -999,28 +1003,49 @@ details > div { margin-top: 12px; }
       ms.appendChild(document.createTextNode(label)); ms.appendChild(b);
     };
     if (c.ready) {
-      line("KI-Chip: ", "bereit", "good");
-      line("Modell: ", (c.model || "geladen") + (c.model_time ? " vom " + c.model_time : "") + (c.ms ? ", " + c.ms.toFixed(0) + " ms pro Bild" : ""));
+      line("1. Kugeln finden (KI-Chip): ", "bereit", "good");
+      line("Modell: ", (c.model || "geladen") + (c.model_time ? " vom " + c.model_time : "") + (c.ms ? ", " + c.ms.toFixed(0) + " ms pro Bild" : "") +
+        (c.classes === 16 ? " (älteres Modell mit Nummern – nur „Kugel ja/nein“ wird benutzt)" : ""));
     } else {
-      line("KI-Chip: ", c.error || "nicht bereit", "bad");
+      line("1. Kugeln finden (KI-Chip): ", c.error || "nicht bereit", "bad");
     }
+    const f = d.features || {};
+    if (f.ready) {
+      line("2. + 3. gestreift / Farbe: ", f.model + (f.model_time && f.own ? " vom " + f.model_time : "") + (f.balls && f.own ? " (" + f.balls + " Kugeln)" : ""), f.own ? "good" : "");
+      if (!f.own) line("", "Tipp: Farben lernen, sobald es festgelegte Bilder gibt – die Startwerte stammen aus dem Simulator.");
+      if (f.inherited && f.inherited.length) line("Zu wenig Beispiele für: ", f.inherited.join(", "));
+    } else {
+      line("2. + 3. gestreift / Farbe: ", f.error || "nicht bereit", "bad");
+    }
+    $("learnFeaturesBtn").disabled = !!f.learning || !t.verified;
+    $("learnFeaturesBtn").textContent = f.learning ? "Lerne Farben ..." : "Farben aus festgelegten Bildern lernen";
+    $("learnResult").hidden = !f.result;
+    $("learnResult").textContent = f.result || "";
 
   }
   $("autoSw").addEventListener("click", () => post("auto_capture", { enabled: !(state && state.training && state.training.auto_capture) }));
   $("modelUploadBtn").addEventListener("click", () => $("modelFile").click());
   $("modelFile").addEventListener("change", async () => {
-    const f = $("modelFile").files[0];
+    const files = Array.from($("modelFile").files);
     $("modelFile").value = "";
-    if (!f) return;
-    toast("Modell wird hochgeladen ...");
-    try {
-      const r = await fetch("/api/model", { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: f });
-      const data = await r.json().catch(() => ({}));
-      if (r.status === 401 || r.status === 403) { showLogin(); return; }
-      if (!r.ok) { toast(data.error || "Hochladen fehlgeschlagen", true); return; }
-      if (data.state) render(data.state);
-      toast(data.message);
-    } catch (e) { toast("Tisch nicht erreichbar", true); }
+    if (!files.length) return;
+    const msgs = [];
+    for (const f of files) {
+      toast(f.name + " wird hochgeladen ...");
+      try {
+        const r = await fetch("/api/model", { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: f });
+        const data = await r.json().catch(() => ({}));
+        if (r.status === 401 || r.status === 403) { showLogin(); return; }
+        if (!r.ok) { toast(f.name + ": " + (data.error || "Hochladen fehlgeschlagen"), true); return; }
+        if (data.state) render(data.state);
+        msgs.push(data.message);
+      } catch (e) { toast("Tisch nicht erreichbar", true); return; }
+    }
+    toast(msgs.join(" "));
+  });
+  $("learnFeaturesBtn").addEventListener("click", () => post("learn_features", {}));
+  $("resetFeaturesBtn").addEventListener("click", () => {
+    if (confirm("Gelernte Farben löschen? Danach gelten wieder die Startwerte aus dem Simulator.")) post("reset_features", {});
   });
 
   fixCanvas.addEventListener("click", (e) => {

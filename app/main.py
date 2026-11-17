@@ -15,6 +15,7 @@ Threads:
 """
 
 import argparse
+import json
 import os
 import secrets
 import socket
@@ -27,7 +28,8 @@ import cv2
 import config
 import web
 from ballnum import ball_number
-from coral_detector import CoralDetector, CoralEngine
+import kugel_merkmale
+from coral_detector import DATA_FEATURES, START_FEATURES, CoralDetector, CoralEngine, default_features
 from cue_sensor import AlignChecker, CueSensor, clean_castcode
 from geometry import Table, TABLE_SIZES
 from notices import Notices
@@ -67,7 +69,10 @@ class App:
         self.reader = make_reader(self.cfg["camera"], config.DATA_DIR).start()
         self.recorder = Recorder(os.path.join(config.DATA_DIR, "dataset"))
         self.uploader = self._start_uploader()
-        self.coral = coral_engine or CoralEngine()          # Kugelerkennung nur ueber den KI-Chip
+        self.coral = coral_engine or CoralEngine()          # Stufe 1: Kugeln finden (KI-Chip)
+        self._learn_lock = threading.Lock()                 # Stufe 2 + 3 lernen (Farben, Streifen)
+        self._learning = False
+        self.learn_result = None
         table = self._table_for(self.reader)
         self.pipe = Pipeline(table, lambda r: CoralDetector(r, self.coral), recorder=self.recorder)
         self.pipe.auto_capture = bool(self.cfg.get("auto_capture"))
@@ -471,7 +476,10 @@ class App:
         return f"Bild {res}. Noch {self.recorder.pending} zu prüfen, {self.recorder.verified} geprüft."
 
     def save_model(self, data: bytes):
-        """Hochgeladenes Coral-Modell speichern. Der Detektor laedt es von selbst (Aenderungszeit)."""
+        """Hochgeladene Datei speichern: Coral-Modell (.tflite, Stufe 1) oder Farb-/Streifen-Werte
+        (billard_merkmale.json, Stufe 2 + 3). Der Detektor laedt beides von selbst (Aenderungszeit)."""
+        if data[:1] == b"{":
+            return self.save_features(data)
         if len(data) < 1000 or data[4:8] != b"TFL3":
             raise config.UserError("Das ist keine TFLite-Modelldatei (.tflite)")
         if b"edgetpu-custom-op" not in data:
@@ -485,6 +493,53 @@ class App:
             f.write(data)
         os.replace(tmp, path)
         return f"Modell gespeichert ({len(data) / 1e6:.1f} MB). Der Coral lädt es in wenigen Sekunden."
+
+    def save_features(self, data: bytes):
+        try:
+            clf = kugel_merkmale.BallClassifier.from_dict(json.loads(data))
+        except (ValueError, KeyError, TypeError) as e:
+            raise config.UserError(f"Keine gültige Datei billard_merkmale.json ({e})")
+        os.makedirs(os.path.dirname(DATA_FEATURES), exist_ok=True)
+        clf.save(DATA_FEATURES)
+        n = clf.info.get("kugeln")
+        return "Farben und Streifen gespeichert" + (f" (gelernt aus {n} Kugeln)" if n else "") + "."
+
+    def learn_features(self):
+        """Stufe 2 + 3 aus den festgelegten Bildern auf dem Pi lernen (im Hintergrund, dauert etwas)."""
+        with self._learn_lock:
+            if self._learning:
+                raise config.UserError("Lernen läuft schon")
+            if not self.recorder.verified:
+                raise config.UserError("Noch keine festgelegten Bilder")
+            self._learning = True
+
+        def run():
+            try:
+                start = kugel_merkmale.BallClassifier.load(START_FEATURES)
+                clf, res = kugel_merkmale.learn(self.recorder.verified_samples(), fallback=start,
+                                                source=f"Pi: {self.recorder.verified} festgelegte Bilder")
+                clf.save(DATA_FEATURES)
+                text = kugel_merkmale.report(res) if res else f"{clf.info['kugeln']} Kugeln gelernt"
+                if clf.info.get("geerbt"):
+                    text += "\nZu wenig Beispiele (Startwerte behalten): " + ", ".join(clf.info["geerbt"])
+                self.learn_result = text
+                print(f"[merkmale] {text}", flush=True)
+                self.notes.push("Farben gelernt", text.split("\n")[0], "success", ttl=10.0, key="merkmale")
+            except Exception as e:                  # darf das Programm nie stoppen
+                self.learn_result = f"Fehler: {e}"
+                self.notes.push("Farben lernen fehlgeschlagen", str(e), "error", ttl=10.0, key="merkmale")
+            finally:
+                self._learning = False
+
+        threading.Thread(target=run, name="merkmale", daemon=True).start()
+        return "Lerne Farben und Streifen aus den festgelegten Bildern ... (Meldung kommt, wenn fertig)"
+
+    def reset_features(self):
+        try:
+            os.remove(DATA_FEATURES)
+        except FileNotFoundError:
+            pass
+        return "Gelernte Farben gelöscht - es gelten wieder die Startwerte"
 
     # ------------------------------------------------------------- Portal-API
     def _cue_found(self, address):
@@ -577,7 +632,9 @@ class App:
                          "verified": self.recorder.verified, "discarded": self.recorder.discarded,
                          "disk_ok": self.recorder.disk_ok(), "quality": self.recorder.model_quality(),
                          "upload": self.uploader.status() if self.uploader else None},
-            "detector": {"coral": self.coral.status(), "not_ready": self.pipe.not_ready},
+            "detector": {"coral": self.coral.status(), "not_ready": self.pipe.not_ready,
+                         "features": dict(default_features().status(START_FEATURES),
+                                          learning=self._learning, result=self.learn_result)},
             "assist": bool(self.cfg.get("assist")),
             "suggestion": (self.suggestion or {}).get("text"),
             "scene_version": self.scene_version,
@@ -684,6 +741,10 @@ class App:
             return f"Ding gespielt über {self.sound.device}"
         if name == "train_correction":
             return self._train_correction(p)
+        if name == "learn_features":
+            return self.learn_features()
+        if name == "reset_features":
+            return self.reset_features()
         if name.startswith("single_"):
             try:
                 if name == "single_mode":

@@ -1,4 +1,13 @@
-# Kugelmodell für den Coral trainieren
+# Kugelerkennung trainieren
+
+Die Erkennung hat drei Stufen:
+
+1. **Kugeln finden** – YOLOv8n mit *einer* Klasse („Kugel“) auf dem Coral → `billard_edgetpu.tflite`
+2. **gestreift?** – Weiße / schwarze 8 / voll / halb (Weiß-, Schwarz- und Farbanteil)  } auf dem Pi,
+3. **Farbe** – gelb, blau, rot, violett, orange, grün, weinrot (mittlere Farbe)           } `billard_merkmale.json`
+
+`train_coral.py` macht beides. Stufe 2 + 3 allein dauern nur Sekunden (`--nur-farben`, ohne
+Grafikkarte) – oder direkt im Admin-Panel: „Farben aus festgelegten Bildern lernen“.
 
 Ablauf in Kürze:
 
@@ -10,9 +19,9 @@ Ablauf in Kürze:
    Training; jede Kugel braucht ihre Nummer.
 3. **Trainieren** – Admin-Panel → „KI-Modell (Coral)“ → „Trainingsdaten laden“ (ZIP), dann eine der
    Varianten unten.
-4. **Hochladen** – die Datei `billard_edgetpu.tflite` im Admin-Panel unter „Modell hochladen“.
-   Der KI-Chip nimmt sie sofort, das Admin-Panel zeigt „KI-Chip: bereit“ und mit jedem geprüften Bild,
-   wie oft er richtig lag.
+4. **Hochladen** – `billard_edgetpu.tflite` und `billard_merkmale.json` im Admin-Panel unter
+   „Modell / Farben hochladen“ (beide auf einmal). Der Pi nimmt sie sofort, das Admin-Panel zeigt den
+   Stand aller drei Stufen und mit jedem geprüften Bild, wie oft die Erkennung richtig lag.
 
 **Wie viele Bilder?** Brauchbar ab etwa 200–300 geprüften Bildern, besser 500+, bei
 verschiedenem Licht (Tag/Abend, Lampen an/aus). Nachtrainieren mit mehr Bildern lohnt sich:
@@ -23,7 +32,9 @@ einfach alle ZIPs angeben.
 Der letzte Schritt (Edge-TPU-Compiler) läuft nur unter Linux – Colab ist Linux.
 
 1. https://colab.research.google.com → Neues Notebook → Laufzeit → Laufzeittyp ändern → **GPU**.
-2. Links auf das Ordner-Symbol, `train_coral.py` und die ZIP-Datei hochladen.
+2. Links auf das Ordner-Symbol, `train_coral.py`, **`kugel_merkmale.py`** (aus `app/`) und die
+   ZIP-Datei hochladen. Optional `start_merkmale.json` (aus `app/models/`) in einen Ordner `models/`
+   – dann behalten Kugeln mit zu wenig Beispielen die Startwerte statt eines Fehlers.
 3. In eine Zelle schreiben und ausführen (Dateiname anpassen):
 
 ```
@@ -31,9 +42,12 @@ Der letzte Schritt (Edge-TPU-Compiler) läuft nur unter Linux – Colab ist Linu
 !python train_coral.py billard-training-20261110.zip --epochs 120 --device 0
 ```
 
-4. Dauer: ca. 10–30 Minuten. Danach links `ausgabe/billard_edgetpu.tflite` herunterladen.
+4. Dauer: ca. 10–30 Minuten. Danach links `ausgabe/billard_edgetpu.tflite` und
+   `ausgabe/billard_merkmale.json` herunterladen.
 
-Am Ende steht die Genauigkeit auf den Prüfbildern (`mAP50`). Unter 0.9: mehr Bilder sammeln.
+Am Ende steht für Stufe 1 die Genauigkeit auf den Prüfbildern (`mAP50`, unter 0.95: mehr Bilder) und
+für Stufe 2 + 3, wie viele Kugeln Art, Farbe und Nummer richtig hatten – mit den häufigsten
+Verwechslungen (z. B. `11→3`: halbe rote als volle rote gelesen).
 
 ## Variante B: eigener PC
 
@@ -48,13 +62,30 @@ python train_coral.py billard-training-20261110.zip --no-export
   `!python train_coral.py --export-only best.pt billard-training-20261110.zip`
   (die ZIP wird für die int8-Kalibrierung gebraucht).
 
+## Variante C: nur Farben (Stufe 2 + 3), Sekunden
+
+Im Repo-Ordner `training/` (braucht nur `numpy` und `opencv-python`, keine Grafikkarte):
+
+```
+python train_coral.py --nur-farben billard-training-20261110.zip
+```
+
+→ `ausgabe/billard_merkmale.json` hochladen. Lohnt sich nach jedem neuen Schwung festgelegter Bilder
+oder wenn das Licht anders ist. Noch einfacher: Admin-Panel → „Farben aus festgelegten Bildern lernen“.
+
 ## Was im Modell steckt
 
-- YOLOv8n (klein), Eingabe 640×640, **16 Klassen = Kugelnummern** (0 = Weiße, 1–15). Datei ca. 4 MB.
+- Stufe 1: YOLOv8n (klein), Eingabe 640×640, **1 Klasse = Kugel**. Datei ca. 4 MB. Im Training wird
+  Farbton/Helligkeit stark verändert – die Farbe ist für Stufe 1 egal, so findet es jede Kugel.
+- Stufe 2 + 3: pro Art bzw. Farbe eine Normalverteilung über wenige Merkmale (`app/kugel_merkmale.py`),
+  ein paar KB als JSON. Fehlen Beispiele für eine Kugel, bleiben dafür die Startwerte aus dem Simulator.
+- In der ZIP steht weiter die Kugelnummer als Klasse (0 = Weiße, 1–15); `train_coral.py` macht für
+  Stufe 1 daraus „Kugel“ und lernt Stufe 2 + 3 aus den Nummern.
 - Auf dem Coral laufen rund 230 von 257 Rechenschritten (alle aufwendigen); nur die letzte
   Auswertung des Netzes läuft auf dem Pi – das ist bei YOLO auf dem Coral normal.
-- Die Kugeln erkennt **nur** dieses Modell. Ohne Stick oder Modell wird nichts gezählt.
-- Ältere Modelle mit 4 Klassen (voll/halb) passen nicht mehr und werden abgelehnt.
+- Ohne Stick oder Modell wird nichts gezählt.
+- Ältere Modelle mit 16 Klassen (Kugelnummern) funktionieren als Stufe 1 weiter; die Nummer kommt
+  trotzdem aus Stufe 2 + 3. Modelle mit 4 Klassen (voll/halb) werden abgelehnt.
 - Ältere festgelegte Bilder werden beim Export übernommen, wenn bei allen Kugeln die Nummer
   bekannt ist; sonst bleiben sie liegen und werden ausgelassen.
 

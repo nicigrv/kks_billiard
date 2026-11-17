@@ -8,9 +8,11 @@ Queue-Gyroskop (optional) ◀─WLAN─▶│  ├── Prüfer        http://<
   Castcode, UDP 5005 + HTTP-API   │  └── Beamerbild    http://<pi-ip>:8089/beamer
 ```
 
-**Kugelerkennung:** ausschließlich über den **KI-Chip (Coral USB Accelerator)** – er erkennt jede
-Kugel samt Nummer. Bis ein eigenes Modell trainiert ist, zählt der Pi nichts selbst: Ihr nehmt per
-Knopf Bilder auf und legt die Kugeln auf dem iPad fest (Abschnitt 5).
+**Kugelerkennung in drei Stufen:** 1. der **KI-Chip (Coral USB Accelerator)** findet die Kugeln,
+2. der Pi schaut, ob eine Kugel **gestreift** ist (Weiße / 8 / voll / halb), 3. welche **Farbe** sie hat.
+Daraus ergibt sich die Nummer. Stufe 2 + 3 lernen aus euren festgelegten Bildern (Sekunden, direkt
+im Admin-Panel). Ohne KI-Chip und Modell zählt der Pi nichts: Ihr nehmt per Knopf Bilder auf und
+legt die Kugeln auf dem iPad fest (Abschnitt 5).
 
 **Beamer:** links das Live-Kamerabild mit Kreisen um die Kugeln, rechts eine gezeichnete
 Grafik des Tisches (neu nach jedem Stoß, mit Stoßvorschlag), unten die **Game-Bar**:
@@ -293,9 +295,19 @@ eintragen, im Spiel-Panel die Schlagverbesserung einschalten.
 
 ## 5. KI-Chip: Kugeln festlegen, trainieren, Modell aufspielen
 
-Die Kugeln erkennt **nur der KI-Chip** (Coral USB Accelerator). Er läuft direkt im Hauptprogramm,
-es gibt keinen eigenen Container mehr. Das Modell erkennt jede Kugel mit ihrer **Nummer**
-(Weiße, 1–15). Ohne Stick oder ohne Modell wird nichts gezählt – Bilder werden trotzdem aufgenommen.
+Die Erkennung läuft in **drei Stufen** (`app/coral_detector.py`, `app/kugel_merkmale.py`):
+
+| Stufe | Was | Wo | gelernt mit |
+|---|---|---|---|
+| 1. Kugeln finden | „hier liegt eine Kugel“ | KI-Chip (YOLOv8n, 1 Klasse) | `train_coral.py` (Colab) → `billard_edgetpu.tflite` |
+| 2. gestreift? | Weiße / schwarze 8 / voll / halb | Pi (Weiß-, Schwarz-, Farbanteil der Kugel) | „Farben lernen“ im Admin-Panel oder `train_coral.py` → `billard_merkmale.json` |
+| 3. Farbe | gelb, blau, rot, violett, orange, grün, weinrot | Pi (mittlere Farbe der Kugel) | wie Stufe 2 |
+
+Aus Art und Farbe ergibt sich die Nummer (z. B. halb + rot = 11); jede Nummer gibt es nur einmal.
+Stufe 1 muss nur Kugeln finden – das lernt das Modell mit viel weniger Bildern als 16 Nummern.
+Stufe 2 + 3 sehen die Kugel in voller Auflösung und lernen in Sekunden, auch nach jedem Lichtwechsel.
+Ältere Modelle mit 16 Kugelnummern gehen weiter (davon wird nur „Kugel ja/nein“ benutzt).
+Ohne Stick oder ohne Modell wird nichts gezählt – Bilder werden trotzdem aufgenommen.
 
 **So lernt das System euren Tisch:**
 
@@ -315,7 +327,11 @@ es gibt keinen eigenen Container mehr. Das Modell erkennt jede Kugel mit ihrer *
    dann nur noch prüfen und „Passt alles“.
 3. **Trainieren:** „Trainingsdaten laden“ (ZIP) → `training/train_coral.py`, am einfachsten in
    Google Colab. Anleitung: `training/README.md`.
-4. **Hochladen:** `billard_edgetpu.tflite` unter „Modell hochladen“. Der KI-Chip nimmt es sofort.
+   Nur Stufe 2 + 3 (Farben): Admin-Panel → „Farben aus festgelegten Bildern lernen“ (nimmt die
+   festgelegten Bilder auf dem Pi, z. B. aus der Einzelkugel-Serie) oder am PC
+   `python train_coral.py --nur-farben <zip>` (Sekunden, ohne Grafikkarte).
+4. **Hochladen:** `billard_edgetpu.tflite` und `billard_merkmale.json` unter „Modell / Farben hochladen“
+   (beide auf einmal auswählen). Der Pi nimmt sie sofort.
 5. **Wiederholen, bis es passt:** Im Admin-Panel steht, wie oft der KI-Chip bei euren geprüften Bildern
    richtig lag („… % der Kugeln richtig“). Mit jedem Training mit mehr Bildern wird es besser.
 
@@ -389,7 +405,8 @@ Tests selbst laufen lassen (im Ordner `app/`):
 ```bash
 python3 -m sim.test_game          # Regeln + simuliertes Spiel (Kugeln aus dem Simulator)
 python3 -m sim.test_features      # Stoßvorschlag, Gyroskop, Game-Bar, Aufzeichnung
-python3 -m sim.test_coral         # KI-Chip, Bilder aufnehmen/festlegen, Trefferquote
+python3 -m sim.test_coral         # KI-Chip (Stufe 1-3), Bilder aufnehmen/festlegen, Trefferquote
+python3 -m sim.test_merkmale      # Stufe 2 + 3: gestreift? Farbe? lernen und prüfen
 python3 -m sim.test_review        # Prüfrunden (Mehrheit), Anmeldung, Ding-Ton
 python3 -m sim.test_cue_link      # Queue: Castcode, Suche im WLAN, Abfrage der Lage, an/aus
 python3 -m sim.test_panels        # Spiel-/Admin-Panel (PINs), QR-Code und Meldungen auf dem Beamer

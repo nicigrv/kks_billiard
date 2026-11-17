@@ -1,3 +1,5 @@
-Hier kann ein Startmodell fuer den KI-Chip liegen (start_edgetpu.tflite, 16 Klassen = Kugelnummern).
-Im Normalfall bleibt der Ordner leer: das eigene Modell wird im Admin-Portal hochgeladen und liegt
-dann in data/models/billard_edgetpu.tflite.
+start_merkmale.json   Startwerte fuer Stufe 2 + 3 (gestreift? Farbe?), aus Simulator-Bildern
+                      (python3 -m sim.make_start_merkmale). Gelten, bis echte Farben gelernt sind
+                      (Admin-Panel "Farben aus festgelegten Bildern lernen" -> data/models/billard_merkmale.json).
+start_edgetpu.tflite  optional: Startmodell fuer Stufe 1 (Kugeln finden). Im Normalfall fehlt es:
+                      das eigene Modell wird im Admin-Panel hochgeladen (data/models/billard_edgetpu.tflite).
