@@ -138,39 +138,120 @@ class V4L2Reader(_Reader):
 
 # ------------------------------------------------------------------ Pi-Kamera
 class PiCamReader(_Reader):
-    """Raspberry-Pi-Kameramodul (CSI) ueber picamera2/libcamera."""
+    """Raspberry-Pi-Kameramodul (CSI) ueber picamera2/libcamera - in einem EIGENEN Prozess.
+
+    Laeuft picamera2 im selben Prozess wie die HDMI-Ausgabe (pygame/kmsdrm), bleibt die
+    Kamera nach einigen Sekunden stehen (Standbild), und cam.stop() haengt dann ebenfalls.
+    Im eigenen Prozess passiert das nicht; falls doch einmal keine Bilder mehr kommen,
+    wird nur der Kamera-Prozess beendet und neu gestartet.
+    Die Bilder kommen ueber eine Datei in /dev/shm (Arbeitsspeicher):
+    8 Byte Zaehler (ungerade = wird gerade geschrieben), danach das Bild (BGR)."""
+
+    TIMEOUT_S = 5.0          # so lange ohne neues Bild -> Kamera-Prozess neu starten
 
     def __init__(self, size=(1280, 720)):
         super().__init__("pi-kamera")
-        self.size = size
+        self.size = (int(size[0]), int(size[1]))
         self.calib_key = "picam"
+        self._proc = None
 
     def _run(self):
-        try:
-            from picamera2 import Picamera2
-        except ImportError:
-            self._fail("picamera2 ist im Container nicht installiert (siehe README: Pi-Kameramodul)", 3600)
-            return
+        import mmap
+        import subprocess
+        import sys
+        w, h = self.size
+        nbytes = 8 + w * h * 3
+        path = f"/dev/shm/billard-picam-{os.getpid()}.raw"
         while not self._stop.is_set():
-            cam = None
+            with open(path, "wb") as f:
+                f.truncate(nbytes)
+            fd = os.open(path, os.O_RDWR)
+            mm = mmap.mmap(fd, nbytes)
+            os.close(fd)
+            seq = np.ndarray((1,), np.uint64, mm, 0)
+            img = np.ndarray((h, w, 3), np.uint8, mm, 8)
+            proc = subprocess.Popen(
+                [sys.executable, "-c", "import cameras, sys; cameras.picam_worker(*sys.argv[1:])",
+                 path, str(w), str(h)],
+                cwd=os.path.dirname(os.path.abspath(__file__)))
+            self._proc = proc
+            last, last_t, started, msg = 0, time.monotonic(), False, ""
+            while not self._stop.is_set():
+                s1 = int(seq[0])
+                if s1 != last and s1 % 2 == 0:
+                    frame = img.copy()
+                    if int(seq[0]) == s1:                 # waehrend des Kopierens nicht ueberschrieben
+                        last, last_t = s1, time.monotonic()
+                        if not started:
+                            started = True
+                            self.info = f"{w}x{h}"
+                            print(f"[kamera] Pi-Kameramodul gestartet ({self.info}, eigener Prozess)", flush=True)
+                        self._push(frame)
+                        continue
+                if proc.poll() is not None:
+                    msg = f"Pi-Kameramodul: Kamera-Prozess beendet (Code {proc.returncode})"
+                    break
+                if time.monotonic() - last_t > (self.TIMEOUT_S if started else 20.0):
+                    msg = f"Pi-Kameramodul liefert seit {self.TIMEOUT_S:.0f} s keine Bilder - starte neu"
+                    break
+                time.sleep(0.004)
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(2.0)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(2.0)
+            self._proc = None
+            del seq, img
+            mm.close()
             try:
-                cam = Picamera2()
-                # "RGB888" liefert die Bytes in der Reihenfolge B, G, R - passt direkt zu OpenCV
-                cam.configure(cam.create_video_configuration(main={"size": tuple(self.size), "format": "RGB888"}))
-                cam.start()
-                self.info = f"{self.size[0]}x{self.size[1]}"
-                print(f"[kamera] Pi-Kameramodul gestartet ({self.info})", flush=True)
-                while not self._stop.is_set():
-                    self._push(cam.capture_array("main").copy())
-            except Exception as e:      # Kamera fehlt / belegt -> spaeter erneut
-                self._fail(f"Pi-Kameramodul: {e}", 5.0)
-            finally:
-                if cam is not None:
-                    try:
-                        cam.stop()
-                        cam.close()
-                    except Exception:
-                        pass
+                os.unlink(path)
+            except OSError:
+                pass
+            if not self._stop.is_set():
+                self._fail(msg or "Pi-Kameramodul: neu starten", 2.0)
+
+
+def picam_worker(path, w, h):
+    """Laeuft im Kamera-Prozess: Bilder von picamera2 holen und in die Datei schreiben."""
+    import ctypes
+    import mmap
+    import signal
+    try:                                                 # mit dem Hauptprogramm beenden
+        ctypes.CDLL("libc.so.6").prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG
+    except Exception:
+        pass
+    signal.signal(signal.SIGTERM, lambda *a: os._exit(0))
+    w, h = int(w), int(h)
+    try:
+        from picamera2 import Picamera2
+    except ImportError:
+        print("[kamera] picamera2 ist im Container nicht installiert (siehe README: Pi-Kameramodul)", flush=True)
+        os._exit(2)
+    fd = os.open(path, os.O_RDWR)
+    mm = mmap.mmap(fd, 8 + w * h * 3)
+    os.close(fd)
+    seq = np.ndarray((1,), np.uint64, mm, 0)
+    img = np.ndarray((h, w, 3), np.uint8, mm, 8)
+    try:
+        cam = Picamera2()
+        # "RGB888" liefert die Bytes in der Reihenfolge B, G, R - passt direkt zu OpenCV
+        cam.configure(cam.create_video_configuration(main={"size": (w, h), "format": "RGB888"},
+                                                     buffer_count=4))   # weniger CMA-Speicher
+        cam.start()
+    except Exception as e:
+        print(f"[kamera] Pi-Kameramodul: {e}", flush=True)
+        os._exit(3)
+    n = 0
+    while True:
+        arr = cam.capture_array("main")
+        if arr.shape[0] != h or arr.shape[1] != w:
+            arr = cv2.resize(arr[:, :, :3], (w, h))
+        n += 1
+        seq[0] = 2 * n - 1          # ungerade: wird geschrieben
+        img[:] = arr[:, :, :3]
+        seq[0] = 2 * n              # gerade: fertig
 
 
 # ------------------------------------------------------------------ Demo

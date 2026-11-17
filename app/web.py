@@ -201,6 +201,10 @@ def make_handler(app, auth: Auth):
                 if jpg is None:
                     return self._send(503, {"error": "Grafik nicht verfügbar"})
                 return self._send(200, jpg, "image/jpeg")
+            if path == "/api/single.jpg":                        # Einzelkugel: zuletzt gespeichertes Bild
+                if app.single.preview is None:
+                    return self._send(404, {"error": "Noch kein Bild"})
+                return self._send(200, app.single.preview, "image/jpeg")
             if path == "/api/snapshot":
                 snap = app.snapshot()
                 if snap is None:

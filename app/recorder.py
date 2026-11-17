@@ -298,8 +298,11 @@ class Recorder:
             with open(os.path.join(self.pending_dir, name + ".json"), "w") as f:
                 json.dump(data, f)
 
-    def save_verified(self, warped, balls, radius, numbers=None):
-        """Live-Bild, das im Admin-Panel korrigiert wurde: direkt als geprueft speichern."""
+    def save_verified(self, warped, balls, radius, numbers=None, extra=None):
+        """Live-Bild, das im Admin-Panel korrigiert wurde (oder Einzelkugel-Serie):
+        direkt als geprueft speichern."""
+        if not self.disk_ok():
+            return None
         numbers = numbers or [None] * len(balls)
         with self.lock:
             os.makedirs(self.ok_img, exist_ok=True)
@@ -307,7 +310,8 @@ class Recorder:
             name = self._new_name()
             h, w = warped.shape[:2]
             cv2.imwrite(os.path.join(self.ok_img, name + ".jpg"), warped, [cv2.IMWRITE_JPEG_QUALITY, 92])
-            self._write_verified(name, [_ball_dict(b, n) for b, n in zip(balls, numbers)], radius, w, h, True)
+            self._write_verified(name, [_ball_dict(b, n) for b, n in zip(balls, numbers)], radius, w, h, True,
+                                 extra)
         return name
 
     def delete_all(self):

@@ -40,6 +40,7 @@ from review_rounds import RoundManager
 from sound import Sound
 from scene import SceneRenderer, bar_balls, surface_to_bgr
 from cameras import SOURCE_NAMES, SOURCES, make_reader
+from single_ball import SingleBall
 
 KINDS = ("cue", "eight", "solid", "stripe")
 COLORS = ("gelb", "blau", "rot", "violett", "orange", "gruen", "weinrot", "schwarz", "")
@@ -82,6 +83,7 @@ class App:
         self.auth = None                                      # setzt web.start()
         self.panel_url = ""                                   # Adresse des Spiel-Panels (QR-Code)
         self.notes = Notices()                                # Meldungen oben rechts
+        self.single = SingleBall(self.pipe, self.recorder, self.notes)   # Einzelkugel-Serie (KI-Training)
         self._edges = {}
         self._disk = (0.0, True)
         self.proc_fps = 0.0
@@ -95,6 +97,12 @@ class App:
         self._graphic = (None, None)        # (Schluessel, JPEG)
         self._beamer = {"t": 0.0, "jpg": None, "size": None, "cam": {}, "renderer": None}
         self._beamer_lock = threading.Lock()
+        self._beamer_cond = threading.Condition(self._beamer_lock)
+        self._beamer_want = (0.0, None)     # (Zeitpunkt, Groesse) der letzten Anfrage aus dem Browser
+        # True, solange der Hauptthread das HDMI-Bild zeichnet: dann bekommt der Browser eine
+        # verkleinerte Kopie davon. Ein zweites pygame-Zeichnen im Web-Thread parallel zur
+        # HDMI-Ausgabe (kmsdrm) liess das Pi-Kameramodul haengen (Standbild).
+        self.display_active = False
         self._snapshots = {}
         self._snap_id = 0
         self._stop = threading.Event()
@@ -306,9 +314,49 @@ class App:
             self._graphic = (key, jpg.tobytes())
         return self._graphic[1]
 
+    def _beamer_from_display(self, size, max_age):
+        """Beamerbild mit HDMI-Ausgabe: auf die naechste Kopie aus dem Hauptthread warten."""
+        size = tuple(size)
+        with self._beamer_cond:
+            b = self._beamer
+            now = time.monotonic()
+            self._beamer_want = (now, size)
+            if b["jpg"] is None or b["size"] != size or now - b["t"] >= max_age:
+                self._beamer_cond.wait_for(
+                    lambda: b["jpg"] is not None and b["size"] == size and b["t"] >= now, timeout=2.0)
+            if b["jpg"] is None or b["size"] != size:
+                raise OSError("Beamerbild noch nicht bereit")   # Stream wird beendet, Browser laedt neu
+            return b["jpg"]
+
+    def offer_beamer(self, screen, max_age=0.15):
+        """Vom Hauptthread nach jedem HDMI-Bild aufgerufen: fertiges Bild fuer den Browser
+        verkleinern - nur wenn gerade jemand die Beamer-Ansicht offen hat."""
+        t, size = self._beamer_want
+        now = time.monotonic()
+        if size is None or now - t > 3.0 or now - self._beamer["t"] < max_age:
+            return
+        import pygame
+        from scene import RENDER_LOCK
+        with RENDER_LOCK:
+            if screen.get_size() == size:
+                small = screen.copy()
+            else:
+                try:
+                    small = pygame.transform.smoothscale(screen, size)
+                except ValueError:                       # nur 24/32-Bit-Flaechen
+                    small = pygame.transform.scale(screen, size)
+            img = surface_to_bgr(small)
+        ok, jpg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        if ok:
+            with self._beamer_cond:
+                self._beamer.update(t=time.monotonic(), jpg=jpg.tobytes(), size=size)
+                self._beamer_cond.notify_all()
+
     def beamer_jpeg(self, size=(1280, 720), max_age=0.15):
         """Das komplette Beamerbild (Kamera + Grafik + Game-Bar) fuer den Browser.
         Mehrere Zuschauer teilen sich ein Bild; neu gezeichnet hoechstens alle max_age s."""
+        if self.display_active:
+            return self._beamer_from_display(size, max_age)
         import pygame
         from display import draw_beamer
         from scene import RENDER_LOCK
@@ -543,6 +591,7 @@ class App:
             "review": self.reviews.status(),
             "review_show_ai": bool(self.cfg.get("review_show_ai", False)),
             "sound": {"device": self.sound.device, "error": self.sound.error},
+            "single": self.single.status(),
         }
 
     def game_state(self):
@@ -635,6 +684,21 @@ class App:
             return f"Ding gespielt über {self.sound.device}"
         if name == "train_correction":
             return self._train_correction(p)
+        if name.startswith("single_"):
+            try:
+                if name == "single_mode":
+                    return self.single.set_enabled(bool(p.get("enabled")))
+                if name == "single_ball":
+                    return self.single.set_number(p["number"])
+                if name == "single_empty":
+                    return self.single.remember_empty()
+                if name == "single_start":
+                    return self.single.start(p.get("count", 50), p.get("interval", 1.0), p.get("only_new", True))
+                if name == "single_stop":
+                    return self.single.stop()
+            except ValueError as e:
+                raise config.UserError(str(e))
+            return None
         if name == "record_round":
             if p.get("enabled"):
                 if not self.rounds.start(self.scene(live=False)):
@@ -763,6 +827,7 @@ class App:
 
     def stop(self):
         self._stop.set()
+        self.single.stop()
         self.reader.stop()
         self.cue.stop()
 
@@ -799,12 +864,15 @@ def main():
     disp.open()
     import pygame
     clock = pygame.time.Clock()
+    app.display_active = True
     try:
         while disp.handle_events():
             frame, fid, _ = app.reader.latest()
             disp.draw(frame, fid, app.pipe, app.reader, app.scene())
+            app.offer_beamer(disp.screen)
             clock.tick(20)
     finally:
+        app.display_active = False
         app.stop()
         disp.close()
     return 0
