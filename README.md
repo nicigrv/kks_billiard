@@ -25,6 +25,7 @@ erscheinen **oben rechts** als Mitteilung wie bei iPhone/Mac – auf dem Beamer 
 | `app/` | **Hauptprogramm**: Erkennung (KI-Chip), 8-Ball-Regeln, Beamer, Spiel- und Admin-Panel |
 | `app/sim/` | Simulator + Tests (laufen ohne Tisch) |
 | `cue_sensor/` | Programm für den Queue mit Gyroskop (ESP32 + MPU6050, PlatformIO) – optional |
+| `koe_messgeraet/` | Eigenständiges Kö-Messgerät: Atom Matrix (MPU6886) mit eigenem WLAN und Messseite |
 | `training/` | Kugelmodell für den Coral trainieren (PC / Google Colab) |
 
 ---
