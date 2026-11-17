@@ -394,6 +394,22 @@ class Recorder:
         return n
 
     # ------------------------------------------------------------ 3. Export
+    def verified_samples(self):
+        """Festgelegte Bilder fuer Stufe 2 + 3 (Farben lernen): (bild, [(x, y, nummer)], radius)."""
+        for fn in sorted(os.listdir(self.ok_img)) if os.path.isdir(self.ok_img) else []:
+            if not fn.endswith(".jpg"):
+                continue
+            try:
+                with open(os.path.join(self.ok_lbl, fn[:-4] + ".json")) as f:
+                    meta = json.load(f)
+            except (OSError, ValueError):
+                continue
+            balls = [(float(b["x"]), float(b["y"]), ball_num(b)) for b in meta.get("balls", [])]
+            balls = [b for b in balls if b[2] is not None]
+            img = cv2.imread(os.path.join(self.ok_img, fn))
+            if img is not None and balls:
+                yield img, balls, float(meta["radius"])
+
     def export_zip(self, path):
         """Alle geprueften Bilder als ZIP fuer das Training (training/train_coral.py)."""
         n = 0

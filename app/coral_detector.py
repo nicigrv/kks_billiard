@@ -1,16 +1,24 @@
 """
-Kugelerkennung ausschliesslich mit dem KI-Chip (Coral USB Accelerator).
+Kugelerkennung in drei Stufen:
 
-    Draufsicht -> verkleinern (Letterbox) -> [Coral: Modell] -> Kaesten -> Kugeln mit Nummer
+    1. Kugeln finden    KI-Chip (Coral, YOLOv8n mit 1 Klasse "Kugel")
+                        Draufsicht -> verkleinern (Letterbox) -> [Coral] -> Kaesten
+    2. gestreift?       kugel_merkmale.py: Weisse / schwarze 8 / voll / halb
+    3. Farbe            kugel_merkmale.py: gelb, blau, rot, violett, orange, gruen, weinrot
+    -> Nummer (0 = Weisse, 1-7 Volle, 8, 9-15 Halbe); jede Nummer gibt es nur einmal.
 
-Das Modell (YOLOv8n, 16 Klassen) liefert jede Kugel direkt mit ihrer Nummer:
-0 = Weisse, 1-7 Volle, 8 = schwarze 8, 9-15 Halbe. Der Pi rechnet nichts nach - keine
-Farbauswertung, keine klassische Kugelsuche mehr.
+Stufe 2 + 3 schauen sich jede gefundene Kugel in der vollen Draufsicht an (nicht im
+verkleinerten Coral-Bild) und lernen aus festgelegten Bildern (billard_merkmale.json).
+Aeltere Modelle mit 16 Klassen (Kugelnummern) gehen weiter: dann zaehlt nur, DASS dort eine
+Kugel ist - die Nummer bestimmen Stufe 2 + 3.
 
-Modell:
+Coral-Modell:
     /data/models/billard_edgetpu.tflite      eigenes Modell (Upload im Admin-Panel)
     /app/models/start_edgetpu.tflite         Startmodell (mit Simulator-Bildern trainiert)
-Wird die Datei ersetzt, laedt der Detektor das neue Modell von selbst.
+Merkmale (Stufe 2 + 3):
+    /data/models/billard_merkmale.json       gelernt (Admin-Panel oder train_coral.py)
+    /app/models/start_merkmale.json          Startwerte aus dem Simulator
+Wird eine Datei ersetzt, laedt der Detektor sie von selbst.
 
 Laeuft im Hauptprogramm (kein eigener Container): tflite_runtime + libedgetpu (Coral-Treiber),
 beide fuer Python 3.11 / Debian 12 gebaut gegen TensorFlow 2.17.1 (siehe Dockerfile).
@@ -23,10 +31,14 @@ import cv2
 import numpy as np
 
 from ballnum import Ball
+from kugel_merkmale import ClassifierStore
 
-N_CLASSES = 16                      # Klasse = Kugelnummer
+MODEL_CLASSES = (1, 16)             # 1 = "Kugel" (neu), 16 = Kugelnummern (aeltere Modelle)
+MODELS_DIR = os.path.join(os.environ.get("DATA_DIR", "/data"), "models")
 DATA_MODEL = os.path.join(os.environ.get("DATA_DIR", "/data"), "models", "billard_edgetpu.tflite")
 START_MODEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "start_edgetpu.tflite")
+DATA_FEATURES = os.path.join(MODELS_DIR, "billard_merkmale.json")
+START_FEATURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "start_merkmale.json")
 EDGETPU_LIB = "libedgetpu.so.1"
 
 
@@ -61,6 +73,7 @@ class CoralEngine:
         self.model = None           # (Pfad, Aenderungszeit)
         self.error = "noch nicht gestartet"
         self.ms = None
+        self.nc = None              # Klassen des Modells (1 oder 16)
         self._next_try = 0.0
         self._checked = 0.0
 
@@ -95,14 +108,16 @@ class CoralEngine:
             interp.set_tensor(inp["index"], np.zeros(inp["shape"], inp["dtype"]))
             interp.invoke()                     # erster Lauf kopiert das Modell auf den Stick
             out = interp.get_output_details()[0]
-            if 4 + N_CLASSES not in [int(v) for v in out["shape"]]:
-                raise CoralNotReady(f"Modell hat das falsche Format {list(out['shape'])} - "
-                                    f"gebraucht wird ein Modell mit {N_CLASSES} Kugelnummern")
+            shape = [int(v) for v in out["shape"]]
+            nc = next((k for k in MODEL_CLASSES if 4 + k in shape), None)
+            if nc is None:
+                raise CoralNotReady(f"Modell hat das falsche Format {shape} - gebraucht wird ein "
+                                    f"Kugel-Modell aus training/train_coral.py (1 Klasse)")
         except CoralNotReady as e:
             return self._fail(str(e))
         except (ValueError, RuntimeError) as e:
             return self._fail(f"Modell laesst sich nicht laden: {e}")
-        self.interp, self.model, self.error = interp, (path, mtime), ""
+        self.interp, self.model, self.error, self.nc = interp, (path, mtime), "", nc
         print(f"[coral] Modell geladen in {time.monotonic() - t0:.1f} s: {os.path.basename(path)} "
               f"{[int(v) for v in inp['shape']]}", flush=True)
         return True
@@ -147,6 +162,7 @@ class CoralEngine:
             "model_time": None if mtime is None else time.strftime("%d.%m.%Y %H:%M", time.localtime(mtime)),
             "error": self.error,
             "ms": None if self.ms is None else round(self.ms, 1),
+            "classes": self.nc,
         }
 
 
@@ -162,24 +178,24 @@ def letterbox(img, out_h, out_w, fill=114):
     return canvas, scale, dx, dy
 
 
-def decode_yolo(out, in_w, in_h, conf=0.35, iou=0.45, nc=N_CLASSES):
-    """YOLOv8-Ausgabe (1, 4+nc, N) -> [(cx, cy, w, h, score, klasse, alle_scores)] in Eingabe-Pixeln."""
+def decode_yolo(out, in_w, in_h, conf=0.35, iou=0.45, nc=1):
+    """YOLOv8-Ausgabe (1, 4+nc, N) -> [(cx, cy, w, h, score)] in Eingabe-Pixeln.
+    Bei mehreren Klassen (aeltere Modelle) zaehlt nur die beste: "hier ist eine Kugel"."""
     a = np.squeeze(out, 0) if out.ndim == 3 else out
     if a.shape[0] == 4 + nc:
         a = a.T
     if a.shape[1] != 4 + nc:
-        raise CoralNotReady(f"Unerwartete Modellausgabe {out.shape} ({nc} Kugelnummern erwartet)")
-    boxes, scores = a[:, :4].copy(), a[:, 4:]
+        raise CoralNotReady(f"Unerwartete Modellausgabe {out.shape} ({nc} Klassen erwartet)")
+    boxes = a[:, :4].copy()
+    best = a[:, 4:].max(1)
     if boxes.size and float(np.abs(boxes).max()) <= 2.0:   # Edge-TPU-Export liefert 0..1
         boxes *= np.array([in_w, in_h, in_w, in_h], np.float32)
-    cls = scores.argmax(1)
-    best = scores[np.arange(len(scores)), cls]
     keep = np.nonzero(best >= conf)[0]
     if not len(keep):
         return []
     tl = [[float(b[0] - b[2] / 2), float(b[1] - b[3] / 2), float(b[2]), float(b[3])] for b in boxes[keep]]
     idx = np.array(cv2.dnn.NMSBoxes(tl, [float(s) for s in best[keep]], conf, iou)).reshape(-1)
-    return [(*boxes[keep[i]], float(best[keep[i]]), int(cls[keep[i]]), scores[keep[i]]) for i in idx]
+    return [(*boxes[keep[i]], float(best[keep[i]])) for i in idx]
 
 
 def assign_unique(cands):
@@ -201,12 +217,14 @@ class CoralDetector:
 
     name = "coral"
 
-    def __init__(self, radius_px, engine: CoralEngine, conf=0.35):
+    def __init__(self, radius_px, engine: CoralEngine, conf=0.35, features: ClassifierStore = None):
         self.r = float(radius_px)
         self.engine = engine
         self.conf = conf
+        self.features = features or default_features()
 
-    def detect(self, warped):
+    def find(self, warped):
+        """Stufe 1 (KI-Chip): wo liegen Kugeln? -> [{"x", "y", "det"}]"""
         if not self.engine.ready():
             raise CoralNotReady(self.engine.error)
         shape, dt, scale_q, zp = self.engine.input_info()
@@ -219,18 +237,39 @@ class CoralDetector:
             info = np.iinfo(dt)
             data = np.clip(np.round(q), info.min, info.max).astype(dt)[None]
         out = self.engine.run(data)
-        dets = decode_yolo(out, w, h, self.conf)
+        dets = decode_yolo(out, w, h, self.conf, nc=self.engine.nc or 1)
 
         H, W = warped.shape[:2]
         cands = []
-        for cx, cy, bw, bh, score, k, scores in dets:
+        for cx, cy, bw, bh, score in dets:
             x, y = (cx - dx) / scale, (cy - dy) / scale
             if -self.r <= x <= W + self.r and -self.r <= y <= H + self.r:
-                cands.append({"x": float(np.clip(x, 0, W - 1)), "y": float(np.clip(y, 0, H - 1)),
-                              "score": score, "number": k, "scores": scores})
+                cands.append({"x": float(np.clip(x, 0, W - 1)), "y": float(np.clip(y, 0, H - 1)), "det": score})
         # Doppelte Treffer derselben Kugel weg: zwei echte Kugeln liegen nie naeher als 1 Durchmesser
         kept, min_d2 = [], (1.45 * self.r) ** 2
-        for c in sorted(cands, key=lambda c: -c["score"]):
+        for c in sorted(cands, key=lambda c: -c["det"]):
             if all((c["x"] - o["x"]) ** 2 + (c["y"] - o["y"]) ** 2 >= min_d2 for o in kept):
                 kept.append(c)
+        return kept
+
+    def detect(self, warped):
+        kept = self.find(warped)
+        clf = self.features.get()
+        if clf is None:
+            raise CoralNotReady("Keine Farb-/Streifen-Werte (models/start_merkmale.json fehlt)")
+        for c in kept:                                   # Stufe 2 + 3
+            c["scores"], c["p_kind"], c["p_color"] = clf.classify(warped, c["x"], c["y"], self.r)
+            c["number"] = int(np.argmax(c["scores"]))
+            c["score"] = float(c["scores"][c["number"]])
         return [Ball.from_number(c["x"], c["y"], self.r, c["number"], c["score"]) for c in assign_unique(kept)]
+
+
+_FEATURES = None
+
+
+def default_features():
+    """Eine gemeinsame Merkmal-Datei fuer alle Detektoren (laedt neu, wenn sie ersetzt wird)."""
+    global _FEATURES
+    if _FEATURES is None:
+        _FEATURES = ClassifierStore((DATA_FEATURES, START_FEATURES))
+    return _FEATURES

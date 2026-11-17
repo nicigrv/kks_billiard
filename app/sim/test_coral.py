@@ -3,7 +3,8 @@ Tests fuer KI-Chip und Trainingsbilder (ohne echten Coral-Stick):
   * Trainingsbilder: aufnehmen -> festlegen/pruefen -> nichts geht verloren -> Export
   * Trefferquote des Modells (Vorschlag gegen festgelegtes Ergebnis)
   * CoralEngine/CoralDetector mit einem Ersatz-Interpreter, der wie ein Edge-TPU-Modell
-    aus dem Training antwortet (int8, 16 Kugelnummern, Kaesten 0..1)
+    aus dem Training antwortet (int8, 1 Klasse "Kugel" bzw. aeltere 16 Kugelnummern, Kaesten 0..1);
+    die Nummer kommt aus Stufe 2 + 3 (gestreift? Farbe?) am Simulator-Bild
   * Pipeline: ohne KI-Chip wird nichts gezaehlt, Bilder entstehen nur per Knopf
 
     python3 -m sim.test_coral
@@ -19,7 +20,7 @@ import numpy as np
 
 from ballnum import Ball
 from coral_detector import CoralDetector, CoralEngine, CoralNotReady, letterbox
-from geometry import TABLE_SIZES, Table
+from geometry import TABLE_SIZES, WARP_H, WARP_W, Table
 from pipeline import Pipeline
 from recorder import Recorder
 from sim.render import DEFAULT_CORNERS, SimBall, render_topdown, to_camera
@@ -106,11 +107,11 @@ def test_training_data():
 
 # ------------------------------------------------------------------ KI-Chip
 IN = 640
-N = 16
+N = 1
 
 
 class FakeInterpreter:
-    """Antwortet wie ein Ultralytics-Edge-TPU-Modell: int8 rein, (1, 4+16, N) int8 raus,
+    """Antwortet wie ein Ultralytics-Edge-TPU-Modell: int8 rein, (1, 4+klassen, N) int8 raus,
     Kaesten normiert 0..1. Liefert die Kaesten aus FakeInterpreter.boxes."""
     boxes = []            # (cx, cy, w, h, nummer, score) normiert auf das 640er-Eingabebild
     last_input = None
@@ -140,23 +141,35 @@ class FakeInterpreter:
         o = np.zeros((1, 4 + self.out_classes, 300), np.float32)
         for i, (cx, cy, w, h, k, sc) in enumerate(self.boxes):
             o[0, :4, i] = (cx, cy, w, h)
-            o[0, 4 + k, i] = sc
+            o[0, 4 + min(k, self.out_classes - 1), i] = sc
         return np.clip(np.round(o * 255 - 128), -128, 127).astype(np.int8)
 
 
-def box(x, y, number, score=0.9):
-    """Kugel bei (x, y) in der 800x400-Draufsicht -> normierter Kasten im 640er-Eingabebild."""
-    return ((x * 0.8) / IN, (y * 0.8 + 160) / IN, 0.03, 0.03, number, score)
+def box(x, y, cls=0, score=0.9, err=0.0):
+    """Kugel bei (x, y) in der 800x400-Draufsicht -> normierter Kasten im 640er-Eingabebild.
+    err: so viele Pixel liegt der Kasten daneben (wie bei einem echten Modell)."""
+    return (((x + err) * 0.8) / IN, ((y - err) * 0.8 + 160) / IN, 0.03, 0.03, cls, score)
+
+
+def sim_table(balls_spec, seed=3):
+    """Simulator-Draufsicht mit Kugeln [(nummer, x_px, y_px)] -> (bild, radius)."""
+    L = TABLE_SIZES["8ft"]
+    W = L / 2
+    t = Table(DEFAULT_CORNERS, L)
+    balls = [SimBall(n, x / WARP_W * L, y / WARP_H * W, look=1000 + n) for n, x, y in balls_spec]
+    rng = np.random.default_rng(seed)
+    return t.warp(to_camera(render_topdown(balls, L, W, "blau", rng), DEFAULT_CORNERS)), t.ball_radius_px
 
 
 def test_engine():
-    print("KI-Chip (mit Ersatz-Interpreter)")
+    print("KI-Chip (mit Ersatz-Interpreter) + Stufe 2/3")
+    spec = [(0, 200, 200), (3, 480, 120), (11, 640, 280), (8, 400, 320), (5, 120, 330), (13, 300, 90), (2, 700, 80)]
     with tempfile.TemporaryDirectory() as d:
         model = os.path.join(d, "billard_edgetpu.tflite")
         now = [100.0]
         eng = CoralEngine(model_paths=(model,), make_interpreter=FakeInterpreter, clock=lambda: now[0])
-        det = CoralDetector(10.2, eng)
-        warped = np.full((400, 800, 3), 60, np.uint8)
+        warped, r = sim_table(spec)
+        det = CoralDetector(r, eng)
         try:
             det.detect(warped)
             check(False, "ohne Modell: nicht bereit")
@@ -166,21 +179,29 @@ def test_engine():
         open(model, "wb").write(b"x")
         os.utime(model, (1, 1))
         now[0] += 10
-        FakeInterpreter.boxes = [box(200, 200, 0), box(480, 120, 3), box(640, 280, 11), box(400, 320, 8),
-                                 box(482, 121, 3, 0.6),          # Doppeltreffer derselben Kugel
-                                 box(100, 100, 11, 0.5)]         # zweite "11" -> naechstbeste Nummer
+        FakeInterpreter.boxes = [box(x, y, err=1.5 * (-1) ** i) for i, (n, x, y) in enumerate(spec)]
+        FakeInterpreter.boxes.append(box(482, 121, score=0.6))            # Doppeltreffer derselben Kugel
         balls = det.detect(warped)
         got = {b.number: (round(b.x), round(b.y), b.kind, b.color) for b in balls}
-        check(eng.status()["ready"] and eng.status()["model"] == "eigenes Modell", "Modell geladen")
-        check(len(balls) == 5, f"Doppeltreffer entfernt ({len(balls)} Kugeln)")
-        ok = all(abs(got[n][0] - x) <= 2 and abs(got[n][1] - y) <= 2 for n, x, y in
-                 ((0, 200, 200), (3, 480, 120), (11, 640, 280), (8, 400, 320)))
-        check(ok, "Positionen korrekt auf den Tisch zurueckgerechnet")
-        check(got[3][2:] == ("solid", "rot") and got[11][2:] == ("stripe", "rot") and got[0][2] == "cue"
-              and got[8][2] == "eight", "Nummer -> Typ und Farbe")
-        check(len({b.number for b in balls}) == 5, "jede Nummer nur einmal")
+        check(eng.status()["ready"] and eng.status()["model"] == "eigenes Modell" and eng.status()["classes"] == 1,
+              "Modell mit 1 Klasse (Kugel) geladen")
+        check(len(balls) == len(spec), f"Doppeltreffer entfernt ({len(balls)} Kugeln)")
+        check(all(n in got and abs(got[n][0] - x) <= 3 and abs(got[n][1] - y) <= 3 for n, x, y in spec),
+              f"Stufe 1 + 2 + 3: jede Kugel mit richtiger Nummer an richtiger Stelle ({sorted(got)})")
+        check(got.get(3, ())[2:] == ("solid", "rot") and got.get(11, ())[2:] == ("stripe", "rot")
+              and got.get(0, ())[2:3] == ("cue",) and got.get(8, ())[2:3] == ("eight",), "Typ und Farbe passen")
+        check(len({b.number for b in balls}) == len(balls), "jede Nummer nur einmal")
         pad = FakeInterpreter.last_input[0, 10, 10]
         check(list(pad) == [-14, -14, -14], "Eingabe int8 mit grauem Rand wie im Training")
+
+        # Aelteres Modell mit 16 Kugelnummern: Nummer des Modells wird ignoriert, Stufe 2 + 3 entscheiden
+        FakeInterpreter.out_classes = 16
+        FakeInterpreter.boxes = [box(x, y, cls=(n + 5) % 16) for n, x, y in spec]   # absichtlich falsche Nummern
+        os.utime(model, (3, 3))
+        now[0] += 10
+        balls = det.detect(warped)
+        check(eng.status()["classes"] == 16 and sorted(b.number for b in balls) == sorted(n for n, _, _ in spec),
+              "altes 16-Nummern-Modell: nur 'Kugel ja/nein' zaehlt, Nummer aus Stufe 2 + 3")
 
         # Modell mit falschem Format (z. B. altes 4-Klassen-Modell)
         FakeInterpreter.out_classes = 4
@@ -190,7 +211,7 @@ def test_engine():
             det.detect(warped)
             check(False, "altes Modell mit 4 Klassen wird abgelehnt")
         except CoralNotReady as e:
-            check("16 Kugelnummern" in str(e), "altes Modell mit 4 Klassen wird abgelehnt")
+            check("1 Klasse" in str(e), "altes Modell mit 4 Klassen wird abgelehnt")
         FakeInterpreter.out_classes = N
 
     img, s, dx, dy = letterbox(np.zeros((400, 800, 3), np.uint8), 640, 640)
