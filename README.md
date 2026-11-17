@@ -88,7 +88,8 @@ erscheinen **oben rechts** als Mitteilung wie bei iPhone/Mac – auf dem Beamer 
 | `cue_sensor/` | Programm für den Queue mit Gyroskop (ESP32 + MPU6050, PlatformIO) – optional |
 | `koe_messgeraet/` | Eigenständiges Kö-Messgerät: Atom Matrix (MPU6886) mit eigenem WLAN und Messseite |
 | `scripts/` | `update.sh` (Installation/Update) und `build_release.sh` (baut die Release-Pakete) |
-| `.github/workflows/check.yml` | prüft jeden Pull Request: Python-Syntax + Tests, Firmware-Build, Skripte, docker-compose, JavaScript |
+| `.github/workflows/check.yml` | Formprüfung bei jedem Pull Request (Syntax, ca. 30 s) |
+| `.github/workflows/test.yml` | Tests und Firmware-Build nach dem Merge |
 | `.github/workflows/release.yml` | erstellt nach jedem gemergten PR automatisch ein Release (PATCH + 1) |
 | `training/` | Kugelmodell für den Coral trainieren (PC / Google Colab) |
 
@@ -466,17 +467,15 @@ für HDMI 1 z. B. `hdmi:CARD=vc4hdmi1,DEV=0`).
 Wie gut die Erkennung ist, hängt jetzt vom trainierten Modell ab. Das Admin-Panel zeigt die Trefferquote
 auf euren geprüften Bildern (Abschnitt 5).
 
-**Automatisch:** Bei jedem Pull Request und jedem Push auf `main` läuft die **Prüfung**
-(`.github/workflows/check.yml`). Am Pull Request steht danach ein grüner Haken oder ein rotes X:
+**Automatisch auf GitHub** (blockiert das Mergen nicht):
 
-| Teil | Was geprüft wird |
-|---|---|
-| Python | Syntaxfehler und undefinierte Namen (ruff), alle Tests unten, Tests der Trainingsseite |
-| Firmware | `cue_sensor` für alle Boards und `koe_messgeraet` lassen sich bauen (PlatformIO) |
-| Sonstiges | Shell-Skripte (shellcheck), beide `docker-compose.yml`, JavaScript in `.js` und HTML-Seiten, Workflows (actionlint) |
+| Wann | Workflow | Was geprüft wird | Dauer |
+|---|---|---|---|
+| jeder Pull Request | **Formprüfung** (`check.yml`) | Syntax: Python (ruff, compileall), Shell-Skripte (shellcheck), beide `docker-compose.yml`, JavaScript in `.js` und HTML-Seiten, Workflows (actionlint) | ca. 30 s |
+| nach dem Merge (Push auf `main`) | **Tests** (`test.yml`) | alle Tests unten + Tests der Trainingsseite, Firmware-Build für alle Boards | einige Minuten |
 
-Erst mergen, wenn alles grün ist. Wer es erzwingen will: Settings → Branches → Regel für `main` →
-„Require status checks to pass“.
+Ein rotes X nach dem Merge heißt: Fehler im nächsten Pull Request beheben. Beides lässt sich auch von Hand
+unter **Actions** starten.
 
 Tests selbst laufen lassen (im Ordner `app/`):
 ```bash
