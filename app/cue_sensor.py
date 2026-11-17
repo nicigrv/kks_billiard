@@ -7,7 +7,8 @@ Koppeln ueber den CASTCODE (6 Zeichen, zeigt der Queue in seinem Einrichtungs-Ho
   2. Der Pi sucht den Queue per UDP-Broadcast {"suche": "<castcode>"} an Port 5005;
      der Queue mit diesem Code antwortet mit seiner IP.
   3. Danach abonniert der Pi die Lage: {"abo": "<castcode>", "farbe": [r, g, b] | null} an
-     den Queue (UDP 5005). Der Queue SENDET dann von selbst ca. 50x pro Sekunde an den Pi:
+     den Queue (UDP 5005). Der Queue SENDET dann von selbst ca. 17x pro Sekunde an den Pi
+     (jeder Wert ist der Mittelwert aus 3 geprueften Messungen, Ausreisser verwirft der Queue):
      {"castcode": "K7P2QM", "seq": 123, "yaw": 37.5, "pitch": -4.2, "still": 0, "bat": 3.91,
       "rssi": -55, "knopf": 0, "stoss": 4.2, "stoesse": 7}
      yaw   = Richtung in der Waagerechten, Grad, gegen den Uhrzeigersinn positiv
@@ -89,6 +90,7 @@ class CueSensor:
         self.lost = 0
         self.rate = 0.0
         self.button = None                # zuletzt gesehener Zaehler "knopf"
+        self.rejected = 0                 # unplausible Pakete (verworfen)
         self.last_error = ""
         self.state = self._idle_state()
         self._stop = threading.Event()
@@ -253,16 +255,33 @@ class CueSensor:
                 self.rate = 0.0
 
     def feed(self, raw, addr=None):
-        """Ein Paket verarbeiten (auch direkt aus Tests aufrufbar)."""
+        """Ein Paket verarbeiten (auch direkt aus Tests aufrufbar). Unplausible Pakete werden verworfen
+        (und gezaehlt), unplausible Zusatzwerte (Akku, Stossstaerke) nur weggelassen."""
         try:
             d = json.loads(raw)
-            yaw = float(d["yaw"])
-            if not math.isfinite(yaw):
-                raise ValueError("yaw")
+            if not isinstance(d, dict):
+                raise TypeError("kein Objekt")
             if self.castcode and str(d.get("castcode", self.castcode)).upper() != self.castcode:
-                return False                        # fremder Queue
+                return False                        # fremder Queue (kein Fehler)
+            yaw = float(d["yaw"])
+            if not (math.isfinite(yaw) and -360.0 <= yaw <= 360.0):
+                raise ValueError("yaw")
+            if d.get("pitch") is not None:
+                pitch = float(d["pitch"])
+                if not (math.isfinite(pitch) and -90.5 <= pitch <= 90.5):
+                    raise ValueError("pitch")
         except (ValueError, KeyError, TypeError):
+            self.rejected += 1
             return False
+        for key, lo, hi in (("bat", 0.0, 6.0), ("stoss", 0.0, 40.0)):
+            try:
+                v = float(d[key]) if d.get(key) is not None else None
+            except (TypeError, ValueError):
+                v = None
+            if v is not None and not (math.isfinite(v) and lo <= v <= hi):
+                v = None
+            if key in d:
+                d[key] = v
         pressed = False
         with self.lock:
             old = self.data
@@ -324,6 +343,7 @@ class CueSensor:
             "packets": self.packets,
             "rate": round(self.rate, 1),
             "lost": self.lost,
+            "rejected": self.rejected,
             "rssi": d.get("rssi"),
             "fw": d.get("fw"),
             "stroke": d.get("stoss"),             # Stossstaerke des letzten Stosses (g), ab Firmware 3.1

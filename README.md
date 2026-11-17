@@ -335,7 +335,7 @@ seinem **Castcode**:
 2. Admin-Panel → „Queue mit Gyroskop“ → Castcode eintragen → „Koppeln“.
 3. Am Handy den Haken „Castcode ist eingetragen“ setzen → „Verbinden“.
 4. Der Pi sucht den Queue im WLAN (UDP-Broadcast an Port 5005 mit dem Castcode, nur dieser Queue
-   antwortet) und abonniert dann seine Lage: Der Queue schickt sie ca. 50× pro Sekunde per UDP an den Pi,
+   antwortet) und abonniert dann seine Lage: Der Queue schickt sie ca. 17× pro Sekunde per UDP an den Pi (je ein Mittelwert aus 3 geprüften Messungen),
    der Pi wiederholt das Abo jede Sekunde (Lebenszeichen + Teamfarbe für die LED). Neue IP nach
    Neustart: findet er von selbst. Zum Nachschauen gibt es weiterhin `GET http://<queue>/api/lage`.
 5. Einmal kalibrieren: Queue an die lange Bande legen, Spitze zeigt in der Grafik nach rechts →

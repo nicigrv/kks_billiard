@@ -5,6 +5,7 @@ LED-Farbe und Knopf. Laeuft gegen den simulierten Queue (sim/fake_cue.py), ohne 
     python3 -m sim.test_cue_link
 """
 
+import json
 import os
 import sys
 import threading
@@ -52,6 +53,18 @@ def main():
         except UserError:
             check(True, f"ungueltig abgelehnt: {bad}")
 
+    print("Pruefung der Werte")
+    v = CueSensor("SMQ234")
+    good = {"castcode": "SMQ234", "seq": 1, "yaw": 12.5, "pitch": -3.0, "bat": 3.9, "stoss": 4.2}
+    check(v.feed(json.dumps(good)) and v.raw_yaw() == 12.5, "gueltiges Paket angenommen")
+    for bad in (dict(good, yaw="nan"), dict(good, yaw=1e9), dict(good, pitch=135), dict(good, yaw=None)):
+        check(not v.feed(json.dumps(bad)) and v.raw_yaw() == 12.5, f"unplausibel verworfen: {bad}")
+    check(not v.feed(b"[1, 2]") and not v.feed(b"kein json"), "kein JSON-Objekt verworfen")
+    check(v.rejected == 6, f"verworfene Pakete werden gezaehlt ({v.rejected})")
+    check(v.feed(json.dumps(dict(good, bat=99, stoss=-5))) and v.status()["battery"] is None
+          and v.status()["stroke"] is None, "unplausibler Akku/Stoss weggelassen, Lage trotzdem da")
+    check(not v.feed(json.dumps(dict(good, castcode="ABCDEF"))) and v.rejected == 6, "fremder Queue ist kein Fehler")
+
     print("Koppeln und abonnieren")
     disc = 5191
     cue = start_fake("SMQ234", disc)
@@ -69,8 +82,8 @@ def main():
     n0 = s.packets
     time.sleep(1.0)
     rate = s.packets - n0
-    check(35 <= rate <= 60, f"Queue sendet von selbst ca. 50x pro Sekunde ({rate}/s)")
-    check(s.status()["rate"] > 30, f"Paketrate im Status ({s.status()['rate']}/s)")
+    check(12 <= rate <= 22, f"Queue sendet von selbst ca. 17x pro Sekunde, je 3 Messungen gemittelt ({rate}/s)")
+    check(s.status()["rate"] > 10, f"Paketrate im Status ({s.status()['rate']}/s)")
     with cue.lock:
         cue.yaw = 10.0
     time.sleep(0.2)
