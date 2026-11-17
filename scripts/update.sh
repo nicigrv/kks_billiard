@@ -3,7 +3,7 @@
 #
 #   Raspberry Pi:  curl -fsSL https://github.com/nicigrv/kks_billiard/releases/latest/download/update.sh | bash -s -- rasp
 #   Server (VPS):  curl -fsSL https://github.com/nicigrv/kks_billiard/releases/latest/download/update.sh | bash -s -- server
-#   feste Version: ... | bash -s -- rasp v7
+#   feste Version: ... | bash -s -- rasp v0.1.2
 #
 # Ordner: Pi ~/billard, Server ~/billard-training (anders: BILLARD_DIR=/pfad davor setzen).
 # Bleibt erhalten: data/, .env und die Einstellungen ganz oben in docker-compose.yml (x-...).
@@ -16,7 +16,7 @@ VERSION="${2:-latest}"
 case "$ZIEL" in
   rasp)   ASSET="billard-rasp.zip";   TOP="billard";          DIR="${BILLARD_DIR:-$HOME/billard}" ;;
   server) ASSET="billard-server.zip"; TOP="billard-training"; DIR="${BILLARD_DIR:-$HOME/billard-training}" ;;
-  *) echo "Aufruf: update.sh rasp|server [version, z. B. v7]"; exit 1 ;;
+  *) echo "Aufruf: update.sh rasp|server [version, z. B. v0.1.2]"; exit 1 ;;
 esac
 
 if [ "$VERSION" = "latest" ]; then

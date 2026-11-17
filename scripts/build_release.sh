@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Baut die Release-Pakete (läuft in GitHub Actions, geht aber auch lokal).
-#   scripts/build_release.sh v7 dist
+#   scripts/build_release.sh v0.1.2 dist
 # Ergebnis in dist/:
 #   billard-rasp.zip     Raspberry Pi (app/ + docker-compose.yml)
 #   billard-server.zip   Trainingsserver für den VPS (training_server/)
@@ -10,7 +10,7 @@
 # Braucht: git, zip, PlatformIO (pio) und esptool.
 set -euo pipefail
 
-VERSION="${1:?Version fehlt, z. B. v7}"
+VERSION="${1:?Version fehlt, z. B. v0.1.2}"
 OUT="$(realpath -m "${2:-dist}")"
 ROOT="$(git rev-parse --show-toplevel)"
 BAU="$(mktemp -d)"
