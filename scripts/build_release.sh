@@ -46,7 +46,8 @@ mkdir -p "$FW"
 baue() {   # baue <projektordner> <env> <zielname>
   local p="$1" env="$2" ziel="$3"
   cp -a "$p" "$BAU/build-$(basename "$p")"
-  local b="$BAU/build-$(basename "$p")"
+  local b
+  b="$BAU/build-$(basename "$p")"
   pio run -d "$b" -e "$env" >/dev/null
   local o="$b/.pio/build/$env"
   local app0
