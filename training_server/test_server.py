@@ -14,6 +14,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -186,6 +187,55 @@ def main():
         s, raw = admin.call("GET", "/api/admin/zip?modus=alle")
         check(sum(n.startswith("images/") for n in zipfile.ZipFile(io.BytesIO(raw)).namelist()) == 1, "inkl. unfertige: nur Bilder mit Festlegung")
         check(Client(base).call("GET", "/api/admin/zip")[0] == 403, "ZIP nur für Admins")
+
+        print("Einzelkugel: Bild per Knopf am Pi, Kreis zieht der Server")
+        import numpy as np
+        import cv2
+        rng = np.random.default_rng(3)
+        tuch = np.zeros((400, 800, 3), np.uint8); tuch[:] = (150, 70, 30)            # BGR: blaues Tuch
+        leer = np.clip(tuch + rng.normal(0, 3, tuch.shape), 0, 255).astype(np.uint8)
+        ok, leer_jpg = cv2.imencode(".jpg", leer)
+        rec2 = Recorder(os.path.join(d, "pi2"))
+        bilder = {}
+        for i, (x, y, hand) in enumerate([(200, 150, False), (610, 320, False), (400, 200, True)]):
+            img = np.clip(tuch + rng.normal(0, 3, tuch.shape), 0, 255).astype(np.uint8)
+            cv2.circle(img, (x, y), 10, (40, 40, 210), -1)                           # rote Kugel (3)
+            if hand:
+                cv2.rectangle(img, (300, 0), (380, 260), (120, 160, 210), -1)
+            bilder[rec2.save_single(img, 3, 10.2, leer_jpg.tobytes())] = (x, y, hand)
+            time.sleep(0.002)
+        check(rec2.single == 3 and len([f for f in os.listdir(rec2.single_dir) if f.startswith("leer-")]) == 1,
+              "Pi: 3 Knopf-Bilder, leerer Tisch nur einmal abgelegt")
+        vorher = daten.zaehler()
+        up2 = Uploader(rec2, base, "test-schluessel-123")
+        check(up2.run_once() == 3, "3 Einzelkugel-Bilder hochgeladen (mit Bild des leeren Tisches)")
+        z = daten.zaehler()
+        check(z["einzel"] == 3 and z["einzel_erkannt"] == 2, f"Server: 3 Einzelkugel-Bilder, 2 erkannt ({z['einzel_erkannt']})")
+        check(z["fertig"] == vorher["fertig"] + 2 and z["offen"] == vorher["offen"] + 1,
+              "erkannte sind sofort fertig, das mit Hand im Bild bleibt offen für die Trainer")
+        check(z["festlegungen"] == vorher["festlegungen"], "Bilderkennung zählt nicht als Trainer-Festlegung")
+        for name, (x, y, hand) in bilder.items():
+            fl = daten.festlegungen(name)
+            if hand:
+                check(not fl, "Hand im Bild: keine automatische Festlegung")
+                continue
+            k = json.loads(fl[0]["kugeln"])[0] if fl else {}
+            check(fl and fl[0]["person_name"] == "Bilderkennung" and k.get("number") == 3 and k.get("kind") == "solid"
+                  and k.get("color") == "rot" and abs(k["x"] - x) < 2 and abs(k["y"] - y) < 2,
+                  f"Kugel 3 bei ({x}, {y}) gefunden: {k.get('x')}, {k.get('y')}")
+        erster = sorted(bilder)[0]
+        s1, roh = admin.call("GET", "/api/admin/bild?name=" + erster)
+        s2, kreis = admin.call("GET", "/api/admin/bild?kreis=1&name=" + erster)
+        check(s1 == 200 and s2 == 200 and kreis[:2] == b"\xff\xd8" and kreis != roh, "Admin-Vorschau mit Kreis")
+        eintrag = next(b for b in admin.call("GET", "/api/admin/stand")[1]["letzte"] if b["name"] == erster)
+        check(eintrag["einzel"] == 3 and eintrag["erkennung"] == "gefunden" and eintrag["wer"] == ["Bilderkennung"],
+              "Admin-Liste zeigt Einzelkugel + Bilderkennung")
+        s, raw = admin.call("GET", "/api/admin/zip")
+        zz = zipfile.ZipFile(io.BytesIO(raw))
+        check(f"images/{erster}.jpg" in zz.namelist() and zz.read(f"labels/{erster}.txt").decode().startswith("3 0.25"),
+              "erkannte Einzelkugel-Bilder sind in der Trainings-ZIP (Klasse 3)")
+        nicht = Client(base).call("POST", "/api/upload", {"name": "20261113-130000-000"})
+        check(nicht[0] == 403, "Upload ohne Schlüssel weiter gesperrt")
 
         print("Umstellung alter Daten")
         alt = server.Daten(os.path.join(d, "alt"))

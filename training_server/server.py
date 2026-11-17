@@ -8,8 +8,12 @@ Billard-Training im Netz (VPS): Bilder vom Tisch zuhause festlegen.
     Bilder, denen nur noch wenig fehlt, kommen zuerst.
     -> fertig; die Trainings-ZIP nimmt je Kugel die Mehrheit (gleiche Nummer an fast gleicher Stelle).
   Admin (/admin, hinter Authelia): Trainer und Codes, Stand, ZIP fuer training/train_coral.py.
+  Einzelkugel-Bilder (am Pi per Knopf, Nummer am Pi festgelegt): die Kugel findet eine einfache
+    Bilderkennung hier auf dem Server (einzelkugel.py, Vergleich mit dem leeren Tisch). Genau eine
+    Kugel gefunden -> Bild ist sofort fertig ("Bilderkennung"); sonst legen es Trainer wie gewohnt fest.
 
-Nur Standardbibliothek. Daten in DATA_DIR: billard.sqlite, bilder/<name>.jpg, geheim.key.
+Python-Standardbibliothek, fuer die Einzelkugel-Erkennung zusaetzlich Pillow + numpy.
+Daten in DATA_DIR: billard.sqlite, bilder/<name>.jpg, bilder/leer/<hash>.jpg, geheim.key.
 """
 
 import base64
@@ -27,6 +31,11 @@ import time
 import urllib.parse
 import zipfile
 
+try:
+    import einzelkugel                 # Pillow + numpy; ohne: Einzelkugel-Bilder legen Trainer fest
+except ImportError:
+    einzelkugel = None
+
 HIER = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 UPLOAD_KEY = os.environ.get("UPLOAD_KEY", "")
@@ -40,6 +49,7 @@ ZIEL = max(1, int(os.environ.get("FESTLEGUNGEN", "3")))   # so oft wird jedes Bi
 COOKIE = "billard_training"
 MAX_AGE = 120 * 24 * 3600
 MAX_UPLOAD = 8_000_000
+ERKENNUNG = "Bilderkennung"        # "Person", die Einzelkugel-Bilder festlegt (id 0)
 
 
 class Fehler(ValueError):
@@ -172,6 +182,11 @@ class Daten:
                 kugeln TEXT NOT NULL, zeit REAL NOT NULL, UNIQUE (bild, person));
             CREATE INDEX IF NOT EXISTS festlegungen_person ON festlegungen(person);
         """)
+        spalten = {r["name"] for r in self.db.execute("PRAGMA table_info(bilder)")}
+        if "einzel" not in spalten:            # Kugelnummer bei Einzelkugel-Bildern, sonst NULL
+            self.db.execute("ALTER TABLE bilder ADD COLUMN einzel INTEGER")
+            self.db.execute("ALTER TABLE bilder ADD COLUMN erkennung TEXT")
+        os.makedirs(os.path.join(self.bilder, "leer"), exist_ok=True)
         # Umstellung auf "jedes Bild mehrfach, ohne Vorschlaege": alte Runden werden zu "offen".
         # Am Tisch festgelegte Kugeln bleiben in kugeln1 stehen, zaehlen aber nicht als Festlegung.
         self.db.execute("""UPDATE bilder SET status = 'offen' WHERE status IN ('runde1', 'runde2', 'fertig')
@@ -302,13 +317,15 @@ class Daten:
         except (KeyError, TypeError, ValueError):
             raise Fehler("Bildangaben fehlen")
         balls = [b for b in meta.get("balls", []) if isinstance(b, dict)]
+        einzel = d.get("einzelkugel")
+        if einzel is not None:
+            if not isinstance(einzel, int) or not 0 <= einzel <= 15:
+                raise Fehler("Kugelnummer")
+            return self._upload_einzel(name, jpg, d.get("leer"), w, h, radius, einzel)
         with self.lock:
             if self.db.execute("SELECT 1 FROM bilder WHERE name = ?", (name,)).fetchone():
                 return False
-            tmp = os.path.join(self.bilder, name + ".jpg.tmp")
-            with open(tmp, "wb") as f:
-                f.write(jpg)
-            os.replace(tmp, os.path.join(self.bilder, name + ".jpg"))
+            self._bild_speichern(name, jpg)
             festgelegt = bool(d.get("festgelegt")) and all(ball_num(b) is not None for b in balls)
             if festgelegt:
                 # am Tisch schon festgelegt -> wird aufgehoben, zaehlt aber nicht: online legen trotzdem alle neu fest
@@ -323,6 +340,63 @@ class Daten:
                 self.db.execute("""INSERT INTO bilder (name, eingang, breite, hoehe, radius, modell, vorschlag, status)
                                    VALUES (?,?,?,?,?,?,?, 'offen')""",
                                 (name, self.clock(), w, h, radius, meta.get("model"), json.dumps(balls)))
+            self.db.commit()
+        return True
+
+    def _bild_speichern(self, name, jpg):
+        tmp = os.path.join(self.bilder, name + ".jpg.tmp")
+        with open(tmp, "wb") as f:
+            f.write(jpg)
+        os.replace(tmp, os.path.join(self.bilder, name + ".jpg"))
+
+    def _leer_speichern(self, leer_b64):
+        """Bild des leeren Tisches (kommt mit jedem Einzelkugel-Bild) einmal ablegen -> Bytes oder None."""
+        if not leer_b64:
+            return None
+        try:
+            leer = base64.b64decode(leer_b64, validate=True)
+        except (ValueError, TypeError):
+            raise Fehler("Bild des leeren Tisches")
+        if not leer.startswith(b"\xff\xd8") or len(leer) > MAX_UPLOAD:
+            raise Fehler("Bild des leeren Tisches ist kein JPEG")
+        pfad = os.path.join(self.bilder, "leer", hashlib.sha256(leer).hexdigest()[:20] + ".jpg")
+        if not os.path.exists(pfad):
+            with open(pfad + ".tmp", "wb") as f:
+                f.write(leer)
+            os.replace(pfad + ".tmp", pfad)
+        return leer
+
+    def _upload_einzel(self, name, jpg, leer_b64, w, h, radius, nummer):
+        """Einzelkugel-Bild: Nummer kommt vom Pi, die Position findet die Bilderkennung."""
+        leer = self._leer_speichern(leer_b64)
+        kugeln, grund = [], "Bilderkennung nicht installiert (Pillow/numpy)"
+        if einzelkugel is not None:
+            try:
+                kugeln, grund = einzelkugel.finde_kugel(jpg, leer, radius)
+            except Exception as e:                       # kaputtes Bild o. ae.: dann legen Trainer fest
+                kugeln, grund = [], f"Bilderkennung: {e}"
+        basis = {"x": 0, "y": 0, "kind": "cue" if nummer == 0 else "eight" if nummer == 8 else
+                  ("solid" if nummer < 8 else "stripe"),
+                  "color": "" if nummer == 0 else "schwarz" if nummer == 8 else
+                  next(c for c, v in COLOR_NUMBER.items() if v == (nummer if nummer < 8 else nummer - 8)),
+                  "number": nummer}
+        gefunden = len(kugeln) == 1
+        now = self.clock()
+        with self.lock:
+            if self.db.execute("SELECT 1 FROM bilder WHERE name = ?", (name,)).fetchone():
+                return False
+            self._bild_speichern(name, jpg)
+            if gefunden:
+                kugel = dict(basis, x=kugeln[0][0], y=kugeln[0][1])
+                self.db.execute("""INSERT INTO bilder (name, eingang, breite, hoehe, radius, modell, vorschlag, status,
+                                   einzel, erkennung) VALUES (?,?,?,?,?,?,?, 'fertig', ?, ?)""",
+                                (name, now, w, h, radius, "Einzelkugel", json.dumps([kugel]), nummer, "gefunden"))
+                self.db.execute("INSERT INTO festlegungen (bild, person, person_name, kugeln, zeit) VALUES (?,?,?,?,?)",
+                                (name, 0, ERKENNUNG, json.dumps([kugel]), now))
+            else:
+                self.db.execute("""INSERT INTO bilder (name, eingang, breite, hoehe, radius, modell, vorschlag, status,
+                                   einzel, erkennung) VALUES (?,?,?,?,?,?,?, 'offen', ?, ?)""",
+                                (name, now, w, h, radius, "Einzelkugel", "[]", nummer, grund or "unsicher"))
             self.db.commit()
         return True
 
@@ -354,7 +428,10 @@ class Daten:
         for r in self.db.execute("SELECT status, COUNT(*) n FROM bilder GROUP BY status"):
             z[r["status"]] = r["n"]
         z["ziel"] = ZIEL
-        z["festlegungen"] = self.db.execute("SELECT COUNT(*) FROM festlegungen").fetchone()[0]
+        z["festlegungen"] = self.db.execute("SELECT COUNT(*) FROM festlegungen WHERE person != 0").fetchone()[0]
+        z["einzel"] = self.db.execute("SELECT COUNT(*) FROM bilder WHERE einzel IS NOT NULL").fetchone()[0]
+        z["einzel_erkannt"] = self.db.execute(
+            "SELECT COUNT(*) FROM bilder WHERE einzel IS NOT NULL AND erkennung = 'gefunden'").fetchone()[0]
         if pid is not None:
             z["fuer_mich"] = self.db.execute(
                 """SELECT COUNT(*) FROM bilder b WHERE status = 'offen'
@@ -431,6 +508,14 @@ class Daten:
                 self.claims[name].pop(pid, None)
         return text
 
+    def kreise(self, name):
+        """Kugeln fuer die Vorschau im Admin (Ergebnis der Festlegungen bzw. der Bilderkennung)."""
+        with self.lock:
+            r = self.db.execute("SELECT radius FROM bilder WHERE name = ?", (name,)).fetchone()
+            if not r:
+                return [], 0
+            return self._ergebnis(name, r["radius"])[0], r["radius"]
+
     def bild_pfad(self, name):
         if not NAME_RE.fullmatch(name or ""):
             return None
@@ -453,7 +538,9 @@ class Daten:
             for r in rows:
                 fl = [dict(f) for f in self.db.execute("SELECT person, person_name, kugeln FROM festlegungen WHERE bild = ? ORDER BY zeit", (r["name"],))]
                 kugeln, einig = konsens([json.loads(f["kugeln"]) for f in fl], r["radius"])
-                out.append({"name": r["name"], "status": r["status"], "festlegungen": len(fl), "ziel": ZIEL,
+                out.append({"name": r["name"], "status": r["status"], "festlegungen": len(fl),
+                            "ziel": 1 if r["erkennung"] == "gefunden" else ZIEL,
+                            "einzel": r["einzel"], "erkennung": r["erkennung"],
                             "wer": [namen.get(f["person"], f["person_name"]) for f in fl],
                             "einig": einig if len(fl) >= 2 else None,
                             "verworfen_von": namen.get(r["verworfen_von"]), "kugeln": len(kugeln)})
@@ -611,8 +698,16 @@ def make_handler(daten: Daten):
                                         "letzte": daten.letzte(), "upload": bool(UPLOAD_KEY),
                                         "letzter_eingang": daten.letzter_eingang()})
             if pfad == "/api/admin/bild":
-                jpg = daten.bild_pfad((q.get("name") or [""])[0])
-                return self._datei(jpg, "image/jpeg") if jpg else self._send(404, {"error": "Bild nicht gefunden"})
+                name = (q.get("name") or [""])[0]
+                jpg = daten.bild_pfad(name)
+                if not jpg:
+                    return self._send(404, {"error": "Bild nicht gefunden"})
+                if (q.get("kreis") or ["0"])[0] == "1" and einzelkugel is not None:
+                    kugeln, radius = daten.kreise(name)
+                    if kugeln:
+                        with open(jpg, "rb") as f:
+                            return self._send(200, einzelkugel.mit_kreisen(f.read(), kugeln, radius), "image/jpeg")
+                return self._datei(jpg, "image/jpeg")
             if pfad == "/api/admin/zip":
                 modus = (q.get("modus") or ["alle" if (q.get("runde1") or ["0"])[0] == "1" else "fertig"])[0]
                 if modus not in ("fertig", "einig", "alle"):

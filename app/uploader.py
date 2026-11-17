@@ -2,8 +2,9 @@
 Gespeicherte Trainingsbilder zum Server schicken (Trainingsseite im Netz, training_server/).
 
 Laeuft im Hintergrund, nur wenn TRAINING_UPLOAD_URL und TRAINING_UPLOAD_KEY gesetzt sind.
-Schaut regelmaessig in dataset/pruefen/ (offen) und dataset/geprueft/ (am Tisch festgelegt) und
-schickt jedes Bild genau einmal hoch. Was schon oben ist, steht in dataset/hochgeladen.txt.
+Schaut regelmaessig in dataset/pruefen/ (offen), dataset/geprueft/ (am Tisch festgelegt) und
+dataset/einzel/ (Einzelkugel per Knopf, mit Bild des leeren Tisches) und schickt jedes Bild genau
+einmal hoch. Was schon oben ist, steht in dataset/hochgeladen.txt.
 Ohne Internet wird es spaeter nochmal versucht; am Tisch merkt man davon nichts.
 Die Bilder bleiben auf dem Pi.
 """
@@ -49,7 +50,8 @@ class Uploader:
         """(name, jpg, json, festgelegt) fuer alles, was noch nicht oben ist - aelteste zuerst."""
         out = []
         for folder, lbl, done in ((self.rec.pending_dir, self.rec.pending_dir, False),
-                                  (self.rec.ok_img, self.rec.ok_lbl, True)):
+                                  (self.rec.ok_img, self.rec.ok_lbl, True),
+                                  (self.rec.single_dir, self.rec.single_dir, False)):
             try:
                 names = os.listdir(folder)
             except OSError:
@@ -67,8 +69,17 @@ class Uploader:
             image = base64.b64encode(f.read()).decode()
         with open(js) as f:
             meta = json.load(f)
-        body = json.dumps({"name": name, "image": image, "meta": meta, "festgelegt": done,
-                           "von": meta.get("labeled_by") if done else None}).encode()
+        d = {"name": name, "image": image, "meta": meta, "festgelegt": done,
+             "von": meta.get("labeled_by") if done else None}
+        if meta.get("single_ball") is not None and os.path.dirname(jpg) == self.rec.single_dir:
+            d["einzelkugel"] = int(meta["single_ball"])
+            if meta.get("empty"):
+                try:
+                    with open(os.path.join(self.rec.single_dir, meta["empty"]), "rb") as f:
+                        d["leer"] = base64.b64encode(f.read()).decode()
+                except OSError:
+                    pass
+        body = json.dumps(d).encode()
         req = urllib.request.Request(self.url, data=body, method="POST",
                                      headers={"Content-Type": "application/json", "X-Upload-Key": self.key})
         with urllib.request.urlopen(req, timeout=30) as r:

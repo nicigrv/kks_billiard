@@ -83,6 +83,7 @@ class Recorder:
         self.ok_img = os.path.join(base_dir, "geprueft", "images")
         self.ok_lbl = os.path.join(base_dir, "geprueft", "labels")
         self.discard_dir = os.path.join(base_dir, "verworfen")
+        self.single_dir = os.path.join(base_dir, "einzel")   # Einzelkugel per Knopf: Kreis zieht der VPS
         self.min_free_bytes = min_free_bytes
         self.lock = threading.Lock()
         self.claims = {}                  # Bildname -> (wer, seit wann): gerade in Arbeit
@@ -314,12 +315,43 @@ class Recorder:
                                  extra)
         return name
 
+    @property
+    def single(self):
+        return self._count(self.single_dir, ".json")
+
+    def save_single(self, warped, number, radius, empty_jpg=None):
+        """Einzelkugel-Bild per Knopf: nur Bild + Kugelnummer, die Position findet die Bilderkennung
+        auf dem Trainingsserver. Das Bild des leeren Tisches (falls gemerkt) liegt einmal daneben
+        (leer-<hash>.jpg) und geht mit jedem Bild mit hoch."""
+        if not self.disk_ok():
+            return None
+        with self.lock:
+            os.makedirs(self.single_dir, exist_ok=True)
+            empty = None
+            if empty_jpg:
+                import hashlib
+                empty = "leer-" + hashlib.sha256(empty_jpg).hexdigest()[:16] + ".jpg"
+                p = os.path.join(self.single_dir, empty)
+                if not os.path.exists(p):
+                    with open(p, "wb") as f:
+                        f.write(empty_jpg)
+            name = self._new_name()
+            h, w = warped.shape[:2]
+            cv2.imwrite(os.path.join(self.single_dir, name + ".jpg"), warped, [cv2.IMWRITE_JPEG_QUALITY, 92])
+            data = {"width": w, "height": h, "radius": float(radius), "model": None, "balls": [],
+                    "single_ball": int(number), "empty": empty}
+            tmp = os.path.join(self.single_dir, name + ".json.tmp")
+            with open(tmp, "w") as f:
+                json.dump(data, f)
+            os.replace(tmp, os.path.join(self.single_dir, name + ".json"))
+        return name
+
     def delete_all(self):
         """ALLE Trainingsbilder loeschen (offen, festgelegt, verworfen) und die Trefferquote
         zuruecksetzen. Das hochgeladene Modell bleibt. Liefert die Anzahl geloeschter Bilder."""
         with self.lock:
-            n = self.pending + self.verified + self.discarded
-            for folder in (self.pending_dir, os.path.dirname(self.ok_img), self.discard_dir):
+            n = self.pending + self.verified + self.discarded + self.single
+            for folder in (self.pending_dir, os.path.dirname(self.ok_img), self.discard_dir, self.single_dir):
                 shutil.rmtree(folder, ignore_errors=True)
             self.claims.clear()
             try:
@@ -347,7 +379,7 @@ class Recorder:
         n = 0
         with zipfile.ZipFile(path, "w", zipfile.ZIP_STORED) as z:
             for folder, sub in ((self.pending_dir, "offen"), (self.ok_img, "festgelegt"),
-                                (self.discard_dir, "verworfen")):
+                                (self.discard_dir, "verworfen"), (self.single_dir, "einzelkugel")):
                 if not os.path.isdir(folder):
                     continue
                 lbl_dir = self.ok_lbl if folder == self.ok_img else folder

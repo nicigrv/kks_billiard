@@ -88,7 +88,8 @@ class App:
         self.auth = None                                      # setzt web.start()
         self.panel_url = ""                                   # Adresse des Spiel-Panels (QR-Code)
         self.notes = Notices()                                # Meldungen oben rechts
-        self.single = SingleBall(self.pipe, self.recorder, self.notes)   # Einzelkugel-Serie (KI-Training)
+        self.single = SingleBall(self.pipe, self.recorder, self.notes,      # Einzelkugel (KI-Training)
+                                 has_upload=lambda: self.uploader is not None)
         self._edges = {}
         self._disk = (0.0, True)
         self.proc_fps = 0.0
@@ -718,6 +719,8 @@ class App:
                     return self.single.start(p.get("count", 50), p.get("interval", 1.0), p.get("only_new", True))
                 if name == "single_stop":
                     return self.single.stop()
+                if name == "single_shot":
+                    return self.single.shot()
             except ValueError as e:
                 raise config.UserError(str(e))
             return None
