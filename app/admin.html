@@ -20,6 +20,8 @@
   --solid: #F2B705;
   --foul: #D2453B;
   --radius-board: 18px;
+  --card: rgba(8, 36, 28, .62);
+  --line: rgba(122, 75, 46, .45);
   --radius-btn: 12px;
   --display: "Barlow Condensed", "Arial Narrow", sans-serif;
   --body: "Atkinson Hyperlegible", system-ui, sans-serif;
@@ -38,14 +40,95 @@ body {
   font: 17px/1.5 var(--body);
   padding: 16px max(16px, env(safe-area-inset-left)) 48px;
 }
-main { max-width: 560px; margin: 0 auto; }
-/* iPad quer / breite Bildschirme: links Grafik + Spielstand, rechts Bedienung */
-@media (min-width: 900px) {
-  main { max-width: 1240px; display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 28px; align-items: start; }
-  .col-left { position: sticky; top: 16px; }
-  .col-right > section:first-child { margin-top: 0; }
+main { max-width: 1240px; margin: 0 auto; }
+
+/* ---------- Kopfzeile + Reiter ---------- */
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 14px; }
+.top h1 { font: 700 32px/1 var(--display); margin: 0 8px 0 0; letter-spacing: .5px; }
+/* Links bleiben links: oben rechts erscheinen die Meldungen (notify.js) */
+.links { display: flex; flex-wrap: wrap; gap: 8px; }
+.links a, .links button { min-height: 40px; padding: 8px 14px; font-size: 15px; border-radius: 10px; }
+.links a { display: inline-flex; align-items: center; color: var(--ivory); text-decoration: none;
+  border: 2px solid var(--rail-light); font-weight: 700; }
+@media (max-width: 520px) {
+  .top h1 { font-size: 28px; }
+  .links a, .links button { min-height: 36px; padding: 6px 10px; font-size: 14px; }
+  .card { padding: 14px; }
 }
+.tabs { position: sticky; top: 0; z-index: 5; display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none;
+  margin: 0 -4px 18px; padding: 6px 4px; background: rgba(10, 47, 37, .92); backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { flex: 0 0 auto; min-height: 44px; padding: 8px 16px; border-radius: 10px; background: transparent;
+  color: var(--ivory-dim); font-weight: 700; white-space: nowrap; }
+.tab:hover { color: var(--ivory); }
+.tab[aria-selected="true"] { background: var(--rail); color: var(--ivory); box-shadow: inset 0 0 0 1px var(--rail-light); }
+.tab .badge { font-size: 14px; margin-left: 4px; }
+
+/* ---------- Karten ---------- */
+.cards { display: grid; gap: 16px; grid-template-columns: 1fr; align-items: start; }
+@media (min-width: 900px) {
+  .cards { grid-template-columns: 1fr 1fr; }
+  .cards .wide { grid-column: 1 / -1; }
+  .cards.overview { grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); }
+  .cards.overview .game { grid-row: span 2; }
+}
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px; min-width: 0; }
+.card h2, .h2 { font: 700 24px/1.15 var(--display); margin: 0 0 10px; letter-spacing: .3px; display: block; }
+.card h3 { font: 700 19px/1.2 var(--display); margin: 14px 0 4px; }
+.cardhead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.cardhead h2 { margin: 0; }
+.block { width: 100%; }
+button.big { min-height: 64px; font-size: 19px; }
+.hint.small, .statusline { font-size: 14px; }
 .graphic { width: 100%; aspect-ratio: 16 / 9; display: block; border-radius: 12px; background: #0E1218; margin-bottom: 14px; }
+.game .board { border-width: 6px; padding: 10px 12px; }
+.game .team .name { font-size: 26px; }
+.game .team .frames { font-size: 40px; }
+
+/* aufklappbare Karte (Tisch einrichten, Kamerabild) */
+details.expand > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+details.expand > summary::-webkit-details-marker { display: none; }
+details.expand > summary .h2 { margin: 0; }
+details.expand > summary .sub { display: block; font-size: 14px; color: var(--ivory-dim); }
+details.expand > summary::after { content: "Öffnen"; flex: 0 0 auto; padding: 8px 14px; border-radius: 10px;
+  border: 2px solid var(--rail-light); font-weight: 700; font-size: 15px; }
+details.expand[open] > summary::after { content: "Schließen"; }
+details.expand > div { margin-top: 14px; }
+
+/* "So geht's": Erklaertexte eingeklappt */
+details.help { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+details.help > summary { cursor: pointer; color: var(--chalk); font-weight: 700; font-size: 15px; list-style: none; }
+details.help > summary::-webkit-details-marker { display: none; }
+details.help > summary::before { content: "\25B8"; display: inline-block; margin-right: 6px; transition: transform .2s; }
+details.help[open] > summary::before { transform: rotate(90deg); }
+details.help p { color: var(--ivory-dim); font-size: 15px; margin: 10px 0 0; }
+
+/* Systemstatus */
+.status { list-style: none; padding: 0; margin: 0; }
+.status li { display: grid; grid-template-columns: 14px 1fr auto; align-items: center; gap: 4px 12px;
+  padding: 10px 0; border-bottom: 1px solid var(--line); }
+.status li:last-child { border-bottom: 0; }
+.status .lamp { width: 12px; height: 12px; border-radius: 50%; background: #55645C; }
+.status .ok .lamp { background: #30D158; }
+.status .warn .lamp { background: #FF9F0A; }
+.status .bad .lamp { background: #FF453A; }
+.status .off .lamp { background: #55645C; }
+.status .what { font-weight: 700; }
+.status .val { display: block; font-weight: 400; font-size: 14px; color: var(--ivory-dim); }
+.status button { min-height: 36px; padding: 6px 12px; font-size: 14px; background: transparent; border: 2px solid var(--rail-light); }
+
+.switchrow.plain { background: none; border: 0; padding: 0; margin: 0; }
+.qrrow { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.qrrow .statusline { flex: 1 1 160px; overflow-wrap: anywhere; }
+.code-input { text-transform: uppercase; letter-spacing: 3px; }
+.seg.compact label { padding: 8px 14px; font-size: 15px; }
+.single { display: grid; gap: 4px 24px; }
+@media (min-width: 900px) { .single { grid-template-columns: 1fr 1fr; } }
+.singleimg { width: 100%; border-radius: 10px; margin-top: 6px; display: block; }
+.danger-zone { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
+  border-color: rgba(210, 69, 59, .45); }
+a.btnlink.quiet { background: transparent; border: 2px solid var(--rail-light); }
 .toggle.on { background: var(--chalk); color: var(--felt-dark); }
 .statusline { font-size: 15px; color: var(--ivory-dim); margin: 8px 0 12px; }
 .statusline b { color: var(--ivory); }
@@ -110,7 +193,6 @@ a.link { color: var(--chalk); font-weight: 700; }
 .sys .ok { color: var(--chalk); }
 
 /* ---------- Bereiche ---------- */
-section { margin-top: 28px; }
 h2 { font: 700 26px/1.2 var(--display); margin: 0 0 10px; }
 p.hint { color: var(--ivory-dim); margin: 0 0 12px; font-size: 15px; }
 
@@ -147,14 +229,8 @@ input[type=text], input[type=password], input[type=number], select {
 .seg input:checked + label { background: var(--rail); font-weight: 700; }
 .seg input:focus-visible + label { outline: 3px solid var(--chalk); outline-offset: -3px; }
 
-details { border-top: 2px solid rgba(122, 75, 46, .6); padding-top: 14px; margin-top: 22px; }
-summary { font: 700 24px/1.2 var(--display); cursor: pointer; list-style: none; }
-summary::-webkit-details-marker { display: none; }
-summary::after { content: "+"; float: right; color: var(--ivory-dim); }
-details[open] summary::after { content: "\2212"; }
-details > div { margin-top: 12px; }
 
-.log { list-style: none; padding: 0; margin: 0; font-size: 14px; color: var(--ivory-dim); }
+.log { list-style: none; padding: 0; margin: 0; font-size: 14px; color: var(--ivory-dim); max-height: 360px; overflow-y: auto; }
 .log li { padding: 6px 0; border-bottom: 1px solid rgba(239, 230, 210, .08); }
 .log time { color: var(--ivory); margin-right: 8px; font-variant-numeric: tabular-nums; }
 
@@ -177,10 +253,6 @@ details > div { margin-top: 12px; }
 .dot { width: 12px; height: 12px; border-radius: 50%; background: #55645C; display: inline-block; }
 .dot.on { background: #7FE0A0; }
 .addrow { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
-.topnav { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
-.topnav h1 { font: 700 30px/1 var(--display); margin: 0 auto 0 0; }
-.topnav a, .topnav button { min-height: 40px; padding: 8px 12px; font-size: 15px; border-radius: 10px; }
-.topnav a { color: var(--ivory); text-decoration: none; border: 2px solid var(--rail-light); font-weight: 700; }
 .switchrow { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 16px;
   border-radius: 14px; background: rgba(10, 47, 37, .7); border: 2px solid rgba(122, 75, 46, .55); margin-bottom: 10px; }
 .switchrow .lbl { font-weight: 700; }
@@ -191,7 +263,7 @@ details > div { margin-top: 12px; }
   background: #fff; box-shadow: 0 2px 4px rgba(0,0,0,.3); transition: transform .25s cubic-bezier(.3,1.3,.5,1); }
 .switch[aria-checked="true"] { background: #30D158; }
 .switch[aria-checked="true"]::after { transform: translateX(22px); }
-.qrprev { display: block; width: 160px; height: 160px; margin: 4px 0 12px; border-radius: 12px; background: #fff; image-rendering: pixelated; }
+.qrprev { display: block; width: 132px; height: 132px; margin: 4px 0 12px; border-radius: 12px; background: #fff; image-rendering: pixelated; }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
@@ -200,269 +272,343 @@ details > div { margin-top: 12px; }
 </head>
 <body>
 <main>
- <div class="col-left">
-
-  <nav class="topnav" aria-label="Seiten">
+  <header class="top">
     <h1>Admin</h1>
-    <a href="/">Spiel-Panel</a>
-    <a href="/beamer" target="_blank" rel="noopener">Beamer-Ansicht</a>
-    <button class="quiet" type="button" id="logoutBtn">Abmelden</button>
-  </nav>
-  <img class="graphic" id="graphic" alt="Grafische Ansicht des Tisches wie auf dem Beamer">
+    <nav class="links" aria-label="Seiten">
+      <a href="/">Spiel-Panel</a>
+      <a href="/beamer" target="_blank" rel="noopener">Beamer-Ansicht</a>
+      <button class="quiet" type="button" id="logoutBtn">Abmelden</button>
+    </nav>
+  </header>
 
-  <div class="board" aria-live="polite">
-    <div class="cueball hidden" id="cueball" aria-hidden="true"></div>
-    <div class="teams">
-      <div class="team" id="team0">
-        <div class="name" id="name0">Team A</div>
-        <div class="group" id="group0"></div>
-        <div class="rack" id="rack0"></div>
-        <div class="frames" id="frames0">0</div>
+  <nav class="tabs" role="tablist" aria-label="Bereiche">
+    <button type="button" role="tab" class="tab" data-tab="overview" id="tab-overview" aria-controls="panel-overview">Übersicht</button>
+    <button type="button" role="tab" class="tab" data-tab="setup" id="tab-setup" aria-controls="panel-setup">Einrichtung</button>
+    <button type="button" role="tab" class="tab" data-tab="queue" id="tab-queue" aria-controls="panel-queue">Queue</button>
+    <button type="button" role="tab" class="tab" data-tab="training" id="tab-training" aria-controls="panel-training">KI-Training <span class="badge" id="reviewBadge" hidden></span></button>
+    <button type="button" role="tab" class="tab" data-tab="review" id="tab-review" aria-controls="panel-review">Prüfer <span class="badge" id="roundBadge" hidden></span></button>
+  </nav>
+
+  <!-- ===================================================== Übersicht -->
+  <section class="panel" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview">
+    <div class="cards overview">
+      <div class="card game">
+        <img class="graphic" id="graphic" alt="Grafische Ansicht des Tisches wie auf dem Beamer">
+        <div class="board" aria-live="polite">
+          <div class="cueball hidden" id="cueball" aria-hidden="true"></div>
+          <div class="teams">
+            <div class="team" id="team0">
+              <div class="name" id="name0">Team A</div>
+              <div class="group" id="group0"></div>
+              <div class="rack" id="rack0"></div>
+              <div class="frames" id="frames0">0</div>
+            </div>
+            <div class="team" id="team1">
+              <div class="name" id="name1">Team B</div>
+              <div class="group" id="group1"></div>
+              <div class="rack" id="rack1"></div>
+              <div class="frames" id="frames1">0</div>
+            </div>
+          </div>
+          <div class="message idle" id="message">Verbinde mit dem Tisch ...</div>
+          <div class="sys"><span id="status">-</span><span id="fps"></span></div>
+        </div>
       </div>
-      <div class="team" id="team1">
-        <div class="name" id="name1">Team B</div>
-        <div class="group" id="group1"></div>
-        <div class="rack" id="rack1"></div>
-        <div class="frames" id="frames1">0</div>
+
+      <div class="card">
+        <h2>Systemstatus</h2>
+        <ul class="status" id="statusList" aria-live="polite"></ul>
+      </div>
+
+      <div class="card">
+        <h2>Verlauf</h2>
+        <ul class="log" id="log"></ul>
       </div>
     </div>
-    <div class="message idle" id="message">Verbinde mit dem Tisch ...</div>
-    <div class="sys"><span id="status">-</span><span id="fps"></span></div>
-  </div>
+  </section>
 
-
- </div>
- <div class="col-right">
-
-  <details id="cueDetails" open>
-    <summary>Queue mit Gyroskop</summary>
-    <div>
-      <div class="switchrow">
-        <span class="lbl" id="cueUseLbl">Queue benutzen<span class="sub">optional – auch im Spiel-Panel schaltbar</span></span>
-        <button class="switch" type="button" role="switch" id="cueUse" aria-checked="false" aria-labelledby="cueUseLbl"></button>
-      </div>
-      <p class="statusline" id="cueStatus">-</p>
-      <p class="hint">Koppeln: Queue einschalten, am Handy mit dem WLAN <b>„Billard-Queue-…“</b> verbinden. Auf der Seite, die sich öffnet, euer WLAN wählen. Der Queue zeigt dann seinen <b>Castcode</b> – hier eintragen, dort den Haken setzen und „Verbinden“. Danach finden sich Pi und Queue über das Netzwerk von selbst.</p>
-      <p class="hint">LED am Queue (M5Stack Atom): <b>rot</b> = keine Verbindung zum Pi, <b>grün</b> = verbunden, kein Spiel. Knopf drücken, wenn sie grün ist: Spiel <b>Team A</b> (blau) gegen <b>Team B</b> (orange) startet. Die LED zeigt dann die Farbe des Teams, das dran ist.</p>
-      <form class="addrow" id="cuePairForm" autocomplete="off">
-        <input type="text" id="cueCode" maxlength="9" placeholder="Castcode, z. B. K7P2QM" aria-label="Castcode des Queues" autocapitalize="characters" spellcheck="false" style="text-transform:uppercase;letter-spacing:3px">
-        <button type="submit" class="primary">Koppeln</button>
-      </form>
-      <button class="quiet" type="button" id="cueUnpair" style="width:100%;margin:8px 0 14px" hidden>Queue entkoppeln</button>
-      <p class="hint">Kalibrieren: Queue flach an die lange Bande legen, die Spitze zeigt in der Grafik nach <b>rechts</b>. Dann drücken und den Queue kurz ruhig lassen.</p>
-      <button class="primary" type="button" id="cueCalib" style="width:100%">Queue kalibrieren</button>
-      <div class="grid two" style="margin-top:12px">
-        <button class="quiet" type="button" id="cueFlip">Drehrichtung umkehren</button>
-        <div>
-          <label for="cueTol">Grüner Haken ab</label>
-          <select id="cueTol">
-            <option value="1">± 1°</option><option value="2">± 2°</option><option value="3">± 3°</option><option value="5">± 5°</option>
+  <!-- ===================================================== Einrichtung -->
+  <section class="panel" id="panel-setup" role="tabpanel" aria-labelledby="tab-setup" hidden>
+    <div class="cards">
+      <div class="card">
+        <h2>Kamera</h2>
+        <p class="statusline" id="cameraStatus">-</p>
+        <div class="field">
+          <label for="camSource">Kameraquelle</label>
+          <select id="camSource">
+            <option value="picam">Pi-Kameramodul (Flachbandkabel)</option>
+            <option value="usb">USB-Kamera am Pi</option>
+            <option value="demo">Demo (Bild aus dem Internet / Simulation)</option>
           </select>
         </div>
-      </div>
-      <p class="hint" style="margin-top:8px">Dreht sich der helle Queue in der Grafik falsch herum, „Drehrichtung umkehren“ drücken.</p>
-    </div>
-  </details>
-
-  <details id="qrDetails">
-    <summary>Beamer: QR-Code</summary>
-    <div>
-      <p class="hint">Unten rechts auf dem Beamer. Ohne eigenen Inhalt führt er zum Spiel-Panel (dort braucht es die Spiel-PIN). Ihr könnt auch eine eigene Adresse eintragen, z. B. eure Webseite.</p>
-      <div class="switchrow">
-        <span class="lbl" id="qrOnLbl">QR-Code zeigen</span>
-        <button class="switch" type="button" role="switch" id="qrOn" aria-checked="true" aria-labelledby="qrOnLbl"></button>
-      </div>
-      <img class="qrprev" id="qrPreview" alt="Vorschau des QR-Codes">
-      <p class="statusline" id="qrNow"></p>
-      <form id="qrForm" autocomplete="off">
-        <div class="field">
-          <label for="qrText">Inhalt (Adresse oder Text)</label>
-          <input type="text" id="qrText" inputmode="url" maxlength="300" placeholder="leer = Spiel-Panel">
+        <div class="field cam-opt" data-src="usb">
+          <label for="camDevice">Gerät</label>
+          <input type="text" id="camDevice" autocomplete="off" placeholder="/dev/video0">
         </div>
-        <div class="field">
-          <label for="qrLabel">Beschriftung darunter</label>
-          <input type="text" id="qrLabel" maxlength="24" placeholder="z. B. Spiel-Panel">
+        <div class="field cam-opt" data-src="demo">
+          <label for="demoUrl">Bildadresse (Foto eines Pooltisches von oben, JPEG/PNG)</label>
+          <input type="text" id="demoUrl" inputmode="url" autocomplete="off" placeholder="leer = eingebautes simuliertes Spiel">
+          <p class="hint small">Wird einmal geladen und auf dem Pi gespeichert (läuft danach auch offline). Danach unter „Tisch“ die vier Ecken antippen. Ohne Adresse läuft ein simuliertes Spiel, das schon eingerichtet ist.</p>
         </div>
-        <button class="primary" type="submit" style="width:100%">QR-Code speichern</button>
-      </form>
-    </div>
-  </details>
+        <button class="primary block" type="button" id="camApply">Kamera übernehmen</button>
+      </div>
 
-  <details id="roundDetails">
-    <summary>Prüfrunde (mehrere Prüfer) <span class="badge" id="roundBadge" hidden></span></summary>
-    <div>
-      <p class="hint">Jedes Bild wird von mehreren Prüfern gleichzeitig festgelegt. Prüfer öffnen am iPad <b id="pruefenUrl">/pruefen</b> und melden sich mit ihrem Code an. „Bild an alle Prüfer“ schickt das aktuelle Kamerabild an alle, die gerade angemeldet sind. Haben alle gespeichert, zeigt der Beamer „Alle fertig – weiter!“ und es klingt ein Ding. Mehrheit entscheidet. Gibt es ein KI-Modell, macht der KI-Chip zu jedem Bild einen Vorschlag, der danach mit dem Ergebnis der Prüfer verglichen wird: Wo die KI falsch lag oder die Prüfer uneinig sind, kommt ein „?“ – das Bild landet dann bei euch unter den offenen Bildern.</p>
-      <button class="primary" type="button" id="roundStartBtn" style="width:100%">Bild an alle Prüfer</button>
-      <label class="check"><input type="checkbox" id="showAiToggle"> Prüfer sehen den KI-Vorschlag (sonst legen sie selbst fest und es wird danach verglichen – genauer)</label>
-      <p class="statusline" id="reviewRoundStatus"></p>
-      <div class="grid two" id="roundActions" hidden>
-        <button class="quiet" type="button" id="roundFinishBtn">Mit den bisherigen abschließen</button>
-        <button class="danger" type="button" id="roundCancelBtn">Runde abbrechen</button>
+      <div class="card">
+        <h2>Beamer: QR-Code</h2>
+        <p class="hint">Unten rechts auf dem Beamer. Leer = Adresse des Spiel-Panels.</p>
+        <div class="switchrow">
+          <span class="lbl" id="qrOnLbl">QR-Code zeigen</span>
+          <button class="switch" type="button" role="switch" id="qrOn" aria-checked="true" aria-labelledby="qrOnLbl"></button>
+        </div>
+        <div class="qrrow">
+          <img class="qrprev" id="qrPreview" alt="Vorschau des QR-Codes">
+          <p class="statusline" id="qrNow"></p>
+        </div>
+        <form id="qrForm" autocomplete="off">
+          <div class="field">
+            <label for="qrText">Inhalt (Adresse oder Text)</label>
+            <input type="text" id="qrText" inputmode="url" maxlength="300" placeholder="leer = Spiel-Panel">
+          </div>
+          <div class="field">
+            <label for="qrLabel">Beschriftung darunter</label>
+            <input type="text" id="qrLabel" maxlength="24" placeholder="z. B. Spiel-Panel">
+          </div>
+          <button class="primary block" type="submit">QR-Code speichern</button>
+        </form>
       </div>
-      <h2 style="font-size:20px;margin:18px 0 4px">Prüfer</h2>
-      <ul class="reviewers" id="reviewerList"></ul>
-      <form class="addrow" id="addReviewer">
-        <input type="text" id="reviewerName" maxlength="20" placeholder="Name, z. B. Anna" aria-label="Name des Prüfers" autocomplete="off">
-        <button type="submit">Hinzufügen</button>
-      </form>
-      <p class="hint" style="margin-top:12px" id="soundInfo"></p>
-      <button class="quiet" type="button" id="soundTestBtn" style="width:100%">Ding testen (HDMI)</button>
-    </div>
-  </details>
 
-  <details id="fixBallsDetails">
-    <summary>KI-Training: Kugeln festlegen <span class="badge" id="reviewBadge" hidden></span></summary>
-    <div>
-      <div class="switchrow">
-        <span class="lbl" id="autoLbl">Nach jedem Stoß automatisch ein Bild speichern<span class="sub">auch im Spiel-Panel schaltbar; Prüfer legen die Bilder später unter /pruefen fest</span></span>
-        <button class="switch" type="button" role="switch" id="autoSw" aria-checked="false" aria-labelledby="autoLbl"></button>
+      <details class="card wide expand" id="calibDetails">
+        <summary><span><span class="h2">Tisch einrichten</span><span class="sub" id="tableInfo">Ecken, Tischgröße, Tuchfarbe</span></span></summary>
+        <div>
+          <p class="hint">Die vier Ecken der Spielfläche antippen, dort wo das Tuch auf die Bande trifft – einmal rundherum, beginnend an einer langen Seite.</p>
+          <div class="calib"><canvas id="calibCanvas" width="800" height="600" aria-label="Kamerabild zum Markieren der Tischecken"></canvas></div>
+          <div class="grid two" style="margin-top:12px">
+            <div class="field">
+              <label for="tableSize">Tischgröße</label>
+              <select id="tableSize">
+                <option value="7ft">7 Fuß (Spielfläche ca. 1,98 m)</option>
+                <option value="8ft">8 Fuß (Spielfläche ca. 2,24 m)</option>
+                <option value="9ft">9 Fuß (Spielfläche ca. 2,54 m)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="clothColor">Tuchfarbe (für die Grafik)</label>
+              <select id="clothColor">
+                <option value="blau">Blau</option>
+                <option value="gruen">Grün</option>
+              </select>
+            </div>
+          </div>
+          <div class="grid two">
+            <button class="quiet" id="calibReset" type="button">Neu markieren</button>
+            <button class="primary" id="calibSave" type="button" disabled>Speichern</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="card wide expand" id="viewDetails">
+        <summary><span><span class="h2">Was die Kamera sieht</span><span class="sub">Entzerrte Draufsicht mit den erkannten Kugeln</span></span></summary>
+        <div>
+          <img class="liveview" id="liveview" alt="Entzerrte Draufsicht mit erkannten Kugeln">
+          <p class="hint small">Gelb = volle, blau = halbe, weiß = Weiße, grau = 8. Fehlt eine Kugel oder ist sie falsch markiert, liegt es meist am Licht oder an den Tisch-Ecken.</p>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <!-- ===================================================== Queue -->
+  <section class="panel" id="panel-queue" role="tabpanel" aria-labelledby="tab-queue" hidden>
+    <div class="cards">
+      <div class="card">
+        <h2>Queue mit Gyroskop</h2>
+        <div class="switchrow">
+          <span class="lbl" id="cueUseLbl">Queue benutzen<span class="sub">optional – auch im Spiel-Panel schaltbar</span></span>
+          <button class="switch" type="button" role="switch" id="cueUse" aria-checked="false" aria-labelledby="cueUseLbl"></button>
+        </div>
+        <p class="statusline" id="cueStatus">-</p>
+        <form class="addrow" id="cuePairForm" autocomplete="off">
+          <input type="text" id="cueCode" maxlength="9" placeholder="Castcode, z. B. K7P2QM" aria-label="Castcode des Queues" autocapitalize="characters" spellcheck="false" class="code-input">
+          <button type="submit" class="primary">Koppeln</button>
+        </form>
+        <button class="quiet block" type="button" id="cueUnpair" style="margin-top:8px" hidden>Queue entkoppeln</button>
+        <details class="help">
+          <summary>So wird gekoppelt</summary>
+          <p>Queue einschalten, am Handy mit dem WLAN <b>„Billard-Queue-…“</b> verbinden. Auf der Seite, die sich öffnet, euer WLAN wählen. Der Queue zeigt dann seinen <b>Castcode</b> – hier eintragen, dort den Haken setzen und „Verbinden“. Danach finden sich Pi und Queue über das Netzwerk von selbst.</p>
+          <p>LED am Queue (M5Stack Atom): <b>rot</b> = keine Verbindung zum Pi, <b>grün</b> = verbunden, kein Spiel. Knopf drücken, wenn sie grün ist: Spiel <b>Team A</b> (blau) gegen <b>Team B</b> (orange) startet. Die LED zeigt dann die Farbe des Teams, das dran ist.</p>
+        </details>
       </div>
-      <div class="switchrow" style="margin-top:6px">
-        <span class="lbl" id="singleLbl">Einzelkugel-Serie<span class="sub">viele Bilder von einer Kugel – Nummer hier festlegen, Position findet der Pi selbst</span></span>
-        <button class="switch" type="button" role="switch" id="singleSw" aria-checked="false" aria-labelledby="singleLbl"></button>
-      </div>
-      <div id="singleBox" hidden style="margin-bottom:16px">
-        <p class="hint">1. Tisch leer räumen, dann „Leeren Tisch merken“. 2. Kugel wählen – sie ist damit für alle Bilder festgelegt. 3. Kugel hinlegen und Serie starten. Zwischen den Bildern die Kugel an andere Stellen legen. Gespeichert wird nur, wenn genau eine ruhende Kugel zu sehen ist (Hand aus dem Bild nehmen). Die Bilder landen direkt bei den festgelegten Bildern.</p>
-        <button type="button" class="quiet" id="singleEmptyBtn" style="width:100%">Leeren Tisch merken</button>
-        <p class="statusline" id="singleEmptyInfo" style="margin-top:6px"></p>
-        <p class="hint" style="margin:10px 0 0">Kugel</p>
-        <div class="chips" id="singleChips"></div>
-        <button type="button" class="primary" id="singleShotBtn" style="width:100%;min-height:64px;font-size:19px;margin-top:14px">Bild jetzt aufnehmen</button>
-        <p class="hint" id="singleShotHint" style="margin:6px 0 4px"></p>
-        <p class="hint" style="margin:14px 0 4px"><b>Oder automatisch als Serie</b> (der Pi wartet jeweils, bis genau eine ruhende Kugel zu sehen ist):</p>
+
+      <div class="card">
+        <h2>Kalibrieren</h2>
+        <p class="hint">Queue flach an die lange Bande legen, die Spitze zeigt in der Grafik nach <b>rechts</b>. Dann drücken und den Queue kurz ruhig lassen.</p>
+        <button class="primary block" type="button" id="cueCalib">Queue kalibrieren</button>
         <div class="grid two" style="margin-top:12px">
-          <div><label for="singleCount">Anzahl Bilder</label><input type="number" id="singleCount" min="1" max="500" value="50"></div>
-          <div><label for="singleInterval">Abstand (Sekunden)</label><input type="number" id="singleInterval" min="0.3" max="30" step="0.1" value="1"></div>
+          <button class="quiet" type="button" id="cueFlip">Drehrichtung umkehren</button>
+          <div>
+            <label for="cueTol">Grüner Haken ab</label>
+            <select id="cueTol">
+              <option value="1">± 1°</option><option value="2">± 2°</option><option value="3">± 3°</option><option value="5">± 5°</option>
+            </select>
+          </div>
         </div>
-        <label class="check"><input type="checkbox" id="singleOnlyNew" checked> Nur speichern, wenn die Kugel woanders liegt als beim letzten Bild</label>
+        <p class="hint small" style="margin-top:8px">Dreht sich der helle Queue in der Grafik falsch herum: „Drehrichtung umkehren“.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================== KI-Training -->
+  <section class="panel" id="panel-training" role="tabpanel" aria-labelledby="tab-training" hidden>
+    <div class="cards">
+      <div class="card">
+        <h2>Bilder sammeln</h2>
+        <p class="statusline" id="trainInfo"></p>
+        <div class="switchrow">
+          <span class="lbl" id="autoLbl">Nach jedem Stoß automatisch<span class="sub">speichert ein Bild, sobald der Tisch ruhig ist</span></span>
+          <button class="switch" type="button" role="switch" id="autoSw" aria-checked="false" aria-labelledby="autoLbl"></button>
+        </div>
         <div class="grid two">
-          <button type="button" class="primary" id="singleStartBtn">Serie starten</button>
-          <button type="button" class="danger" id="singleStopBtn" disabled>Stoppen</button>
+          <button type="button" class="primary" id="captureBtn">Jetzt ein Bild aufnehmen</button>
+          <a class="btnlink" href="/training">Trainingsmodus (groß, Lupe)</a>
         </div>
-        <p class="statusline" id="singleInfo" style="margin-top:10px"></p>
-        <img id="singleImg" alt="Zuletzt gespeichertes Bild der Serie" hidden style="width:100%;border-radius:10px;margin-top:6px">
+        <details class="help">
+          <summary>So läuft das Training</summary>
+          <p>Bilder entstehen per Knopf (hier oder „Bild speichern“ im Spiel-Panel) oder automatisch nach jedem Stoß. Festgelegt wird später in Ruhe: Prüfer melden sich unter <b>/pruefen</b> an und bekommen – solange keine Prüfrunde läuft – die gespeicherten Bilder, jeder ein anderes. Ihr legt die Kugeln unten fest: auf eine Kugel tippen, dann ihre Nummer; fehlt eine Kugel, auf die freie Stelle tippen. Sobald der KI-Chip ein Modell hat, schlägt er die Kugeln vor – dann nur noch prüfen und „Passt alles“. Nur festgelegte Bilder werden zum Training benutzt.</p>
+        </details>
       </div>
-      <p class="hint">Bilder entstehen per Knopf („Jetzt ein Bild aufnehmen“ hier oder „Bild speichern“ im Spiel-Panel) oder automatisch (Schalter oben). Festlegen geht später in Ruhe: Prüfer melden sich unter <b>/pruefen</b> an und bekommen – solange keine Prüfrunde läuft – die gespeicherten Bilder, jeder ein anderes. Ihr legt die Kugeln fest: auf eine Kugel tippen, dann ihre Nummer. Fehlt eine Kugel, auf die freie Stelle tippen. Sobald der KI-Chip ein Modell hat, schlägt er die Kugeln schon vor – dann nur noch prüfen und „Passt alles“. Nur festgelegte Bilder werden zum Training benutzt.</p>
-      <p class="statusline" id="qualityInfo"></p>
-      <p class="statusline" id="trainInfo"></p>
-      <a class="btnlink" href="/training" style="margin-bottom:14px">Trainingsmodus öffnen (großes Bild, Lupe)</a>
-      <div class="seg" role="radiogroup" aria-label="Welche Bilder" style="margin-bottom:12px">
-        <input type="radio" name="fixMode" id="modeReview" value="review" checked><label for="modeReview">Gesammelte Bilder</label>
-        <input type="radio" name="fixMode" id="modeLive" value="live"><label for="modeLive">Live-Bild jetzt</label>
-      </div>
-      <p class="statusline" id="editorTitle"></p>
-      <canvas class="fixcanvas" id="fixCanvas" width="800" height="400" aria-label="Tischbild mit zugeordneten Kugeln zum Prüfen"></canvas>
-      <div class="picker" id="picker">
-        <p class="hint" id="pickerTitle" style="margin:0">Kugel</p>
-        <div class="chips" id="kindChips"></div>
-        <div class="chips" id="colorChips"></div>
-      </div>
-      <div id="reviewActions" class="grid" style="margin-top:12px">
-        <button class="danger" type="button" id="reviewDiscard">Verwerfen</button>
-        <button class="quiet" type="button" id="reviewSkip">Später</button>
-        <button class="primary" type="button" id="reviewSave" disabled>Passt alles</button>
-      </div>
-      <p class="hint" id="reviewHint" style="margin-top:8px">„Verwerfen“ bei unbrauchbaren Bildern (Arm im Bild, verwackelt).</p>
-      <div id="liveActions" hidden>
-        <label class="check"><input type="checkbox" id="applyFix" checked> Korrektur auch im laufenden Spiel übernehmen</label>
+
+      <div class="card">
+        <h2>KI-Modell</h2>
+        <p class="statusline" id="modelStatus">-</p>
+        <p class="statusline" id="qualityInfo"></p>
         <div class="grid two">
-          <button class="quiet" type="button" id="fixReload">Neues Bild</button>
-          <button class="primary" type="button" id="fixSave" disabled>Korrektur speichern</button>
+          <button type="button" id="learnFeaturesBtn">Farben aus festgelegten Bildern lernen</button>
+          <button type="button" id="modelUploadBtn">Modell / Farben hochladen</button>
+        </div>
+        <p class="hint small" id="learnResult" hidden style="white-space:pre-line;margin-top:10px"></p>
+        <input type="file" id="modelFile" accept=".tflite,.json" multiple hidden>
+        <details class="help">
+          <summary>Mehr: Herunterladen, Zurücksetzen, Erklärung</summary>
+          <div class="grid two" style="margin:10px 0">
+            <a class="btnlink" id="datasetLink" href="/api/dataset.zip" download>Trainingsdaten laden</a>
+            <a class="btnlink quiet" id="allImagesLink" href="/api/all-images.zip" download>Alle Bilder laden</a>
+            <button type="button" class="quiet span2" id="resetFeaturesBtn">Gelernte Farben löschen</button>
+          </div>
+          <p>Die Erkennung läuft in drei Stufen: <b>1. Kugeln finden</b> (KI-Chip), <b>2. gestreift oder nicht</b> und <b>3. Farbe</b> (beides auf dem Pi, mit gelernten Werten). Aus Art und Farbe ergibt sich die Nummer. Ohne KI-Chip und Modell zählt der Pi nichts – er nimmt nur Bilder auf.</p>
+          <p>Stufe 1: Trainingsdaten laden, am PC oder in Google Colab trainieren (training/README.md), dann <b>billard_edgetpu.tflite</b> und <b>billard_merkmale.json</b> zusammen hochladen. Stufe 2 + 3 lernt der Pi in Sekunden selbst („Farben lernen“) – nach Änderungen am Licht neu lernen.</p>
+        </details>
+      </div>
+
+      <div class="card wide">
+        <div class="cardhead">
+          <h2>Kugeln festlegen</h2>
+          <div class="seg compact" role="radiogroup" aria-label="Welche Bilder">
+            <input type="radio" name="fixMode" id="modeReview" value="review" checked><label for="modeReview">Gesammelte Bilder</label>
+            <input type="radio" name="fixMode" id="modeLive" value="live"><label for="modeLive">Live-Bild jetzt</label>
+          </div>
+        </div>
+        <p class="statusline" id="editorTitle"></p>
+        <canvas class="fixcanvas" id="fixCanvas" width="800" height="400" aria-label="Tischbild mit zugeordneten Kugeln zum Prüfen"></canvas>
+        <div class="picker" id="picker">
+          <p class="hint" id="pickerTitle" style="margin:0">Kugel</p>
+          <div class="chips" id="kindChips"></div>
+          <div class="chips" id="colorChips"></div>
+        </div>
+        <div id="reviewActions" class="grid" style="margin-top:12px">
+          <button class="danger" type="button" id="reviewDiscard">Verwerfen</button>
+          <button class="quiet" type="button" id="reviewSkip">Später</button>
+          <button class="primary" type="button" id="reviewSave" disabled>Passt alles</button>
+        </div>
+        <p class="hint small" id="reviewHint" style="margin-top:8px">„Verwerfen“ bei unbrauchbaren Bildern (Arm im Bild, verwackelt).</p>
+        <div id="liveActions" hidden>
+          <label class="check"><input type="checkbox" id="applyFix" checked> Korrektur auch im laufenden Spiel übernehmen</label>
+          <div class="grid two">
+            <button class="quiet" type="button" id="fixReload">Neues Bild</button>
+            <button class="primary" type="button" id="fixSave" disabled>Korrektur speichern</button>
+          </div>
         </div>
       </div>
-      <div class="grid two" style="margin-top:16px">
-        <button type="button" class="primary" id="captureBtn">Jetzt ein Bild aufnehmen</button>
+
+      <div class="card wide">
+        <div class="switchrow plain">
+          <span class="lbl" id="singleLbl"><span class="h2">Einzelkugel-Serie</span><span class="sub">viele Bilder von einer Kugel – Nummer hier festlegen, Position findet der Pi selbst</span></span>
+          <button class="switch" type="button" role="switch" id="singleSw" aria-checked="false" aria-labelledby="singleLbl"></button>
+        </div>
+        <div id="singleBox" hidden>
+          <div class="single">
+            <div>
+              <p class="hint small" style="margin-top:14px">1. Tisch leer räumen → „Leeren Tisch merken“. 2. Kugel wählen. 3. Kugel hinlegen und Bild aufnehmen oder Serie starten; zwischen den Bildern die Kugel woanders hinlegen.</p>
+              <button type="button" class="quiet block" id="singleEmptyBtn">Leeren Tisch merken</button>
+              <p class="statusline" id="singleEmptyInfo" style="margin-top:6px"></p>
+              <label style="margin-top:10px">Kugel</label>
+              <div class="chips" id="singleChips"></div>
+              <button type="button" class="primary block big" id="singleShotBtn" style="margin-top:14px">Bild jetzt aufnehmen</button>
+              <p class="hint small" id="singleShotHint" style="margin:6px 0 4px"></p>
+            </div>
+            <div>
+              <h3>Automatisch als Serie</h3>
+              <p class="hint small">Der Pi wartet jeweils, bis genau eine ruhende Kugel zu sehen ist.</p>
+              <div class="grid two">
+                <div><label for="singleCount">Anzahl Bilder</label><input type="number" id="singleCount" min="1" max="500" value="50"></div>
+                <div><label for="singleInterval">Abstand (Sekunden)</label><input type="number" id="singleInterval" min="0.3" max="30" step="0.1" value="1"></div>
+              </div>
+              <label class="check"><input type="checkbox" id="singleOnlyNew" checked> Nur speichern, wenn die Kugel woanders liegt als beim letzten Bild</label>
+              <div class="grid two">
+                <button type="button" class="primary" id="singleStartBtn">Serie starten</button>
+                <button type="button" class="danger" id="singleStopBtn" disabled>Stoppen</button>
+              </div>
+              <p class="statusline" id="singleInfo" style="margin-top:10px"></p>
+              <img id="singleImg" alt="Zuletzt gespeichertes Bild der Serie" hidden class="singleimg">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card wide danger-zone">
+        <div>
+          <h2>Alle Bilder löschen</h2>
+          <p class="hint small" style="margin:0">Löscht offene, festgelegte, verworfene und Einzelkugel-Bilder. Das KI-Modell bleibt. Vorher ggf. „Alle Bilder laden“.</p>
+        </div>
         <button type="button" class="danger" id="deleteAllBtn">Alle Bilder löschen</button>
       </div>
     </div>
-  </details>
+  </section>
 
-  <details id="modelDetails">
-    <summary>KI-Modell (Coral)</summary>
-    <div>
-      <p class="statusline" id="modelStatus">-</p>
-      <p class="hint">Die Erkennung läuft in drei Stufen: <b>1. Kugeln finden</b> (KI-Chip), <b>2. gestreift oder nicht</b> und <b>3. Farbe</b> (beides auf dem Pi, mit gelernten Werten). Aus Art und Farbe ergibt sich die Nummer. Ohne KI-Chip und Modell zählt der Pi nichts – er nimmt nur Bilder auf, und ihr legt die Kugeln fest. Alle Bilder bleiben auf dem Pi gespeichert, auch verworfene.</p>
-      <p class="hint">Stufe 1 auf den Coral: 1. Trainingsdaten laden. 2. Am PC oder in Google Colab trainieren (Anleitung: training/README.md). 3. <b>billard_edgetpu.tflite</b> und <b>billard_merkmale.json</b> hier hochladen (beide Dateien auf einmal auswählen). Ältere Modelle mit 16 Kugelnummern gehen weiter – davon wird nur „hier ist eine Kugel“ benutzt.</p>
-      <p class="hint">Stufe 2 + 3 lernen geht auch direkt hier, in einigen Sekunden: „Farben lernen“ nimmt alle festgelegten Bilder auf dem Pi (z. B. aus der Einzelkugel-Serie). Nach Änderungen am Licht neu lernen.</p>
-      <div class="grid two">
-        <a class="btnlink" id="datasetLink" href="/api/dataset.zip" download>Trainingsdaten laden</a>
-        <button type="button" id="modelUploadBtn">Modell / Farben hochladen</button>
-        <button type="button" id="learnFeaturesBtn">Farben aus festgelegten Bildern lernen</button>
-        <button type="button" id="resetFeaturesBtn" style="background:transparent;border:2px solid var(--rail-light)">Gelernte Farben löschen</button>
-        <a class="btnlink span2" id="allImagesLink" href="/api/all-images.zip" download style="background:transparent;border:2px solid var(--rail-light)">Alle Bilder laden (auch offene und verworfene)</a>
+  <!-- ===================================================== Prüfer -->
+  <section class="panel" id="panel-review" role="tabpanel" aria-labelledby="tab-review" hidden>
+    <div class="cards">
+      <div class="card">
+        <h2>Prüfrunde</h2>
+        <p class="hint">Das aktuelle Kamerabild geht an alle angemeldeten Prüfer, jeder legt die Kugeln fest, die Mehrheit entscheidet.</p>
+        <button class="primary block" type="button" id="roundStartBtn">Bild an alle Prüfer</button>
+        <label class="check"><input type="checkbox" id="showAiToggle"> Prüfer sehen den KI-Vorschlag</label>
+        <p class="statusline" id="reviewRoundStatus"></p>
+        <div class="grid two" id="roundActions" hidden>
+          <button class="quiet" type="button" id="roundFinishBtn">Mit den bisherigen abschließen</button>
+          <button class="danger" type="button" id="roundCancelBtn">Runde abbrechen</button>
+        </div>
+        <details class="help">
+          <summary>So läuft eine Prüfrunde</summary>
+          <p>Haben alle gespeichert, zeigt der Beamer „Alle fertig – weiter!“ und es klingt ein Ding. Gibt es ein KI-Modell, macht der KI-Chip zu jedem Bild einen Vorschlag, der danach mit dem Ergebnis der Prüfer verglichen wird. Standardmäßig sehen die Prüfer den Vorschlag nicht (ehrlicher Vergleich). Wo die KI falsch lag oder die Prüfer uneinig sind, kommt ein „?“ – das Bild landet dann im KI-Training unter den gesammelten Bildern.</p>
+        </details>
       </div>
-      <p class="hint" id="learnResult" hidden style="white-space:pre-line"></p>
-      <input type="file" id="modelFile" accept=".tflite,.json" multiple hidden>
-    </div>
-  </details>
 
-  <details id="viewDetails">
-    <summary>Was die Kamera sieht</summary>
-    <div>
-      <img class="liveview" id="liveview" alt="Entzerrte Draufsicht mit erkannten Kugeln">
-      <p class="hint" style="margin-top:8px">Gelb = volle, blau = halbe, weiß = Weiße, grau = 8. Fehlt eine Kugel oder ist sie falsch markiert, wird das Licht oder die Kalibrierung das Problem sein.</p>
-    </div>
-  </details>
+      <div class="card">
+        <h2>Prüfer</h2>
+        <p class="hint">Prüfer öffnen am iPad <b id="pruefenUrl">/pruefen</b> und melden sich mit ihrem Code an. Grüner Punkt = online.</p>
+        <ul class="reviewers" id="reviewerList"></ul>
+        <form class="addrow" id="addReviewer">
+          <input type="text" id="reviewerName" maxlength="20" placeholder="Name, z. B. Anna" aria-label="Name des Prüfers" autocomplete="off">
+          <button type="submit">Hinzufügen</button>
+        </form>
+      </div>
 
-  <details id="cameraDetails">
-    <summary>Kamera</summary>
-    <div>
-      <p class="statusline" id="cameraStatus">-</p>
-      <div class="field">
-        <label for="camSource">Kameraquelle</label>
-        <select id="camSource">
-          <option value="picam">Pi-Kameramodul (Flachbandkabel)</option>
-          <option value="usb">USB-Kamera am Pi</option>
-          <option value="demo">Demo (Bild aus dem Internet / Simulation)</option>
-        </select>
-      </div>
-      <div class="field cam-opt" data-src="usb">
-        <label for="camDevice">Gerät</label>
-        <input type="text" id="camDevice" autocomplete="off" placeholder="/dev/video0">
-      </div>
-      <div class="field cam-opt" data-src="demo">
-        <label for="demoUrl">Bildadresse (Foto eines Pooltisches von oben, JPEG/PNG)</label>
-        <input type="text" id="demoUrl" inputmode="url" autocomplete="off" placeholder="leer = eingebautes simuliertes Spiel">
-        <p class="hint" style="margin-top:6px">Das Bild wird einmal geladen und auf dem Pi gespeichert (läuft danach auch offline). Danach unter „Tisch einrichten“ die vier Ecken des Tuchs antippen. Ohne Adresse läuft ein simuliertes Spiel, das schon eingerichtet ist.</p>
-      </div>
-      <button class="primary" type="button" id="camApply" style="width:100%">Kamera übernehmen</button>
-    </div>
-  </details>
-
-  <details id="calibDetails">
-    <summary>Tisch einrichten</summary>
-    <div>
-      <p class="hint">Tippe die vier Ecken der Spielfläche an, dort wo das Tuch auf die Bande trifft. Reihenfolge: einmal rundherum, beginnend an einer langen Seite.</p>
-      <div class="calib"><canvas id="calibCanvas" width="800" height="600" aria-label="Kamerabild zum Markieren der Tischecken"></canvas></div>
-      <div class="field" style="margin-top:12px">
-        <label for="tableSize">Tischgröße</label>
-        <select id="tableSize">
-          <option value="7ft">7 Fuß (Spielfläche ca. 1,98 m)</option>
-          <option value="8ft">8 Fuß (Spielfläche ca. 2,24 m)</option>
-          <option value="9ft">9 Fuß (Spielfläche ca. 2,54 m)</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="clothColor">Tuchfarbe (für die Grafik)</label>
-        <select id="clothColor">
-          <option value="blau">Blau</option>
-          <option value="gruen">Grün</option>
-        </select>
-      </div>
-      <div class="grid two">
-        <button class="quiet" id="calibReset" type="button">Neu markieren</button>
-        <button class="primary" id="calibSave" type="button" disabled>Speichern</button>
+      <div class="card">
+        <h2>Ding-Ton (HDMI)</h2>
+        <p class="statusline" id="soundInfo"></p>
+        <button class="quiet block" type="button" id="soundTestBtn">Ding testen</button>
       </div>
     </div>
-  </details>
-
-
-  <details>
-    <summary>Verlauf</summary>
-    <div><ul class="log" id="log"></ul></div>
-  </details>
-
- </div>
+  </section>
 </main>
 <div class="login" id="login" hidden>
   <form id="loginForm" autocomplete="off">
@@ -519,6 +665,7 @@ details > div { margin-top: 12px; }
       if (data.role !== "admin") { showLogin("Das ist die Spiel-PIN. Hier braucht es die Admin-PIN."); return; }
       $("login").hidden = true;
       poll();
+      if (tab === "training") loadEditor();      // Bild konnte vor der Anmeldung nicht geladen werden
     } catch (err) { showLogin("Tisch nicht erreichbar"); }
   });
   $("logoutBtn").addEventListener("click", async () => {
@@ -566,6 +713,11 @@ details > div { margin-top: 12px; }
 
     const log = $("log");
     log.innerHTML = "";
+    if (!g.log.length) {
+      const li = document.createElement("li");
+      li.textContent = "Noch nichts passiert – Spiel und Korrekturen erscheinen hier.";
+      log.appendChild(li);
+    }
     for (const [t, text] of g.log) {
       const li = document.createElement("li");
       const tm = document.createElement("time");
@@ -579,8 +731,88 @@ details > div { margin-top: 12px; }
     renderSingle(s);
     renderCamera(s);
     renderReview(s);
+    renderStatus(s);
+    $("tableInfo").textContent = s.calibrated
+      ? "Eingerichtet · " + (TABLE_NAMES[s.table_size] || s.table_size || "") + " · Tuch " + (s.cloth === "gruen" ? "grün" : "blau")
+      : "Noch nicht eingerichtet – die vier Ecken antippen";
     if (!calibDirty && s.table_size) $("tableSize").value = s.table_size;
     if (!calibDirty && s.cloth) $("clothColor").value = s.cloth;
+  }
+
+  // ---------------- Systemstatus (Übersicht) ----------------
+  const TABLE_NAMES = { "7ft": "7 Fuß", "8ft": "8 Fuß", "9ft": "9 Fuß" };
+  // Eine Zeile je Teil des Systems: Zustand (ok | warn | bad | off), Text, Sprung in den passenden Bereich
+  function statusRows(s) {
+    const rows = [];
+    const cam = s.camera || {};
+    rows.push(cam.connected
+      ? ["ok", "Kamera", (cam.name || "verbunden") + (s.camera_fps ? " · " + fmtNum(s.camera_fps, 1) + " Bilder/s" : ""), "setup"]
+      : ["bad", "Kamera", "keine Bilder" + (cam.error ? " – " + cam.error : ""), "setup"]);
+    rows.push(s.calibrated
+      ? ["ok", "Tisch", "eingerichtet · " + (TABLE_NAMES[s.table_size] || s.table_size || ""), "setup", "calib"]
+      : ["warn", "Tisch", "nicht eingerichtet – Ecken antippen", "setup", "calib"]);
+    const d = s.detector || {}, c = d.coral || {}, f = d.features || {};
+    rows.push(c.ready
+      ? ["ok", "KI-Chip", (c.model || "Modell geladen") + (c.ms ? " · " + Math.round(c.ms) + " ms pro Bild" : ""), "training"]
+      : ["bad", "KI-Chip", c.error || d.not_ready || "nicht bereit", "training"]);
+    rows.push(f.learning ? ["warn", "Farben & Streifen", "werden gerade gelernt …", "training"]
+      : !f.ready ? ["bad", "Farben & Streifen", f.error || "nicht bereit", "training"]
+      : f.own ? ["ok", "Farben & Streifen", "gelernt" + (f.model_time ? " am " + f.model_time : ""), "training"]
+      : ["warn", "Farben & Streifen", "Startwerte aus dem Simulator – mit eigenen Bildern lernen", "training"]);
+    const q = s.cue || {};
+    rows.push(!q.castcode ? ["off", "Queue", "nicht gekoppelt (optional)", "queue"]
+      : !q.enabled ? ["off", "Queue", "ausgeschaltet", "queue"]
+      : q.connected ? ["ok", "Queue", "verbunden" + (q.battery ? " · Akku " + fmtNum(q.battery, 2) + " V" : ""), "queue"]
+      : ["warn", "Queue", q.state || "nicht verbunden", "queue"]);
+    const revs = s.reviewers || [], rv = s.review || {};
+    const online = revs.filter((r) => r.online).length;
+    rows.push(rv.active ? ["warn", "Prüfer", "Prüfrunde läuft · " + rv.done + "/" + rv.total + " fertig", "review"]
+      : revs.length ? [online ? "ok" : "off", "Prüfer", online + " von " + revs.length + " online", "review"]
+      : ["off", "Prüfer", "noch keine angelegt", "review"]);
+    const t = s.training || {};
+    rows.push([t.pending ? "warn" : "ok", "Trainingsbilder",
+      (t.pending || 0) + " offen · " + (t.verified || 0) + " festgelegt", "training"]);
+    const up = t.upload;
+    if (up) rows.push([up.error ? "warn" : "ok", "Trainingsseite",
+      up.error ? up.error + (up.waiting ? ", " + up.waiting + " warten" : "") : up.waiting ? up.waiting + " werden hochgeladen" : "alles hochgeladen", "training"]);
+    rows.push(t.disk_ok === false ? ["bad", "Speicher", "fast voll – es werden keine Bilder mehr aufgenommen", "training"]
+      : ["ok", "Speicher", "genug frei", null]);
+    const snd = s.sound || {};
+    if (snd.error) rows.push(["warn", "Ding-Ton", snd.error, "review"]);
+    return rows;
+  }
+  const TAB_LABEL = { setup: "Einrichten", queue: "Öffnen", training: "Öffnen", review: "Öffnen" };
+  function renderStatus(s) {
+    const rows = statusRows(s);
+    const key = JSON.stringify(rows);
+    if (key === renderStatus.key) return;
+    renderStatus.key = key;
+    const ul = $("statusList");
+    ul.innerHTML = "";
+    for (const [level, what, val, tab, open] of rows) {
+      const li = document.createElement("li");
+      li.className = level;
+      const lamp = document.createElement("span"); lamp.className = "lamp";
+      lamp.setAttribute("aria-label", { ok: "in Ordnung", warn: "Hinweis", bad: "Problem", off: "aus" }[level]);
+      const txt = document.createElement("span"); txt.className = "what"; txt.textContent = what;
+      const v = document.createElement("span"); v.className = "val"; v.textContent = val;
+      txt.appendChild(v);
+      li.append(lamp, txt);
+      if (tab) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = level === "bad" ? (tab === "setup" ? "Einrichten" : "Beheben") : TAB_LABEL[tab];
+        b.addEventListener("click", () => {
+          showTab(tab);
+          if (open === "calib" && !$("calibDetails").open) $("calibDetails").open = true;
+          window.scrollTo({ top: 0 });
+        });
+        li.appendChild(b);
+      } else {
+        li.appendChild(document.createElement("span"));
+      }
+      ul.appendChild(li);
+    }
   }
 
   // ---------------- Grafik, Queue ----------------
@@ -618,8 +850,10 @@ details > div { margin-top: 12px; }
     if (c.connected) {
       add("Winkel: ", fmtNum(c.angle, 1) + "°");
       if (c.err !== null && c.err !== undefined) add("Abweichung: ", fmtNum(c.err, 1) + "°", c.ok ? "good" : "");
+      if (c.strokes) add("Letzter Stoß: ", fmtNum(c.stroke, 1) + " g (" + c.strokes + " Stöße)");
       if (c.battery) add("Akku: ", fmtNum(c.battery, 2) + " V");
-      if (c.rate) add("Empfang: ", fmtNum(c.rate, 0) + " Pakete/s" + (c.lost ? ", " + c.lost + " verloren" : ""));
+      if (c.rate) add("Empfang: ", fmtNum(c.rate, 0) + " Pakete/s" + (c.lost ? ", " + c.lost + " verloren" : "") +
+                      (c.rejected ? ", " + c.rejected + " unplausibel verworfen" : ""));
       if (c.rssi) add("WLAN: ", c.rssi + " dBm", c.rssi < -75 ? "bad" : "");
     }
     $("cueCalib").disabled = !c.connected;
@@ -1085,7 +1319,6 @@ details > div { margin-top: 12px; }
     afterEdit();
   });
   $("fixReload").addEventListener("click", loadSnapshot);
-  $("fixBallsDetails").addEventListener("toggle", (e) => { if (e.target.open) loadEditor(); });
   $("fixSave").addEventListener("click", async () => {
     const res = await post("train_correction", { id: snap.id, apply: $("applyFix").checked, balls: snap.balls });
     if (res) loadSnapshot();
@@ -1183,6 +1416,41 @@ details > div { margin-top: 12px; }
     const res = await post("calibrate", { corners, table_size: $("tableSize").value, cloth: $("clothColor").value });
     if (res) { points = []; calibDirty = false; $("calibSave").disabled = true; drawCalib(); }
   });
+
+  // ---------------- Reiter ----------------
+  const TABS = ["overview", "setup", "queue", "training", "review"];
+  let tab = null;
+  function showTab(name) {
+    if (!TABS.includes(name)) name = "overview";
+    if (name === tab) return;
+    const prev = tab;
+    tab = name;
+    for (const t of TABS) {
+      const on = t === name;
+      $("tab-" + t).setAttribute("aria-selected", on ? "true" : "false");
+      $("tab-" + t).tabIndex = on ? 0 : -1;
+      $("panel-" + t).hidden = !on;
+    }
+    try { history.replaceState(null, "", "#" + name); } catch (e) { /* egal */ }
+    if (prev !== null) window.scrollTo({ top: 0 });            // neuer Reiter beginnt oben
+    if (prev === "setup") clearInterval(viewTimer);              // Live-Kamerabild nur, solange sichtbar
+    if (name === "setup" && $("viewDetails").open) $("viewDetails").dispatchEvent(new Event("toggle"));
+    if (name === "training") loadEditor();
+  }
+  document.querySelectorAll(".tab").forEach((b) => {
+    b.addEventListener("click", () => showTab(b.dataset.tab));
+    b.addEventListener("keydown", (e) => {                     // Pfeiltasten wie bei Reitern ueblich
+      const i = TABS.indexOf(b.dataset.tab);
+      const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+      if (!d) return;
+      e.preventDefault();
+      const next = TABS[(i + d + TABS.length) % TABS.length];
+      showTab(next);
+      $("tab-" + next).focus();
+    });
+  });
+  window.addEventListener("hashchange", () => showTab(location.hash.slice(1)));
+  showTab(location.hash.slice(1));
 
   poll();
 })();

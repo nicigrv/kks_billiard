@@ -4,7 +4,8 @@ Simulierter Queue (zum Testen ohne Hardware) - verhaelt sich wie die Firmware in
   * Castcode (Standard SMQ234, aenderbar mit --castcode)
   * antwortet auf die Suche des Pi (UDP 5005, {"suche": "<castcode>"})
   * nimmt das Abo an ({"abo": "<castcode>", "farbe": [r, g, b] | null}) und sendet danach
-    von selbst ca. 50x pro Sekunde die Lage an den Pi; ohne Lebenszeichen 3 s -> Schluss
+    von selbst ca. 17x pro Sekunde die Lage an den Pi (wie die Firmware: Mittelwert aus 3 Messungen);
+    ohne Lebenszeichen 3 s -> Schluss
   * "LED" (rot / gruen / Teamfarbe) und "Knopf": press() startet bei gruen ein Spiel
   * HTTP-API  GET /api/lage  (Kopfzeile X-Castcode) wie bisher, zum Nachschauen
 
@@ -46,7 +47,7 @@ class Cue:
             self.seq += 1
             return {"castcode": self.castcode, "seq": self.seq, "yaw": round(((self.yaw + 180) % 360) - 180, 2),
                     "pitch": round(-3 + random.gauss(0, 0.3), 2), "still": 0, "bat": 3.95, "rssi": -52,
-                    "knopf": self.knopf, "ms": int(time.monotonic() * 1000)}
+                    "knopf": self.knopf, "stoss": 3.6, "stoesse": 2, "ms": int(time.monotonic() * 1000)}
 
     def connected(self):
         return self.subscriber is not None and time.monotonic() - self.abo_t < ABO_TIMEOUT_S
@@ -95,7 +96,7 @@ def steer(cue, portal):
         time.sleep(1 / 30)
 
 
-def discovery(cue, port, api_port, rate_hz=50):
+def discovery(cue, port, api_port, rate_hz=50 / 3):
     """UDP wie die Firmware: Suche beantworten, Abo annehmen, danach selbst senden."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
