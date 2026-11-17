@@ -3,7 +3,10 @@ Simulierter Queue (zum Testen ohne Hardware) - verhaelt sich wie die Firmware in
 
   * Castcode (Standard SMQ234, aenderbar mit --castcode)
   * antwortet auf die Suche des Pi (UDP 5005, {"suche": "<castcode>"})
-  * HTTP-API  GET /api/lage  (Kopfzeile X-Castcode)
+  * nimmt das Abo an ({"abo": "<castcode>", "farbe": [r, g, b] | null}) und sendet danach
+    von selbst ca. 50x pro Sekunde die Lage an den Pi; ohne Lebenszeichen 3 s -> Schluss
+  * "LED" (rot / gruen / Teamfarbe) und "Knopf": press() startet bei gruen ein Spiel
+  * HTTP-API  GET /api/lage  (Kopfzeile X-Castcode) wie bisher, zum Nachschauen
 
     python3 -m sim.fake_cue                         # dann im Admin-Panel Castcode SMQ234 eintragen
 
@@ -24,19 +27,43 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
+ABO_TIMEOUT_S = 3.0
+
+
 class Cue:
     def __init__(self, castcode):
         self.castcode = castcode
         self.yaw = 30.0
         self.seq = 0
+        self.knopf = 0
         self.lock = threading.Lock()
+        self.subscriber = None          # (ip, port) des Pi
+        self.abo_t = 0.0
+        self.color = None               # Teamfarbe vom Pi, None = kein Spiel
 
     def reading(self):
         with self.lock:
             self.seq += 1
             return {"castcode": self.castcode, "seq": self.seq, "yaw": round(((self.yaw + 180) % 360) - 180, 2),
-                    "pitch": round(-3 + random.gauss(0, 0.3), 2), "still": 0, "bat": 3.95,
-                    "ms": int(time.monotonic() * 1000)}
+                    "pitch": round(-3 + random.gauss(0, 0.3), 2), "still": 0, "bat": 3.95, "rssi": -52,
+                    "knopf": self.knopf, "ms": int(time.monotonic() * 1000)}
+
+    def connected(self):
+        return self.subscriber is not None and time.monotonic() - self.abo_t < ABO_TIMEOUT_S
+
+    def led(self):
+        """Wie die LED am echten Queue: 'rot', 'gruen' oder die Teamfarbe [r, g, b]."""
+        if not self.connected():
+            return "rot"
+        return self.color if self.color else "gruen"
+
+    def press(self):
+        """Knopf: nur bei gruener LED zaehlt er (Spiel starten)."""
+        if self.led() != "gruen":
+            return False
+        with self.lock:
+            self.knopf += 1
+        return True
 
 
 def get_state(url):
@@ -68,18 +95,34 @@ def steer(cue, portal):
         time.sleep(1 / 30)
 
 
-def discovery(cue, port, api_port):
+def discovery(cue, port, api_port, rate_hz=50):
+    """UDP wie die Firmware: Suche beantworten, Abo annehmen, danach selbst senden."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind(("", port))
+
+    def stream():
+        while True:
+            if cue.connected():
+                try:
+                    sock.sendto(json.dumps(cue.reading()).encode(), cue.subscriber)
+                except OSError:
+                    pass
+            time.sleep(1 / rate_hz)
+    threading.Thread(target=stream, daemon=True).start()
     while True:
-        raw, src = sock.recvfrom(512)
         try:
+            raw, src = sock.recvfrom(512)
             d = json.loads(raw)
-        except ValueError:
+        except (ValueError, OSError):
             continue
         if str(d.get("suche", "")).upper() == cue.castcode:
             sock.sendto(json.dumps({"castcode": cue.castcode, "ip": "127.0.0.1", "port": api_port}).encode(), src)
+        elif str(d.get("abo", "")).upper() == cue.castcode:
+            with cue.lock:
+                cue.subscriber, cue.abo_t = src, time.monotonic()
+                c = d.get("farbe")
+                cue.color = list(c) if isinstance(c, list) and len(c) == 3 else None
 
 
 def make_handler(cue):

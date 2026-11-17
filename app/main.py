@@ -43,6 +43,9 @@ from cameras import SOURCE_NAMES, SOURCES, make_reader
 from single_ball import SingleBall
 
 KINDS = ("cue", "eight", "solid", "stripe")
+# Farbe der Teams auf der LED am Queue (wer dran ist). Rot/Gruen sind fuer die Verbindung reserviert.
+TEAM_COLORS = ([0, 90, 255], [255, 110, 0])        # Team A blau, Team B orange
+TEAM_COLOR_NAMES = ("blau", "orange")
 COLORS = ("gelb", "blau", "rot", "violett", "orange", "gruen", "weinrot", "schwarz", "")
 
 KIND_BGR = {"cue": (255, 255, 255), "eight": (130, 130, 130), "solid": (0, 190, 255), "stripe": (255, 200, 0)}
@@ -72,10 +75,12 @@ class App:
         self.pipe = Pipeline(table, lambda r: CoralDetector(r, self.coral), recorder=self.recorder)
         self.pipe.auto_capture = bool(self.cfg.get("auto_capture"))
         self.pipe.on_capture = self._captured
+        last = self.cfg.get("cue_address")
         self.cue = CueSensor(self.cfg.get("cue_castcode", ""), self.cfg.get("cue_offset", 0.0),
                              self.cfg.get("cue_flip", False), discovery_port=cue_port,
-                             address=self.cfg.get("cue_address"), on_found=self._cue_found,
-                             enabled=self.cfg.get("cue_enabled", True)).start()
+                             address=(last[0], cue_port) if last else None, on_found=self._cue_found,
+                             enabled=self.cfg.get("cue_enabled", True),
+                             on_button=self._cue_button, led_color=self._cue_led).start()
         self.align = AlignChecker(self.cfg.get("cue_tolerance", 2.0))
         self.rounds = RoundRecorder(os.path.join(config.DATA_DIR, "recordings"))
         self.sound = Sound()                                  # Ding ueber HDMI
@@ -491,6 +496,23 @@ class App:
         """Queue im WLAN gefunden: Adresse merken (beim naechsten Start sofort da)."""
         self.cfg["cue_address"] = list(address)
         config.save(self.cfg)
+
+    def _cue_led(self):
+        """Farbe fuer die LED am Queue: Team, das dran ist - oder None (kein Spiel -> gruen)."""
+        g = self.pipe.game
+        if g.phase != "playing":
+            return None
+        return TEAM_COLORS[g.turn % 2]
+
+    def _cue_button(self):
+        """Knopf am Queue (nur bei gruener LED = kein Spiel): Team A gegen Team B starten."""
+        if self.pipe.game.phase == "playing":
+            return
+        self.command("start", {"team_a": "Team A", "team_b": "Team B", "breaker": 0})
+        self.notes.push("Spiel gestartet (Knopf am Queue)",
+                        f"Team A = {TEAM_COLOR_NAMES[0]}, Team B = {TEAM_COLOR_NAMES[1]} - "
+                        "die LED am Queue zeigt, wer dran ist", "success", ttl=8.0, key="queue-knopf")
+        print("[queue] Knopf: Spiel Team A gegen Team B gestartet", flush=True)
 
     # ------------------------------------------------------------- Pruefer
     def reviewer_list(self):

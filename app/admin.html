@@ -241,6 +241,7 @@ details > div { margin-top: 12px; }
       </div>
       <p class="statusline" id="cueStatus">-</p>
       <p class="hint">Koppeln: Queue einschalten, am Handy mit dem WLAN <b>„Billard-Queue-…“</b> verbinden. Auf der Seite, die sich öffnet, euer WLAN wählen. Der Queue zeigt dann seinen <b>Castcode</b> – hier eintragen, dort den Haken setzen und „Verbinden“. Danach finden sich Pi und Queue über das Netzwerk von selbst.</p>
+      <p class="hint">LED am Queue (M5Stack Atom): <b>rot</b> = keine Verbindung zum Pi, <b>grün</b> = verbunden, kein Spiel. Knopf drücken, wenn sie grün ist: Spiel <b>Team A</b> (blau) gegen <b>Team B</b> (orange) startet. Die LED zeigt dann die Farbe des Teams, das dran ist.</p>
       <form class="addrow" id="cuePairForm" autocomplete="off">
         <input type="text" id="cueCode" maxlength="9" placeholder="Castcode, z. B. K7P2QM" aria-label="Castcode des Queues" autocapitalize="characters" spellcheck="false" style="text-transform:uppercase;letter-spacing:3px">
         <button type="submit" class="primary">Koppeln</button>
@@ -608,6 +609,8 @@ details > div { margin-top: 12px; }
       add("Winkel: ", fmtNum(c.angle, 1) + "°");
       if (c.err !== null && c.err !== undefined) add("Abweichung: ", fmtNum(c.err, 1) + "°", c.ok ? "good" : "");
       if (c.battery) add("Akku: ", fmtNum(c.battery, 2) + " V");
+      if (c.rate) add("Empfang: ", fmtNum(c.rate, 0) + " Pakete/s" + (c.lost ? ", " + c.lost + " verloren" : ""));
+      if (c.rssi) add("WLAN: ", c.rssi + " dBm", c.rssi < -75 ? "bad" : "");
     }
     $("cueCalib").disabled = !c.connected;
     $("cueFlip").classList.toggle("on", !!c.flip);

@@ -24,6 +24,15 @@
  *   GET  /api/info   Geraet + Firmware (ohne Castcode)
  *   GET  /demo       Demo-Anzeige (auch im Hotspot), Messwerte dazu: GET /demo/lage (ohne Castcode)
  *   UDP  5005        Suche: {"suche":"K7P2QM"} -> Antwort {"castcode":"K7P2QM","ip":"...","port":80}
+ *                    Abo:   {"abo":"K7P2QM","farbe":[0,90,255]}  (farbe null = kein Spiel)
+ *                           -> der Queue SENDET danach von selbst ca. 50x pro Sekunde an den Absender:
+ *                           {"castcode":"K7P2QM","seq":1,"yaw":37.52,"pitch":-4.1,"still":0,"bat":3.91,
+ *                            "rssi":-55,"knopf":0,"ms":123456}
+ *                           Der Pi wiederholt das Abo jede Sekunde (Lebenszeichen + aktuelle Farbe).
+ *                           Kommt 3 s keins, hoert der Queue auf zu senden.
+ *   LED (M5Stack Atom)   rot = keine Verbindung zum Pi, gruen = verbunden, kein Spiel,
+ *                        sonst Farbe des Teams, das dran ist. Blinkt rot = Einrichtungs-Hotspot.
+ *   Knopf                bei gruener LED: Spiel Team A gegen Team B starten ("knopf" zaehlt hoch)
  *   mDNS             queue-k7p2qm.local
  *
  * yaw: Grad, gegen den Uhrzeigersinn positiv (von oben gesehen). Der absolute Wert ist beliebig -
@@ -44,6 +53,11 @@
 #include <math.h>
 
 #include "config.h"
+
+#if LED_PIN >= 0
+#include <Adafruit_NeoPixel.h>
+static Adafruit_NeoPixel led(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
+#endif
 
 static uint8_t MPU = 0x68;               // 0x69, wenn AD0 auf 3V3 liegt
 static const float GYRO_LSB = 65.5f;      // +-500 Grad/s
@@ -189,6 +203,17 @@ static String scanOptions;
 static uint32_t restartAt = 0, portalSince = 0;
 static uint32_t seq = 0;
 static float curYaw = 0, curPitch = 0, curBat = 0;
+
+// Abo des Pi: an diese Adresse wird gesendet, solange Lebenszeichen kommen
+static IPAddress aboIp;
+static uint16_t aboPort = 0;
+static uint32_t aboLast = 0;            // millis() des letzten Abos
+static bool aboActive = false;
+static bool spiel = false;              // laeuft ein Spiel? (dann Teamfarbe statt gruen)
+static uint8_t teamRgb[3] = {0, 0, 0};
+static uint32_t knopf = 0;              // Knopfdruecke (bei gruener LED), der Pi startet damit ein Spiel
+
+static bool piConnected() { return aboActive && millis() - aboLast < ABO_TIMEOUT_MS; }
 
 static String makeCastcode() {
   const char* abc = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";   // ohne 0/O und 1/I
@@ -459,22 +484,140 @@ static bool connectWifi() {
   return WiFi.status() == WL_CONNECTED;
 }
 
-// Suche des Pi beantworten: {"suche":"K7P2QM"} -> {"castcode":...,"ip":...,"port":80}
-static void handleDiscovery() {
+// Wert hinter "schluessel": aus einem kleinen JSON lesen (ohne Bibliothek)
+static int jsonPos(const String& msg, const char* key) {
+  int i = msg.indexOf(String("\"") + key + "\"");
+  if (i < 0) return -1;
+  i = msg.indexOf(':', i);
+  if (i < 0) return -1;
+  i++;
+  while (i < (int)msg.length() && msg[i] == ' ') i++;
+  return i;
+}
+
+static String jsonStr(const String& msg, const char* key) {
+  int i = jsonPos(msg, key);
+  if (i < 0 || msg[i] != '"') return "";
+  int j = msg.indexOf('"', i + 1);
+  return j < 0 ? "" : msg.substring(i + 1, j);
+}
+
+// UDP an Port 5005: Suche des Pi beantworten und Abos annehmen
+static void handleUdp() {
   int n = udp.parsePacket();
   if (n <= 0) return;
-  char buf[128];
+  char buf[200];
   int len = udp.read(buf, sizeof(buf) - 1);
   buf[len > 0 ? len : 0] = 0;
   String msg(buf);
-  msg.toUpperCase();
-  if (msg.indexOf("\"SUCHE\"") < 0 || msg.indexOf("\"" + castcode + "\"") < 0) return;
-  char out[160];
-  int m = snprintf(out, sizeof(out), "{\"castcode\":\"%s\",\"ip\":\"%s\",\"port\":%d,\"fw\":\"%s\"}",
-                   castcode.c_str(), WiFi.localIP().toString().c_str(), API_PORT, FW_VERSION);
-  udp.beginPacket(udp.remoteIP(), udp.remotePort());
+
+  String code = jsonStr(msg, "suche");
+  code.toUpperCase();
+  if (code == castcode) {                         // {"suche":"K7P2QM"} -> wer bin ich, wo bin ich
+    char out[160];
+    int m = snprintf(out, sizeof(out), "{\"castcode\":\"%s\",\"ip\":\"%s\",\"port\":%d,\"fw\":\"%s\"}",
+                     castcode.c_str(), WiFi.localIP().toString().c_str(), API_PORT, FW_VERSION);
+    udp.beginPacket(udp.remoteIP(), udp.remotePort());
+    udp.write((const uint8_t*)out, m);
+    udp.endPacket();
+    return;
+  }
+
+  code = jsonStr(msg, "abo");
+  code.toUpperCase();
+  if (code != castcode) return;                   // fremder Queue / kein Abo
+  bool neu = !piConnected();
+  aboIp = udp.remoteIP();
+  aboPort = udp.remotePort();
+  aboLast = millis();
+  aboActive = true;
+  int i = jsonPos(msg, "farbe");                  // [r,g,b] = Spiel laeuft, null = kein Spiel
+  if (i >= 0 && msg[i] == '[') {
+    int r = 0, g = 0, b = 0;
+    if (sscanf(msg.c_str() + i, "[%d,%d,%d]", &r, &g, &b) == 3) {
+      teamRgb[0] = constrain(r, 0, 255);
+      teamRgb[1] = constrain(g, 0, 255);
+      teamRgb[2] = constrain(b, 0, 255);
+      spiel = true;
+    }
+  } else {
+    spiel = false;
+  }
+  if (neu) Serial.printf("Pi %s:%u hat abonniert - sende Lage\n", aboIp.toString().c_str(), aboPort);
+}
+
+// Lage an den Pi senden (nur solange er abonniert hat)
+static void sendLage() {
+  if (!piConnected()) {
+    if (aboActive) {
+      aboActive = false;
+      spiel = false;
+      Serial.println("Kein Lebenszeichen vom Pi - Senden gestoppt");
+    }
+    return;
+  }
+  char out[220];
+  int m = snprintf(out, sizeof(out),
+                   "{\"castcode\":\"%s\",\"seq\":%lu,\"yaw\":%.2f,\"pitch\":%.2f,\"still\":%d,\"bat\":%.2f,"
+                   "\"rssi\":%d,\"knopf\":%lu,\"ms\":%lu}",
+                   castcode.c_str(), (unsigned long)seq++, curYaw, curPitch, still ? 1 : 0, curBat,
+                   (int)WiFi.RSSI(), (unsigned long)knopf, (unsigned long)millis());
+  udp.beginPacket(aboIp, aboPort);
   udp.write((const uint8_t*)out, m);
   udp.endPacket();
+}
+
+// ======================================================== LED und Knopf
+static void ledColor(uint8_t r, uint8_t g, uint8_t b) {
+#if LED_PIN >= 0
+  static uint32_t last = 0xFFFFFFFF;
+  uint32_t c = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+  if (c == last) return;                           // nur bei Aenderung schreiben
+  last = c;
+  for (int i = 0; i < LED_COUNT; i++) led.setPixelColor(i, led.Color(r, g, b));
+  led.show();
+#endif
+}
+
+enum LedState { LED_ROT, LED_GRUEN, LED_TEAM };
+
+static LedState ledState() {
+  if (!piConnected()) return LED_ROT;
+  return spiel ? LED_TEAM : LED_GRUEN;
+}
+
+static void updateLed() {
+  uint32_t ms = millis();
+  if (portal) {                                    // Einrichtungs-Hotspot: rot blinken
+    bool on = (ms / 500) % 2 == 0;
+    ledColor(on ? 255 : 0, 0, 0);
+    return;
+  }
+  switch (ledState()) {
+    case LED_ROT: ledColor(255, 0, 0); break;
+    case LED_GRUEN: ledColor(0, 255, 0); break;
+    case LED_TEAM: ledColor(teamRgb[0], teamRgb[1], teamRgb[2]); break;
+  }
+}
+
+static void handleButton() {
+#if BTN_PIN >= 0
+  static bool lastDown = false;
+  static uint32_t changed = 0;
+  bool down = digitalRead(BTN_PIN) == LOW;
+  uint32_t ms = millis();
+  if (down == lastDown || ms - changed < 40) return;   // entprellen
+  changed = ms;
+  lastDown = down;
+  if (!down) return;                                   // nur beim Druecken
+  if (ledState() == LED_GRUEN) {
+    knopf++;
+    Serial.printf("Knopf: Spiel starten (%lu)\n", (unsigned long)knopf);
+    for (int i = 0; i < 3; i++) sendLage();            // sofort melden (UDP: lieber mehrfach)
+  } else {
+    Serial.println("Knopf: nur bei gruener LED (verbunden, kein Spiel)");
+  }
+#endif
 }
 
 // ======================================================== Ablauf
@@ -482,6 +625,14 @@ void setup() {
   Serial.begin(115200);
   delay(300);
   Serial.println("\nBillard-Queue " FW_VERSION);
+#if LED_PIN >= 0
+  led.begin();
+  led.setBrightness(LED_BRIGHTNESS);
+  ledColor(255, 255, 255);                       // weiss: Gyroskop-Nullpunkt, Queue ruhig liegen lassen
+#endif
+#if BTN_PIN >= 0
+  pinMode(BTN_PIN, INPUT_PULLUP);
+#endif
   if (!mpuInit()) Serial.println("Gyro-Sensor nicht gefunden - Verdrahtung pruefen!");
   calibrateBias();
   // Startlage aus der Schwerkraft, damit der Filter nicht erst einschwingen muss
@@ -503,6 +654,7 @@ void setup() {
 
 void loop() {
   static uint32_t lastSample = micros(), lastAngles = 0, lastWifiCheck = 0;
+  static uint32_t lastSend = 0;
   uint32_t now = micros();
   uint32_t ms = millis();
 
@@ -510,12 +662,18 @@ void loop() {
     dns.processNextRequest();
     if (ssid.length() && ms - portalSince > PORTAL_RETRY_MS) restartAt = ms;   // WLAN spaeter nochmal versuchen
   } else {
-    handleDiscovery();
+    handleUdp();
+    if (ms - lastSend >= SEND_INTERVAL_MS) {
+      lastSend = ms;
+      sendLage();
+    }
     if (ms - lastWifiCheck > 5000) {
       lastWifiCheck = ms;
       if (WiFi.status() != WL_CONNECTED) WiFi.reconnect();
     }
   }
+  handleButton();
+  updateLed();
   server.handleClient();
   if (restartAt && (int32_t)(ms - restartAt) >= 0) ESP.restart();
 
