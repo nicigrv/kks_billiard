@@ -1,5 +1,66 @@
 # Billard-System: Kamera → Kugelerkennung → 8-Ball-Scoreboard
 
+## Schnellstart: Installieren und Updaten
+
+Fertige Versionen liegen unter **[Releases](https://github.com/nicigrv/kks_billiard/releases)**.
+Versionsnummern nach dem Schema **MAJOR.MINOR.PATCH** (z. B. `v0.1.2`):
+
+| Teil | wird erhöht bei | wie |
+|---|---|---|
+| PATCH (0.1.**2** → 0.1.**3**) | Fehlerbehebungen, kleine Änderungen | automatisch nach jedem gemergten Pull Request |
+| MINOR (0.**1**.3 → 0.**2**.0) | neue Funktionen | Label `minor` an den Pull Request |
+| MAJOR (**0**.2.0 → **1**.0.0) | große Umbauten, fertige erste Version | Label `major` an den Pull Request |
+
+Von Hand: **Actions → Release → Run workflow**, dort Stufe (patch/minor/major) oder eine feste Version wählen.
+Jede Version hat diese Dateien:
+
+| Datei | Für | Inhalt |
+|---|---|---|
+| `billard-rasp.zip` | Raspberry Pi | `app/` + `docker-compose.yml` |
+| `billard-server.zip` | Server (VPS) | Trainingsseite (`training_server/`) |
+| `billard-queue.zip` | Queue / Kö-Messgerät | Quellcode + fertige `.bin` für den Atom Matrix, Anleitung in `firmware/FLASHEN.md` |
+| `billard-gesamt.zip` | alles | komplettes Repository |
+| `update.sh` | Pi + Server | Skript für Installation und Update |
+
+**Raspberry Pi installieren** (neueste Version, Ordner `~/billard`, installiert Docker falls nötig):
+
+```bash
+curl -fsSL https://github.com/nicigrv/kks_billiard/releases/latest/download/update.sh | bash -s -- rasp
+```
+
+Vorher Pi-OS einrichten wie in 1.1–1.3 beschrieben. Danach PINs/Port in `~/billard/docker-compose.yml` anpassen (1.5)
+und `cd ~/billard && docker compose up -d` ausführen.
+
+**Raspberry Pi updaten** (gleicher Befehl, Einstellungen bleiben erhalten):
+
+```bash
+curl -fsSL https://github.com/nicigrv/kks_billiard/releases/latest/download/update.sh | bash -s -- rasp
+```
+
+**Server installieren / updaten** (Ordner `~/billard-training`, legt beim ersten Mal eine `.env` mit `UPLOAD_KEY` an
+und zeigt den Schlüssel an):
+
+```bash
+curl -fsSL https://github.com/nicigrv/kks_billiard/releases/latest/download/update.sh | bash -s -- server
+```
+
+**Bestimmte Version** (z. B. zurück auf v0.1.2): Versionsnummer anhängen.
+
+```bash
+curl -fsSL https://github.com/nicigrv/kks_billiard/releases/latest/download/update.sh | bash -s -- rasp v0.1.2
+curl -fsSL https://github.com/nicigrv/kks_billiard/releases/latest/download/update.sh | bash -s -- server v0.1.2
+```
+
+Anderer Ordner: `BILLARD_DIR` setzen, z. B. `... | BILLARD_DIR=/opt/billard bash -s -- server`.
+Beim Update bleiben `data/`, `.env` und die Einstellungen ganz oben in `docker-compose.yml`
+(`x-web-port`, `x-admin-pin`, `x-game-pin`) erhalten. Die alte Datei liegt als `docker-compose.yml.alt` daneben.
+Welche Version läuft, steht in der Datei `VERSION`.
+
+Den **Queue** aktualisiert ihr von Hand: `billard-queue.zip` herunterladen und die `.bin` aufspielen (`firmware/FLASHEN.md`)
+oder mit PlatformIO neu bauen (`cue_sensor/README.md`).
+
+---
+
 ```
 Pi-Kameramodul / USB-Kamera ──▶ Raspberry Pi (Docker: "billard") ──HDMI──▶ Beamer
  (oder Demo ohne Kamera)          │  ├── Spiel-Panel   http://<pi-ip>:8089         PIN 1212 (Spieler)
@@ -26,6 +87,8 @@ erscheinen **oben rechts** als Mitteilung wie bei iPhone/Mac – auf dem Beamer 
 | `app/sim/` | Simulator + Tests (laufen ohne Tisch) |
 | `cue_sensor/` | Programm für den Queue mit Gyroskop (ESP32 + MPU6050, PlatformIO) – optional |
 | `koe_messgeraet/` | Eigenständiges Kö-Messgerät: Atom Matrix (MPU6886) mit eigenem WLAN und Messseite |
+| `scripts/` | `update.sh` (Installation/Update) und `build_release.sh` (baut die Release-Pakete) |
+| `.github/workflows/release.yml` | erstellt nach jedem gemergten PR automatisch ein Release (PATCH + 1) |
 | `training/` | Kugelmodell für den Coral trainieren (PC / Google Colab) |
 
 ---

@@ -1,0 +1,114 @@
+# Neues Release mit Versionsnummer MAJOR.MINOR.PATCH (z. B. v0.1.3):
+#   automatisch nach jedem gemergten Pull Request in main: PATCH + 1
+#     (Label "minor" am PR: MINOR + 1, Label "major": MAJOR + 1)
+#   oder von Hand: GitHub -> Actions -> "Release" -> "Run workflow" (Stufe oder feste Version wählen)
+#   Gibt es noch kein Release, beginnt die Zählung bei v0.1.2.
+# Pakete: billard-rasp.zip, billard-server.zip, billard-queue.zip, billard-gesamt.zip, update.sh
+name: Release
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      stufe:
+        description: "Was wird erhöht?"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      version:
+        description: "Oder feste Version, z. B. 0.2.0 (leer = Stufe oben)"
+        required: false
+        default: ""
+      notiz:
+        description: "Text für die Release-Beschreibung (optional)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+# nie zwei Releases gleichzeitig, sonst gäbe es dieselbe Nummer doppelt
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ hashFiles('cue_sensor/platformio.ini', 'koe_messgeraet/platformio.ini') }}
+
+      - name: Werkzeuge
+        run: pip install -q platformio esptool
+
+      - name: Nächste Version
+        id: nr
+        env:
+          STUFE: ${{ inputs.stufe || (contains(github.event.pull_request.labels.*.name, 'major') && 'major') || (contains(github.event.pull_request.labels.*.name, 'minor') && 'minor') || 'patch' }}
+          FEST: ${{ inputs.version }}
+        run: |
+          git fetch --tags --force
+          letzte=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sed 's/^v//' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          if [ -n "$FEST" ]; then
+            neu="${FEST#v}"
+            echo "$neu" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "Version muss wie 0.2.0 aussehen"; exit 1; }
+            if git rev-parse -q --verify "refs/tags/v$neu" >/dev/null; then echo "v$neu gibt es schon"; exit 1; fi
+          elif [ -z "$letzte" ]; then
+            neu="0.1.2"                                   # Startversion
+          else
+            IFS=. read -r ma mi pa <<< "$letzte"
+            case "$STUFE" in
+              major) neu="$((ma + 1)).0.0" ;;
+              minor) neu="$ma.$((mi + 1)).0" ;;
+              *)     neu="$ma.$mi.$((pa + 1))" ;;
+            esac
+          fi
+          echo "Version: ${letzte:-keine} -> $neu ($STUFE)"
+          echo "version=v$neu" >> "$GITHUB_OUTPUT"
+
+      - name: Pakete bauen
+        run: bash scripts/build_release.sh ${{ steps.nr.outputs.version }} dist
+
+      - name: Release anlegen
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.nr.outputs.version }}
+          PR_NR: ${{ github.event.pull_request.number }}
+          PR_TITEL: ${{ github.event.pull_request.title }}
+          NOTIZ: ${{ inputs.notiz }}
+        run: |
+          {
+            if [ -n "$PR_NR" ]; then echo "Pull Request #$PR_NR: $PR_TITEL"; else echo "${NOTIZ:-Manuelles Release}"; fi
+            echo
+            echo "| Datei | Inhalt |"
+            echo "|---|---|"
+            echo "| billard-rasp.zip | Raspberry Pi (app/, docker-compose.yml) |"
+            echo "| billard-server.zip | Trainingsserver für den VPS |"
+            echo "| billard-queue.zip | Queue-Firmware + Kö-Messgerät, Quellcode und fertige .bin für den Atom Matrix |"
+            echo "| billard-gesamt.zip | komplettes Repository |"
+            echo
+            echo "Update Pi: \`curl -fsSL https://github.com/${{ github.repository }}/releases/download/$VERSION/update.sh | bash -s -- rasp $VERSION\`"
+            echo
+            echo "Update Server: \`curl -fsSL https://github.com/${{ github.repository }}/releases/download/$VERSION/update.sh | bash -s -- server $VERSION\`"
+          } > notes.md
+          gh release create "$VERSION" dist/* \
+            --target "$(git rev-parse HEAD)" \
+            --title "Version ${VERSION#v}" \
+            --notes-file notes.md \
+            --generate-notes \
+            --latest
