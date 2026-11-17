@@ -20,8 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"          # wie im Container auf dem Pi (Debian bookworm)
           cache: pip
@@ -33,13 +33,20 @@ jobs:
         env:
           SDL_VIDEODRIVER: dummy
           SDL_AUDIODRIVER: dummy
+        # alle Tests laufen lassen (nicht beim ersten Fehler aufhoeren), am Ende die roten nennen
         run: |
+          rot=""
           for t in game features coral merkmale review cue_link panels; do
             echo "::group::sim.test_$t"
-            python -m sim.test_$t
+            python -m "sim.test_$t" || rot="$rot sim.test_$t"
             echo "::endgroup::"
           done
+          if [ -n "$rot" ]; then
+            echo "::error::Fehlgeschlagen:$rot"
+            exit 1
+          fi
       - name: Tests Trainingsserver
+        if: ${{ !cancelled() }}                # auch wenn das Pi-Programm rot ist
         working-directory: training_server
         run: python test_server.py
 
@@ -48,11 +55,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.platformio
           key: pio-${{ hashFiles('cue_sensor/platformio.ini', 'koe_messgeraet/platformio.ini') }}
