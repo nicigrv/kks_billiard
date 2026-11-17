@@ -15,6 +15,7 @@ services:
     environment:
       UPLOAD_KEY: ${UPLOAD_KEY:?UPLOAD_KEY fehlt in .env}
       ADMIN_GRUPPEN: admins
+      FESTLEGUNGEN: ${FESTLEGUNGEN:-3}
       TZ: Europe/Berlin
     volumes:
       - ./data:/data
