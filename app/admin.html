@@ -850,6 +850,7 @@ input[type=text], input[type=password], input[type=number], select {
     if (c.connected) {
       add("Winkel: ", fmtNum(c.angle, 1) + "°");
       if (c.err !== null && c.err !== undefined) add("Abweichung: ", fmtNum(c.err, 1) + "°", c.ok ? "good" : "");
+      if (c.strokes) add("Letzter Stoß: ", fmtNum(c.stroke, 1) + " g (" + c.strokes + " Stöße)");
       if (c.battery) add("Akku: ", fmtNum(c.battery, 2) + " V");
       if (c.rate) add("Empfang: ", fmtNum(c.rate, 0) + " Pakete/s" + (c.lost ? ", " + c.lost + " verloren" : ""));
       if (c.rssi) add("WLAN: ", c.rssi + " dBm", c.rssi < -75 ? "bad" : "");

@@ -9,10 +9,11 @@ Koppeln ueber den CASTCODE (6 Zeichen, zeigt der Queue in seinem Einrichtungs-Ho
   3. Danach abonniert der Pi die Lage: {"abo": "<castcode>", "farbe": [r, g, b] | null} an
      den Queue (UDP 5005). Der Queue SENDET dann von selbst ca. 50x pro Sekunde an den Pi:
      {"castcode": "K7P2QM", "seq": 123, "yaw": 37.5, "pitch": -4.2, "still": 0, "bat": 3.91,
-      "rssi": -55, "knopf": 0}
+      "rssi": -55, "knopf": 0, "stoss": 4.2, "stoesse": 7}
      yaw   = Richtung in der Waagerechten, Grad, gegen den Uhrzeigersinn positiv
      pitch = Neigung (Spitze nach unten negativ)
      knopf = zaehlt Knopfdruecke am Queue (bei gruener LED) -> der Pi startet ein Spiel
+     stoss = Spitze der Beschleunigung beim letzten Stoss in g (Stossstaerke), stoesse = Anzahl
   Das Abo wiederholt der Pi jede Sekunde (Lebenszeichen + Teamfarbe fuer die LED; bei
   Farbwechsel sofort). Kommen 3 s keine Daten, sucht der Pi den Queue neu (neue IP?).
   Der Queue ist optional: ausgeschaltet (enabled=False) sucht und fragt der Pi nichts ab.
@@ -325,6 +326,8 @@ class CueSensor:
             "lost": self.lost,
             "rssi": d.get("rssi"),
             "fw": d.get("fw"),
+            "stroke": d.get("stoss"),             # Stossstaerke des letzten Stosses (g), ab Firmware 3.1
+            "strokes": d.get("stoesse"),
             "flip": self.flip,
             "error": self.last_error,
         }

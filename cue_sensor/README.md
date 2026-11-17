@@ -1,7 +1,9 @@
 # Gyroskop im Queue
 
-ESP32 + MPU6050 im Queue-Ende. Der Pi fragt darüber die **Richtung des Queues** ab und zeigt
-auf dem Beamer den hellen Queue (echte Lage) neben dem dunklen (optimale Lage) und den grünen Haken.
+ESP32 + MPU6050 im Queue-Ende (oder ein M5Stack Atom Matrix mit eingebautem Sensor). Der Pi bekommt
+darüber die **Richtung des Queues** und zeigt auf dem Beamer den hellen Queue (echte Lage) neben dem
+dunklen (optimale Lage) und den grünen Haken. Außerdem misst der Queue die **Stoßstärke** (siehe unten) –
+das frühere eigene Programm „Kö-Messgerät“ ist darin aufgegangen.
 
 **Optional:** Ohne Queue läuft alles andere genauso. Ist einer gekoppelt, lässt er sich im
 Spiel-Panel mit dem Schalter „Queue mit Gyroskop“ ein- und ausschalten (aus = der Pi sucht und fragt nichts ab).
@@ -13,7 +15,7 @@ So reden Pi und Queue miteinander (alles im WLAN per UDP, erkannt am **Castcode*
 | Pi → alle | UDP-Broadcast an Port 5005: `{"suche": "K7P2QM"}` |
 | Queue → Pi | nur der Queue mit diesem Castcode antwortet: `{"castcode": "K7P2QM", "ip": "192.168.88.57", "port": 80}` |
 | Pi → Queue | **Abo** an Port 5005: `{"abo": "K7P2QM", "farbe": null}` (während eines Spiels die Teamfarbe, z. B. `[0, 90, 255]`) |
-| Queue → Pi | ab dann **von selbst** ca. 50× pro Sekunde: `{"castcode": "K7P2QM", "seq": 123, "yaw": 37.5, "pitch": -4.2, "still": 0, "bat": 3.91, "rssi": -55, "knopf": 0}` |
+| Queue → Pi | ab dann **von selbst** ca. 50× pro Sekunde: `{"castcode": "K7P2QM", "seq": 123, "yaw": 37.5, "pitch": -4.2, "still": 0, "bat": 3.91, "rssi": -55, "knopf": 0, "stoss": 4.2, "stoesse": 7}` |
 | Pi → Queue | jede Sekunde das Abo erneut (Lebenszeichen), bei Zugwechsel sofort mit der neuen Farbe |
 
 Kommt 3 s kein Lebenszeichen, hört der Queue auf zu senden (LED rot). Kommen 3 s keine Daten, sucht der
@@ -28,6 +30,7 @@ Pi den Queue neu (z. B. neue IP nach Neustart). Zum Nachschauen gibt es weiterhi
 | **rot** | keine Verbindung zum Pi |
 | **grün** | verbunden, es läuft kein Spiel |
 | **blau** / **orange** | Spiel läuft: Team A (blau) bzw. Team B (orange) ist dran |
+| Balken von unten (grün → gelb → rot) | nur Atom Matrix: Stärke des letzten Stoßes, 1 Zeile je 3 g, 2 s lang |
 
 **Knopf** (auf dem Atom gedrückt), wenn die LED **grün** ist: Der Pi startet ein Spiel **Team A gegen
 Team B**, Team A bricht an. Während eines Spiels oder ohne Verbindung macht der Knopf nichts.
@@ -97,6 +100,19 @@ Großansicht: `http://192.168.4.1/demo`. Im WLAN gibt es dieselbe Anzeige unter 
 (Link auf der Statusseite). Der Nullpunkt gilt nur für die Demo auf diesem Handy, der Pi kalibriert
 selbst („Queue kalibrieren“). Ist die Drehrichtung falsch herum (Queue dreht in der Anzeige entgegengesetzt),
 die Platine andersherum einbauen oder `AXIS_SIGN_X` in `include/config.h` umdrehen.
+
+## Stoßstärke
+Bei jedem Stoß merkt sich der Queue die **Spitze der Beschleunigung** (Abweichung von der Erdbeschleunigung,
+in g). Ein Stoß beginnt ab 1,5 g und endet 0,3 s später (Werte in `include/config.h`, `STROKE_…`).
+
+- Geht mit an den Pi (`stoss` = letzter Stoß in g, `stoesse` = Anzahl seit dem Einschalten) und steht im
+  Spiel- und Admin-Panel bei den Queue-Werten.
+- Auf der Demo-Seite: letzter Stoß und geschätzte **Kraft** F = m · a (Kö-Masse dort eintragen, Standard 0,55 kg).
+- Atom Matrix: 2 s lang ein Balken auf der LED-Matrix.
+
+Ehrlich: Das ist eine **Schätzung**. Der Sensor misst ±16 g mit 200 Hz und einem 44-Hz-Tiefpass (für eine
+ruhige Richtung). Sehr kurze, harte Spitzen werden dadurch geglättet – zum Vergleichen von Stößen
+untereinander reicht es, als absolute Kraft auf die Kugel nicht.
 
 **Neu einrichten** (anderes WLAN): Queue beim Einschalten **senkrecht halten** (Spitze nach oben) –
 dann öffnet er den Hotspot. Oder im WLAN seine Seite `http://<queue-ip>` → „WLAN neu einrichten“.

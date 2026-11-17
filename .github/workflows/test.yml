@@ -62,9 +62,7 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: ~/.platformio
-          key: pio-${{ hashFiles('cue_sensor/platformio.ini', 'koe_messgeraet/platformio.ini') }}
+          key: pio-${{ hashFiles('cue_sensor/platformio.ini') }}
       - run: pip install -q platformio
       - name: Queue (alle Boards)
         run: pio run -d cue_sensor
-      - name: Kö-Messgerät
-        run: pio run -d koe_messgeraet

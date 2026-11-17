@@ -375,6 +375,7 @@ details > div { margin-top: 12px; }
     if (c.connected) {
       const parts = [["Winkel: ", fmt(c.angle, 1) + "°"]];
       if (c.err !== null && c.err !== undefined) parts.push(["Abweichung: ", fmt(c.err, 1) + "°"]);
+      if (c.strokes) parts.push(["Letzter Stoß: ", fmt(c.stroke, 1) + " g"]);
       if (c.battery) parts.push(["Akku: ", fmt(c.battery, 2) + " V"]);
       parts.forEach(([l, v], i) => {
         if (i) cs.appendChild(document.createTextNode("  ·  "));

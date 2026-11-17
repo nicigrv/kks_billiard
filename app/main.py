@@ -698,6 +698,7 @@ class App:
             "scene_version": self.scene_version,
             "cue": {"paired": bool(c["castcode"]), "enabled": c["enabled"], "connected": c["connected"],
                     "state": c["state"], "angle": c["angle"], "battery": c["battery"],
+                    "stroke": c["stroke"], "strokes": c["strokes"],
                     "ok": self.align.ok, "err": None if self.align.err is None else round(self.align.err, 1)},
             "round": self.rounds.status(),
             "videos": self.rounds.videos(),

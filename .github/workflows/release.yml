@@ -51,7 +51,7 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: ~/.platformio
-          key: pio-${{ hashFiles('cue_sensor/platformio.ini', 'koe_messgeraet/platformio.ini') }}
+          key: pio-${{ hashFiles('cue_sensor/platformio.ini') }}
 
       - name: Werkzeuge
         run: pip install -q platformio esptool
@@ -99,7 +99,7 @@ jobs:
             echo "|---|---|"
             echo "| billard-rasp.zip | Raspberry Pi (app/, docker-compose.yml) |"
             echo "| billard-server.zip | Trainingsserver für den VPS |"
-            echo "| billard-queue.zip | Queue-Firmware + Kö-Messgerät, Quellcode und fertige .bin für den Atom Matrix |"
+            echo "| billard-queue.zip | Queue-Firmware (Richtung + Stoßstärke), Quellcode und fertige .bin für den Atom Matrix |"
             echo "| billard-gesamt.zip | komplettes Repository |"
             echo
             echo "Update Pi: \`curl -fsSL https://github.com/${{ github.repository }}/releases/download/$VERSION/update.sh | bash -s -- rasp $VERSION\`"

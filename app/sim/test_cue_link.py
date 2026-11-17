@@ -80,6 +80,7 @@ def main():
     st = s.status()
     check(st["castcode"] == "SMQ234" and st["address"] == f"127.0.0.1:{disc}" and st["battery"] == 3.95
           and st["rssi"] == -52, "Status: Castcode, Adresse, Akku, WLAN-Signal")
+    check(st["stroke"] == 3.6 and st["strokes"] == 2, "Stoßstärke kommt an (letzter Stoß, Anzahl)")
 
     print("Knopf und Teamfarbe")
     check(cue.press(), "Knopf bei gruener LED wird gezaehlt")

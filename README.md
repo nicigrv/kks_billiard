@@ -18,7 +18,7 @@ Jede Version hat diese Dateien:
 |---|---|---|
 | `billard-rasp.zip` | Raspberry Pi | `app/` + `docker-compose.yml` |
 | `billard-server.zip` | Server (VPS) | Trainingsseite (`training_server/`) |
-| `billard-queue.zip` | Queue / Kö-Messgerät | Quellcode + fertige `.bin` für den Atom Matrix, Anleitung in `firmware/FLASHEN.md` |
+| `billard-queue.zip` | Queue (Gyroskop) | Quellcode + fertige `.bin` für den Atom Matrix, Anleitung in `firmware/FLASHEN.md` |
 | `billard-gesamt.zip` | alles | komplettes Repository |
 | `update.sh` | Pi + Server | Skript für Installation und Update |
 
@@ -85,8 +85,7 @@ erscheinen **oben rechts** als Mitteilung wie bei iPhone/Mac – auf dem Beamer 
 |---|---|
 | `app/` | **Hauptprogramm**: Erkennung (KI-Chip), 8-Ball-Regeln, Beamer, Spiel- und Admin-Panel |
 | `app/sim/` | Simulator + Tests (laufen ohne Tisch) |
-| `cue_sensor/` | Programm für den Queue mit Gyroskop (ESP32 + MPU6050, PlatformIO) – optional |
-| `koe_messgeraet/` | Eigenständiges Kö-Messgerät: Atom Matrix (MPU6886) mit eigenem WLAN und Messseite |
+| `cue_sensor/` | Programm für den Queue mit Gyroskop: Richtung + Stoßstärke (ESP32 + MPU6050 oder M5Stack Atom Matrix, PlatformIO) – optional |
 | `scripts/` | `update.sh` (Installation/Update) und `build_release.sh` (baut die Release-Pakete) |
 | `.github/workflows/check.yml` | Formprüfung bei jedem Pull Request (Syntax, ca. 30 s) |
 | `.github/workflows/test.yml` | Tests und Firmware-Build nach dem Merge |

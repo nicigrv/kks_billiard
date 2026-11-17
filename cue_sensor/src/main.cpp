@@ -3,6 +3,9 @@
  * --------------------------
  * ESP32 + MPU6050 (Beschleunigung + Drehrate). Ein Madgwick-Filter berechnet die Lage des
  * Queues: Richtung der Queue-Achse in der Waagerechten (yaw) und Neigung (pitch).
+ * Ausserdem die STOSSSTAERKE (frueher eigenes Programm "Koe-Messgeraet"): Spitzenwert der
+ * Beschleunigung je Stoss in g. Geht mit an den Pi, steht auf der Demo-Seite (mit Kraft F = m*a)
+ * und erscheint beim Atom Matrix 2 s lang als Balken auf der LED-Matrix.
  *
  * Einrichtung (Captive Portal, wie bei der Kamera):
  *   1. Ohne gespeichertes WLAN (oder wenn es nicht erreichbar ist) oeffnet der Queue den
@@ -20,18 +23,20 @@
  *
  * Im WLAN:
  *   GET  /api/lage   Lage als JSON (Kopfzeile X-Castcode oder ?code=... noetig)
- *        {"castcode":"K7P2QM","seq":123,"yaw":37.52,"pitch":-4.1,"still":0,"bat":3.91,"ms":123456}
+ *        {"castcode":"K7P2QM","seq":123,"yaw":37.52,"pitch":-4.1,"still":0,"bat":3.91,
+ *         "stoss":4.2,"stoesse":7,"ms":123456}     stoss = Spitze des letzten Stosses in g
  *   GET  /api/info   Geraet + Firmware (ohne Castcode)
  *   GET  /demo       Demo-Anzeige (auch im Hotspot), Messwerte dazu: GET /demo/lage (ohne Castcode)
  *   UDP  5005        Suche: {"suche":"K7P2QM"} -> Antwort {"castcode":"K7P2QM","ip":"...","port":80}
  *                    Abo:   {"abo":"K7P2QM","farbe":[0,90,255]}  (farbe null = kein Spiel)
  *                           -> der Queue SENDET danach von selbst ca. 50x pro Sekunde an den Absender:
  *                           {"castcode":"K7P2QM","seq":1,"yaw":37.52,"pitch":-4.1,"still":0,"bat":3.91,
- *                            "rssi":-55,"knopf":0,"ms":123456}
+ *                            "rssi":-55,"knopf":0,"stoss":4.2,"stoesse":7,"ms":123456}
  *                           Der Pi wiederholt das Abo jede Sekunde (Lebenszeichen + aktuelle Farbe).
  *                           Kommt 3 s keins, hoert der Queue auf zu senden.
  *   LED (M5Stack Atom)   rot = keine Verbindung zum Pi, gruen = verbunden, kein Spiel,
  *                        sonst Farbe des Teams, das dran ist. Blinkt rot = Einrichtungs-Hotspot.
+ *                        Atom Matrix: nach jedem Stoss 2 s ein Balken (1 Zeile je 3 g, gruen -> rot).
  *   Knopf                bei gruener LED: Spiel Team A gegen Team B starten ("knopf" zaehlt hoch)
  *   mDNS             queue-k7p2qm.local
  *
@@ -61,7 +66,7 @@ static Adafruit_NeoPixel led(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
 
 static uint8_t MPU = 0x68;               // 0x69, wenn AD0 auf 3V3 liegt
 static const float GYRO_LSB = 65.5f;      // +-500 Grad/s
-static const float ACC_LSB = 16384.0f;    // +-2 g
+static const float ACC_LSB = 2048.0f;     // +-16 g (Stoesse; die Lage braucht nur die Richtung)
 static const float DEG2RAD = 0.017453292f;
 
 // Madgwick-Filter (6 Achsen), Quaternion Sensor -> Welt
@@ -73,6 +78,14 @@ static float bias[3] = {0, 0, 0};
 static uint32_t stillSince = 0;
 static bool still = false;
 static uint32_t lastGoodRead = 0;          // zuletzt Werte vom Sensor bekommen (Demo: "Sensor fehlt")
+
+// Stossstaerke
+static bool inStroke = false;
+static float strokePeak = 0;               // laufender Stoss: hoechste Abweichung von 1 g
+static uint32_t strokeLastMs = 0;
+static float lastStroke = 0;               // Spitze des letzten Stosses (g)
+static uint32_t strokeCount = 0;
+static uint32_t strokeAt = 0;              // millis() am Ende des letzten Stosses
 
 
 static void writeReg(uint8_t reg, uint8_t val) {
@@ -130,7 +143,7 @@ static bool mpuInit() {
   writeReg(0x19, 4);      // 1 kHz / (1+4) = 200 Hz
   writeReg(0x1A, 0x03);   // Tiefpass 44 Hz
   writeReg(0x1B, 0x08);   // Gyroskop +-500 Grad/s
-  writeReg(0x1C, 0x00);   // Beschleunigung +-2 g
+  writeReg(0x1C, 0x18);   // Beschleunigung +-16 g (Stossstaerke), fuer die Lage egal
   return true;
 }
 
@@ -275,7 +288,7 @@ static void sendPage(const String& body) {
 static const char DEMO_WIDGET[] = R"HTML(<style>
 .demo{background:#fff;border:2px solid #0E3F31;border-radius:14px;padding:10px 12px;margin:10px 0 18px}
 .demo h2{font-size:17px;margin:2px 0 8px}.demo svg{display:block;width:100%;height:auto}
-.dv{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;text-align:center;margin:8px 0}
+.dv{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;text-align:center;margin:8px 0}
 .dv small{display:block;font-size:12px;color:#666}.dv b{font:700 22px/1.2 ui-monospace,monospace}
 .demo button{margin:6px 0 4px}.demo p{margin:4px 0;font-size:13px;color:#555}
 </style><div class=demo><h2>Demo: so sieht der Pi den Queue</h2>
@@ -290,7 +303,9 @@ static const char DEMO_WIDGET[] = R"HTML(<style>
 <g id=dok visibility=hidden><circle cx=78 cy=-32 r=14 fill="#0C2014" stroke="#50DC78" stroke-width=2.5 />
 <path d="M71 -32 l5 5 l10 -11" fill=none stroke="#50DC78" stroke-width=3.5 stroke-linecap=round stroke-linejoin=round /></g></svg>
 <div class=dv><div><small>Richtung</small><b id=dy>-</b></div><div><small>Neigung</small><b id=dp>-</b></div>
-<div><small>Sensor</small><b id=ds>-</b></div></div>
+<div><small>Sensor</small><b id=ds>-</b></div><div><small>letzter Sto&szlig;</small><b id=dk>-</b></div></div>
+<p>Kraft ca. <b id=df>-</b> (F = m&middot;a) &middot; Kö <input id=dm type=number step=0.05 min=0.1 max=2 value=0.55
+style="width:70px;margin:0;padding:4px;font-size:15px"> kg &middot; <span id=dn>0</span> Stö&szlig;e</p>
 <svg viewBox="-62 -16 124 32" aria-label="Seitenansicht: Neigung des Queues"><rect x=-60 y=4 width=120 height=4 fill="#1C5496"/>
 <g id=dsi><polygon points="40,-.7 -55,-2 -55,2 40,.7" fill="#E9D3A8" stroke="#7a5a32" stroke-width=.4 /></g>
 <circle cx=44 cy=1.5 r=2.5 fill="#F6F4EC" stroke="#999" stroke-width=.3 /></svg>
@@ -307,16 +322,19 @@ $('dcu').setAttribute('transform','rotate('+(-r).toFixed(2)+')');
 $('dsi').setAttribute('transform','rotate('+(-d.pitch).toFixed(2)+' 40 0)');
 $('dy').textContent=z===null?f(nm(d.yaw)):f(r);$('dp').textContent=f(d.pitch);
 $('ds').textContent=!d.sensor?'fehlt!':d.still?'ruhig':'bewegt';$('ds').style.color=d.sensor?'#080':'#b00';
+var m=parseFloat($('dm').value)||0.55;$('dk').textContent=d.stoesse?d.stoss.toFixed(1).replace('.',',')+' g':'-';
+$('df').textContent=d.stoesse?(m*d.stoss*9.81).toFixed(0)+' N':'-';$('dn').textContent=d.stoesse;
 $('dtg').setAttribute('visibility',z===null?'hidden':'visible');
 $('dok').setAttribute('visibility',z!==null&&Math.abs(r)<=2?'visible':'hidden');}catch(e){}setTimeout(poll,60)};
 x.onerror=x.ontimeout=function(){$('ds').textContent='getrennt';$('ds').style.color='#b00';setTimeout(poll,500)};x.send()}
 poll()})();</script>)HTML";
 
 static void demoLage() {
-  char buf[140];
+  char buf[180];
   bool ok = millis() - lastGoodRead < 500;
-  snprintf(buf, sizeof(buf), "{\"yaw\":%.2f,\"pitch\":%.2f,\"still\":%d,\"sensor\":%d,\"bat\":%.2f}",
-           curYaw, curPitch, still ? 1 : 0, ok ? 1 : 0, curBat);
+  snprintf(buf, sizeof(buf),
+           "{\"yaw\":%.2f,\"pitch\":%.2f,\"still\":%d,\"sensor\":%d,\"bat\":%.2f,\"stoss\":%.1f,\"stoesse\":%lu}",
+           curYaw, curPitch, still ? 1 : 0, ok ? 1 : 0, curBat, lastStroke, (unsigned long)strokeCount);
   server.sendHeader("Cache-Control", "no-store");
   server.send(200, "application/json", buf);
 }
@@ -425,10 +443,12 @@ static bool authorized() {
 
 static void apiLage() {
   if (!authorized()) { server.send(403, "application/json", "{\"error\":\"falscher Castcode\"}"); return; }
-  char buf[200];
+  char buf[240];
   snprintf(buf, sizeof(buf),
-           "{\"castcode\":\"%s\",\"seq\":%lu,\"yaw\":%.2f,\"pitch\":%.2f,\"still\":%d,\"bat\":%.2f,\"ms\":%lu}",
-           castcode.c_str(), (unsigned long)seq++, curYaw, curPitch, still ? 1 : 0, curBat, (unsigned long)millis());
+           "{\"castcode\":\"%s\",\"seq\":%lu,\"yaw\":%.2f,\"pitch\":%.2f,\"still\":%d,\"bat\":%.2f,"
+           "\"stoss\":%.1f,\"stoesse\":%lu,\"ms\":%lu}",
+           castcode.c_str(), (unsigned long)seq++, curYaw, curPitch, still ? 1 : 0, curBat, lastStroke,
+           (unsigned long)strokeCount, (unsigned long)millis());
   server.sendHeader("Cache-Control", "no-store");
   server.send(200, "application/json", buf);
 }
@@ -437,7 +457,8 @@ static void staRoot() {
   String h = "<h1>Billard-Queue</h1><p class=ok>Verbunden mit <b>" + esc(ssid) + "</b>, IP <b>" +
              WiFi.localIP().toString() + "</b>, Signal " + String(WiFi.RSSI()) + " dBm</p>"
              "<p>Castcode</p><div class=code>" + castcode + "</div>"
-             "<p>Richtung " + String(curYaw, 1) + "&deg;, Neigung " + String(curPitch, 1) + "&deg; &middot; "
+             "<p>Richtung " + String(curYaw, 1) + "&deg;, Neigung " + String(curPitch, 1) + "&deg;, letzter Sto&szlig; " +
+             String(lastStroke, 1) + " g &middot; "
              "<a href='/demo'>Demo-Anzeige (live)</a></p>"
              "<form method=post action='/einrichten' onsubmit=\"return confirm('WLAN neu einrichten? Der Queue oeffnet danach wieder den Hotspot.')\">"
              "<button>WLAN neu einrichten</button></form><p><small>Firmware " FW_VERSION "</small></p>";
@@ -556,28 +577,47 @@ static void sendLage() {
     }
     return;
   }
-  char out[220];
+  char out[260];
   int m = snprintf(out, sizeof(out),
                    "{\"castcode\":\"%s\",\"seq\":%lu,\"yaw\":%.2f,\"pitch\":%.2f,\"still\":%d,\"bat\":%.2f,"
-                   "\"rssi\":%d,\"knopf\":%lu,\"ms\":%lu}",
+                   "\"rssi\":%d,\"knopf\":%lu,\"stoss\":%.1f,\"stoesse\":%lu,\"ms\":%lu}",
                    castcode.c_str(), (unsigned long)seq++, curYaw, curPitch, still ? 1 : 0, curBat,
-                   (int)WiFi.RSSI(), (unsigned long)knopf, (unsigned long)millis());
+                   (int)WiFi.RSSI(), (unsigned long)knopf, lastStroke, (unsigned long)strokeCount,
+                   (unsigned long)millis());
   udp.beginPacket(aboIp, aboPort);
   udp.write((const uint8_t*)out, m);
   udp.endPacket();
 }
 
 // ======================================================== LED und Knopf
+static uint32_t ledLast = 0xFFFFFFFF;           // zuletzt gesetzte Farbe (alle LEDs gleich)
+
 static void ledColor(uint8_t r, uint8_t g, uint8_t b) {
 #if LED_PIN >= 0
-  static uint32_t last = 0xFFFFFFFF;
   uint32_t c = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
-  if (c == last) return;                           // nur bei Aenderung schreiben
-  last = c;
+  if (c == ledLast) return;                        // nur bei Aenderung schreiben
+  ledLast = c;
   for (int i = 0; i < LED_COUNT; i++) led.setPixelColor(i, led.Color(r, g, b));
   led.show();
 #endif
 }
+
+#if LED_PIN >= 0 && LED_COUNT >= 25
+#define HAS_MATRIX 1
+// Atom Matrix (5x5): Stossstaerke als Balken von unten, 1 Zeile je 3 g, gruen -> gelb -> rot
+static void ledBar(float g) {
+  int rows = constrain((int)ceilf(g / 3.0f), 1, 5);
+  uint32_t key = 0xB0000000u | (uint32_t)rows;     // Balkenhoehe als "Farbe" merken: nur bei Aenderung schreiben
+  if (key == ledLast) return;
+  ledLast = key;
+  led.clear();
+  for (int r = 0; r < rows; r++) {
+    uint32_t c = r < 2 ? led.Color(0, 255, 0) : r < 4 ? led.Color(255, 160, 0) : led.Color(255, 0, 0);
+    for (int x = 0; x < 5; x++) led.setPixelColor((4 - r) * 5 + x, c);
+  }
+  led.show();
+}
+#endif
 
 enum LedState { LED_ROT, LED_GRUEN, LED_TEAM };
 
@@ -593,6 +633,12 @@ static void updateLed() {
     ledColor(on ? 255 : 0, 0, 0);
     return;
   }
+#ifdef HAS_MATRIX
+  if (strokeCount && ms - strokeAt < STROKE_SHOW_MS) {   // nach einem Stoss kurz die Staerke zeigen
+    ledBar(lastStroke);
+    return;
+  }
+#endif
   switch (ledState()) {
     case LED_ROT: ledColor(255, 0, 0); break;
     case LED_GRUEN: ledColor(0, 255, 0); break;
@@ -691,6 +737,20 @@ void loop() {
   float acc = sqrtf((float)a[0] * a[0] + (float)a[1] * a[1] + (float)a[2] * a[2]) / ACC_LSB;
   float rate = sqrtf(gd[0] * gd[0] + gd[1] * gd[1] + gd[2] * gd[2]);
   bool calm = rate < 1.5f && fabsf(acc - 1.0f) < 0.05f;
+
+  // Stossstaerke: Abweichung von 1 g (Ruhe). Spitze je Stoss merken, Stoss endet nach kurzer Ruhe.
+  float dyn = fabsf(acc - 1.0f);
+  if (dyn > STROKE_START_G) {
+    if (!inStroke) { inStroke = true; strokePeak = 0; }
+    if (dyn > strokePeak) strokePeak = dyn;
+    strokeLastMs = ms;
+  } else if (inStroke && ms - strokeLastMs > STROKE_END_MS) {
+    inStroke = false;
+    lastStroke = strokePeak;
+    strokeCount++;
+    strokeAt = ms;
+    Serial.printf("Stoss %lu: %.1f g\n", (unsigned long)strokeCount, lastStroke);
+  }
   if (!calm) stillSince = ms;
   still = calm && ms - stillSince > 1000;
   if (still) {

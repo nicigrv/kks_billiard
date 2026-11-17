@@ -4,7 +4,7 @@
 # Ergebnis in dist/:
 #   billard-rasp.zip     Raspberry Pi (app/ + docker-compose.yml)
 #   billard-server.zip   Trainingsserver für den VPS (training_server/)
-#   billard-queue.zip    Queue-Firmware + Kö-Messgerät (Quellcode + fertige .bin für den Atom Matrix)
+#   billard-queue.zip    Queue-Firmware (Quellcode + fertige .bin für den Atom Matrix)
 #   billard-gesamt.zip   das komplette Repository
 #   update.sh            Installations-/Update-Skript für Pi und Server
 # Braucht: git, zip, PlatformIO (pio) und esptool.
@@ -56,14 +56,12 @@ baue() {   # baue <projektordner> <env> <zielname>
     0x1000 "$o/bootloader.bin" 0x8000 "$o/partitions.bin" 0xe000 "$app0" 0x10000 "$o/firmware.bin" >/dev/null
 }
 baue "$SRC/cue_sensor" m5stack-atom queue-atom-matrix.bin
-baue "$SRC/koe_messgeraet" m5stack-atom koe-messgeraet-atom-matrix.bin
 cat > "$FW/FLASHEN.md" <<MD
 # Fertige Firmware aufspielen ($VERSION)
 
 | Datei | Programm |
 |---|---|
-| \`queue-atom-matrix.bin\` | Queue mit Gyroskop (\`cue_sensor\`), M5Stack Atom Matrix / Atom Lite |
-| \`koe-messgeraet-atom-matrix.bin\` | Kö-Messgerät (\`koe_messgeraet\`), M5Stack Atom Matrix |
+| \`queue-atom-matrix.bin\` | Queue mit Gyroskop (\`cue_sensor\`): Richtung + Stoßstärke, M5Stack Atom Matrix / Atom Lite |
 
 Die Dateien enthalten alles (Bootloader, Partitionen, Programm) und werden ab **Adresse 0x0** geschrieben.
 
@@ -75,7 +73,7 @@ Die Dateien enthalten alles (Bootloader, Partitionen, Programm) und werden ab **
 Danach den Queue wie in \`cue_sensor/README.md\` beschrieben über den Hotspot einrichten.
 Andere Boards (XIAO, AtomS3, ESP32-DevKit): Quellcode mit PlatformIO selbst bauen.
 MD
-packe billard-queue billard-queue.zip "$SRC/cue_sensor" "$SRC/koe_messgeraet" "$FW" "$SRC/VERSION"
+packe billard-queue billard-queue.zip "$SRC/cue_sensor" "$FW" "$SRC/VERSION"
 
 # Gesamt
 shopt -s dotglob
