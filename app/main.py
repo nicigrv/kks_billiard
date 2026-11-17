@@ -40,6 +40,7 @@ from review_rounds import RoundManager
 from sound import Sound
 from scene import SceneRenderer, bar_balls, surface_to_bgr
 from cameras import SOURCE_NAMES, SOURCES, make_reader
+from single_ball import SingleBall
 
 KINDS = ("cue", "eight", "solid", "stripe")
 COLORS = ("gelb", "blau", "rot", "violett", "orange", "gruen", "weinrot", "schwarz", "")
@@ -82,6 +83,7 @@ class App:
         self.auth = None                                      # setzt web.start()
         self.panel_url = ""                                   # Adresse des Spiel-Panels (QR-Code)
         self.notes = Notices()                                # Meldungen oben rechts
+        self.single = SingleBall(self.pipe, self.recorder, self.notes)   # Einzelkugel-Serie (KI-Training)
         self._edges = {}
         self._disk = (0.0, True)
         self.proc_fps = 0.0
@@ -589,6 +591,7 @@ class App:
             "review": self.reviews.status(),
             "review_show_ai": bool(self.cfg.get("review_show_ai", False)),
             "sound": {"device": self.sound.device, "error": self.sound.error},
+            "single": self.single.status(),
         }
 
     def game_state(self):
@@ -681,6 +684,21 @@ class App:
             return f"Ding gespielt über {self.sound.device}"
         if name == "train_correction":
             return self._train_correction(p)
+        if name.startswith("single_"):
+            try:
+                if name == "single_mode":
+                    return self.single.set_enabled(bool(p.get("enabled")))
+                if name == "single_ball":
+                    return self.single.set_number(p["number"])
+                if name == "single_empty":
+                    return self.single.remember_empty()
+                if name == "single_start":
+                    return self.single.start(p.get("count", 50), p.get("interval", 1.0), p.get("only_new", True))
+                if name == "single_stop":
+                    return self.single.stop()
+            except ValueError as e:
+                raise config.UserError(str(e))
+            return None
         if name == "record_round":
             if p.get("enabled"):
                 if not self.rounds.start(self.scene(live=False)):
@@ -809,6 +827,7 @@ class App:
 
     def stop(self):
         self._stop.set()
+        self.single.stop()
         self.reader.stop()
         self.cue.stop()
 

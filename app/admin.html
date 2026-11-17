@@ -134,7 +134,7 @@ button:disabled { opacity: .45; cursor: default; }
 .span3 { grid-column: 1 / -1; }
 
 label { display: block; font-size: 15px; color: var(--ivory-dim); margin-bottom: 4px; }
-input[type=text], input[type=password], select {
+input[type=text], input[type=password], input[type=number], select {
   width: 100%; padding: 12px; min-height: 48px;
   background: var(--felt-dark); border: 2px solid var(--rail-light); border-radius: 10px;
 }
@@ -313,6 +313,28 @@ details > div { margin-top: 12px; }
       <div class="switchrow">
         <span class="lbl" id="autoLbl">Nach jedem Stoß automatisch ein Bild speichern<span class="sub">auch im Spiel-Panel schaltbar; Prüfer legen die Bilder später unter /pruefen fest</span></span>
         <button class="switch" type="button" role="switch" id="autoSw" aria-checked="false" aria-labelledby="autoLbl"></button>
+      </div>
+      <div class="switchrow" style="margin-top:6px">
+        <span class="lbl" id="singleLbl">Einzelkugel-Serie<span class="sub">viele Bilder von einer Kugel – Nummer hier festlegen, Position findet der Pi selbst</span></span>
+        <button class="switch" type="button" role="switch" id="singleSw" aria-checked="false" aria-labelledby="singleLbl"></button>
+      </div>
+      <div id="singleBox" hidden style="margin-bottom:16px">
+        <p class="hint">1. Tisch leer räumen, dann „Leeren Tisch merken“. 2. Kugel wählen – sie ist damit für alle Bilder festgelegt. 3. Kugel hinlegen und Serie starten. Zwischen den Bildern die Kugel an andere Stellen legen. Gespeichert wird nur, wenn genau eine ruhende Kugel zu sehen ist (Hand aus dem Bild nehmen). Die Bilder landen direkt bei den festgelegten Bildern.</p>
+        <button type="button" class="quiet" id="singleEmptyBtn" style="width:100%">Leeren Tisch merken</button>
+        <p class="statusline" id="singleEmptyInfo" style="margin-top:6px"></p>
+        <p class="hint" style="margin:10px 0 0">Kugel</p>
+        <div class="chips" id="singleChips"></div>
+        <div class="grid two" style="margin-top:12px">
+          <div><label for="singleCount">Anzahl Bilder</label><input type="number" id="singleCount" min="1" max="500" value="50"></div>
+          <div><label for="singleInterval">Abstand (Sekunden)</label><input type="number" id="singleInterval" min="0.3" max="30" step="0.1" value="1"></div>
+        </div>
+        <label class="check"><input type="checkbox" id="singleOnlyNew" checked> Nur speichern, wenn die Kugel woanders liegt als beim letzten Bild</label>
+        <div class="grid two">
+          <button type="button" class="primary" id="singleStartBtn">Serie starten</button>
+          <button type="button" class="danger" id="singleStopBtn" disabled>Stoppen</button>
+        </div>
+        <p class="statusline" id="singleInfo" style="margin-top:10px"></p>
+        <img id="singleImg" alt="Zuletzt gespeichertes Bild der Serie" hidden style="width:100%;border-radius:10px;margin-top:6px">
       </div>
       <p class="hint">Bilder entstehen per Knopf („Jetzt ein Bild aufnehmen“ hier oder „Bild speichern“ im Spiel-Panel) oder automatisch (Schalter oben). Festlegen geht später in Ruhe: Prüfer melden sich unter <b>/pruefen</b> an und bekommen – solange keine Prüfrunde läuft – die gespeicherten Bilder, jeder ein anderes. Ihr legt die Kugeln fest: auf eine Kugel tippen, dann ihre Nummer. Fehlt eine Kugel, auf die freie Stelle tippen. Sobald der KI-Chip ein Modell hat, schlägt er die Kugeln schon vor – dann nur noch prüfen und „Passt alles“. Nur festgelegte Bilder werden zum Training benutzt.</p>
       <p class="statusline" id="qualityInfo"></p>
@@ -543,6 +565,7 @@ details > div { margin-top: 12px; }
     }
 
     renderTraining(s);
+    renderSingle(s);
     renderCamera(s);
     renderReview(s);
     if (!calibDirty && s.table_size) $("tableSize").value = s.table_size;
@@ -890,6 +913,65 @@ details > div { margin-top: 12px; }
     btn.textContent = "Kamera übernehmen";
     if (res) camDirty = false;
   });
+
+  // ---------------- Einzelkugel-Serie ----------------
+  const SINGLE_HEX = { 0: ["#f4f1e8", "#222"], 8: ["#111", "#fff"] };
+  [["#F5C314", 1], ["#2355CD", 2], ["#D72D28", 3], ["#7837A0", 4], ["#F07A1E", 5], ["#1F8A4C", 6], ["#7A1F2B", 7]]
+    .forEach(([hex, n]) => { SINGLE_HEX[n] = [hex, "#fff"]; SINGLE_HEX[n + 8] = [hex, "#fff", true]; });
+  let singleSaved = -1;
+  (function buildSingleChips() {
+    const box = $("singleChips");
+    for (let n = 0; n <= 15; n++) {
+      const [bg, fg, stripe] = SINGLE_HEX[n];
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "chip"; b.textContent = n === 0 ? "W" : String(n);
+      b.dataset.n = n;
+      b.style.color = fg;
+      b.style.background = stripe ? "linear-gradient(#f4f1e8 0 28%, " + bg + " 28% 72%, #f4f1e8 72%)" : bg;
+      if (stripe) { b.style.color = "#111"; b.style.textShadow = "0 0 3px #fff"; }
+      b.setAttribute("aria-label", n === 0 ? "Weiße" : "Kugel " + n);
+      b.addEventListener("click", () => post("single_ball", { number: n }));
+      box.appendChild(b);
+    }
+  })();
+  function renderSingle(s) {
+    const g = s.single || {};
+    $("singleSw").setAttribute("aria-checked", g.enabled ? "true" : "false");
+    $("singleBox").hidden = !g.enabled;
+    for (const b of $("singleChips").children) {
+      const sel = Number(b.dataset.n) === g.number;
+      b.classList.toggle("sel", sel);
+      b.setAttribute("aria-pressed", sel ? "true" : "false");
+      b.disabled = !!g.active;
+    }
+    $("singleEmptyInfo").textContent = g.empty ? "Leerer Tisch gemerkt um " + g.empty : "Noch kein leerer Tisch gemerkt";
+    $("singleEmptyBtn").disabled = !!g.active;
+    $("singleStartBtn").disabled = !!g.active || g.number === null || g.number === undefined;
+    $("singleStopBtn").disabled = !g.active;
+    $("singleInfo").textContent = (g.number === null || g.number === undefined) ? "Zuerst die Kugel wählen" :
+      g.name + (g.active ? "  ·  " + g.saved + "/" + g.target + " gespeichert" : "") +
+      (g.message ? "  ·  " + g.message : "");
+    if (g.preview && g.saved !== singleSaved) {
+      singleSaved = g.saved;
+      $("singleImg").src = "/api/single.jpg?t=" + Date.now();
+      $("singleImg").hidden = false;
+    }
+  }
+  $("singleSw").addEventListener("click", () => post("single_mode", { enabled: !(state && state.single && state.single.enabled) }));
+  $("singleEmptyBtn").addEventListener("click", () => post("single_empty", {}));
+  $("singleStartBtn").addEventListener("click", () => post("single_start", {
+    count: Number($("singleCount").value) || 50,
+    interval: Number($("singleInterval").value) || 1,
+    only_new: $("singleOnlyNew").checked,
+  }));
+  $("singleStopBtn").addEventListener("click", () => post("single_stop", {}));
+  setInterval(async () => {
+    if (!(state && state.single && state.single.active)) return;
+    try {
+      const r = await fetch("/api/state");
+      if (r.ok) render(await r.json());
+    } catch (e) { /* naechster Versuch */ }
+  }, 1000);
 
   // ---------------- KI-Modell ----------------
   function renderTraining(s) {
