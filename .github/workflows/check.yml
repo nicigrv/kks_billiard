@@ -31,10 +31,11 @@ jobs:
       - name: docker-compose.yml (Pi und Server)
         run: |
           docker compose -f docker-compose.yml config -q
-          UPLOAD_KEY=test docker compose -f training_server/docker-compose.yml config -q
+          export UPLOAD_KEY=test
+          docker compose -f training_server/docker-compose.yml config -q
       - name: JavaScript (.js und in den HTML-Seiten)
         run: |
-          for f in $(git ls-files '*.js'); do node --check "$f"; done
-          python3 scripts/check_html_js.py $(git ls-files '*.html')
+          git ls-files -z '*.js' | xargs -0 -n1 node --check
+          git ls-files -z '*.html' | xargs -0 python3 scripts/check_html_js.py
       - name: Workflows (actionlint)
         run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color
