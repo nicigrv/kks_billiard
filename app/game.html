@@ -170,12 +170,13 @@ details > div { margin-top: 12px; }
   <section id="fixSection">
     <h2>Korrigieren</h2>
     <div class="grid">
+      <button class="primary span3" data-cmd="shot_done" id="shotDoneBtn">Stoß fertig – jetzt auswerten</button>
       <button class="danger" data-cmd="foul">Foul</button>
       <button data-cmd="switch_turn">Zug wechseln</button>
       <button class="quiet" data-cmd="undo" id="undoBtn">Rückgängig</button>
       <button class="quiet span3" data-cmd="undo_shot" id="undoShotBtn">Letzten erkannten Stoß verwerfen</button>
     </div>
-    <p class="hint" style="margin-top:8px">„Stoß verwerfen“, wenn das System einen Stoß erkannt hat, der keiner war (z. B. Kugel von Hand verschoben).</p>
+    <p class="hint" style="margin-top:8px">„Stoß fertig“ (oder Knopf am Queue während des Spiels): wertet sofort aus, sobald der Tisch frei ist, und zählt den Stoß auch ohne Treffer. „Stoß verwerfen“, wenn das System einen Stoß erkannt hat, der keiner war (z. B. Kugel von Hand verschoben).</p>
     <details>
       <summary>Weitere Korrekturen</summary>
       <div>

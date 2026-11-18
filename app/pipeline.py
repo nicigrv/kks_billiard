@@ -126,6 +126,16 @@ class Pipeline:
                 print(f"[training] Rueckmeldung fehlgeschlagen: {e}", flush=True)
         return name
 
+    def cue_stroke(self):
+        """Queue meldet einen Stoss (Gyroskop)."""
+        with self.lock:
+            self.monitor.cue_stroke()
+
+    def finish_shot(self):
+        """'Stoss fertig': sofort auswerten, sobald der Tisch ruhig und frei ist. False = geht noch nicht."""
+        with self.lock:
+            return self.monitor.finish()
+
     def restart_tracking(self):
         """Nach Spielstart / neuem Rack: der naechste ruhige Tisch ist der neue Ausgangszustand,
         egal was vorher war (Aufbauen ist kein Stoss)."""

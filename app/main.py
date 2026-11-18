@@ -96,7 +96,8 @@ class App:
                              self.cfg.get("cue_flip", False), discovery_port=cue_port,
                              address=(last[0], cue_port) if last else None, on_found=self._cue_found,
                              enabled=self.cfg.get("cue_enabled", True),
-                             on_button=self._cue_button, led_color=self._cue_led).start()
+                             on_button=self._cue_button, led_color=self._cue_led,
+                             on_stroke=self._cue_stroke).start()
         self.align = AlignChecker(self.cfg.get("cue_tolerance", 2.0))
         self.cue_fw = CueUpdater(self.cue)                    # Firmware des Queues ueber das WLAN
         self.rounds = RoundRecorder(os.path.join(config.DATA_DIR, "recordings"))
@@ -544,9 +545,29 @@ class App:
             return None
         return TEAM_COLORS[g.turn % 2]
 
+    def _cue_stroke(self, strength):
+        """Gyroskop im Queue hat einen Stoss gemessen: hilft der Stosserkennung (nur im Spiel)."""
+        if self.pipe.game.phase == "playing" and self.cue.enabled:
+            self.pipe.cue_stroke()
+
+    def shot_done(self, source="Spiel-Panel"):
+        """'Stoss fertig': der Spieler sagt, sein Stoss ist vorbei -> sofort auswerten."""
+        if self.pipe.game.phase != "playing":
+            raise config.UserError("Es läuft kein Spiel")
+        if not self.pipe.finish_shot():
+            raise config.UserError("Noch kein Ausgangszustand - erst den Tisch ruhig werden lassen")
+        self.notes.push("Stoß fertig", f"{source}: wird ausgewertet, sobald der Tisch frei ist",
+                        "info", ttl=4.0, key="stoss-fertig")
+        return "Stoß wird ausgewertet, sobald der Tisch ruhig und frei ist"
+
     def _cue_button(self):
-        """Knopf am Queue (nur bei gruener LED = kein Spiel): Team A gegen Team B starten."""
+        """Knopf am Queue: ohne Spiel (LED gruen) Team A gegen Team B starten,
+        im Spiel (LED in Teamfarbe) 'Stoss fertig'."""
         if self.pipe.game.phase == "playing":
+            try:
+                self.shot_done("Knopf am Queue")
+            except config.UserError as e:
+                print(f"[queue] Knopf: {e}", flush=True)
             return
         self.command("start", {"team_a": "Team A", "team_b": "Team B", "breaker": 0})
         self.notes.push("Spiel gestartet (Knopf am Queue)",
@@ -853,6 +874,8 @@ class App:
                 g.abort()
             elif name == "foul":
                 g.foul()
+            elif name == "shot_done":
+                return self.shot_done()
             elif name == "switch_turn":
                 g.switch_turn()
             elif name == "undo":

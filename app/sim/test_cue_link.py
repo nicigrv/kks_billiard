@@ -68,9 +68,9 @@ def main():
     print("Koppeln und abonnieren")
     disc = 5191
     cue = start_fake("SMQ234", disc)
-    found, presses = [], []
+    found, presses, strokes = [], [], []
     team = {"color": None}
-    s = CueSensor("", discovery_port=disc, on_found=found.append,
+    s = CueSensor("", discovery_port=disc, on_found=found.append, on_stroke=strokes.append,
                   on_button=lambda: presses.append(1), led_color=lambda: team["color"]).start()
     time.sleep(0.5)
     check(not s.connected and s.status()["state"] == "kein Castcode eingetragen", "ohne Castcode: wartet")
@@ -100,11 +100,14 @@ def main():
     check(wait_for(lambda: len(presses) == 1, 2), "Pi bekommt den Knopfdruck genau einmal")
     team["color"] = [0, 90, 255]                      # Spiel laeuft, Team A dran
     check(wait_for(lambda: cue.led() == [0, 90, 255], 1), "Teamfarbe kommt sofort auf die LED")
-    check(not cue.press(), "Knopf waehrend des Spiels zaehlt nicht (LED nicht gruen)")
+    check(cue.press() and wait_for(lambda: len(presses) == 2, 2),
+          "Knopf waehrend des Spiels wird gemeldet (= Stoss fertig)")
     team["color"] = [255, 110, 0]                     # Zugwechsel
     check(wait_for(lambda: cue.led() == [255, 110, 0], 1), "Zugwechsel: andere Teamfarbe")
     time.sleep(0.5)
-    check(len(presses) == 1, "kein weiterer Knopfdruck gemeldet")
+    check(len(presses) == 2, "kein weiterer Knopfdruck gemeldet")
+    cue.stroke()
+    check(wait_for(lambda: len(strokes) == 1, 2) and strokes[0] == 3.6, "Stoss vom Gyroskop wird gemeldet (mit Staerke)")
     team["color"] = None
     check(wait_for(lambda: cue.led() == "gruen", 1), "Spiel vorbei: wieder gruen")
 

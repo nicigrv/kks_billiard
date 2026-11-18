@@ -189,7 +189,56 @@ def test_simulated_game(seed=42):
     print("  Endstand:", g.frames_won, "-", g.message)
 
 
+def test_queue_help():
+    """Stosserkennung mit Hilfe vom Queue: Gyroskop-Stoss und Knopf 'Stoss fertig'."""
+    from ballnum import Ball
+    from shots import ShotEvent, ShotMonitor
+    print("Stosserkennung: Hilfe vom Queue")
+    r = 10.0
+    t = [0.0]
+    m = ShotMonitor(r, clock=lambda: t[0])
+    base = [Ball.from_number(100, 100, r, 0), Ball.from_number(300, 200, r, 3), Ball.from_number(500, 100, r, 9)]
+    nudged = [Ball.from_number(112, 100, r, 0)] + base[1:]          # Weisse nur 1,2 Radien bewegt
+
+    def still(balls, s=2.0):
+        out = None
+        end = t[0] + s
+        while t[0] < end:
+            t[0] += 0.1
+            ev = m.update(balls, False, False)
+            out = ev if ev is not None else out
+        return out
+
+    def move():
+        t[0] += 0.1
+        m.update([], True, False)
+
+    check(still(base) == "reference", "Ausgangszustand")
+    move()
+    check(still(nudged) is None, "ohne Queue: Weisse 1,2 Radien bewegt -> kein Stoss (zu wenig)")
+    m.cue_stroke()
+    move()
+    back = list(base)
+    check(isinstance(still(back), ShotEvent), "Queue meldet Stoss: kleine Bewegung der Weissen reicht")
+    m.cue_stroke()
+    check(isinstance(still(nudged), ShotEvent), "Queue-Stoss auch ohne von der Kamera gesehene Bewegung")
+    check(m.finish(), "'Stoss fertig' angenommen")
+    t0 = t[0]
+    ev = None
+    while ev is None and t[0] - t0 < 3:
+        t[0] += 0.1
+        ev = m.update(nudged, False, False)
+    check(isinstance(ev, ShotEvent) and t[0] - t0 < 0.6,
+          f"'Stoss fertig': sofort ausgewertet ({t[0] - t0:.1f} s) und zaehlt auch ohne Veraenderung")
+    m.finish()
+    t[0] += 0.1
+    check(m.update(nudged, False, True) is None, "'Stoss fertig' wartet, solange etwas ueber dem Tisch haengt")
+    m.reset()
+    check(not m.finish(), "'Stoss fertig' ohne Ausgangszustand: abgelehnt")
+
+
 if __name__ == "__main__":
+    test_queue_help()
     test_rules()
     for seed in (42, 7, 123):
         test_simulated_game(seed)

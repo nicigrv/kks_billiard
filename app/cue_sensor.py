@@ -15,6 +15,8 @@ Koppeln ueber den CASTCODE (6 Zeichen, zeigt der Queue in seinem Einrichtungs-Ho
      pitch = Neigung (Spitze nach unten negativ)
      knopf = zaehlt Knopfdruecke am Queue (bei gruener LED) -> der Pi startet ein Spiel
      stoss = Spitze der Beschleunigung beim letzten Stoss in g (Stossstaerke), stoesse = Anzahl
+             -> zaehlt "stoesse" hoch, meldet der Pi der Stosserkennung "Queue hat gestossen"
+     knopf waehrend eines Spiels (LED in Teamfarbe) = "Stoss fertig" (ab Firmware 3.4)
   Das Abo wiederholt der Pi jede Sekunde (Lebenszeichen + Teamfarbe fuer die LED; bei
   Farbwechsel sofort). Kommen 3 s keine Daten, sucht der Pi den Queue neu (neue IP?).
   Der Queue ist optional: ausgeschaltet (enabled=False) sucht und fragt der Pi nichts ab.
@@ -67,7 +69,7 @@ def clean_castcode(code):
 class CueSensor:
     def __init__(self, castcode="", offset=0.0, flip=False, discovery_port=5005, address=None,
                  on_found=None, poll_hz=25.0, clock=time.monotonic, enabled=True,
-                 on_button=None, led_color=None):
+                 on_button=None, led_color=None, on_stroke=None):
         self.castcode = castcode or ""
         self.enabled = bool(enabled)
         self.offset = float(offset)
@@ -77,7 +79,8 @@ class CueSensor:
         self.discovery_addrs = [a for a in os.environ.get("CUE_DISCOVERY_ADDR", "255.255.255.255,127.0.0.1").split(",") if a]
         self.address = tuple(address) if address else None    # (ip, port), zuletzt bekannt
         self.on_found = on_found
-        self.on_button = on_button        # Knopf am Queue gedrueckt (bei gruener LED)
+        self.on_button = on_button        # Knopf am Queue gedrueckt
+        self.on_stroke = on_stroke        # Queue hat gestossen (Zaehler "stoesse" steigt) -> Staerke in g
         self.led_color = led_color        # -> [r, g, b] des Teams, das dran ist, oder None (kein Spiel)
         self.poll_s = 1.0 / poll_hz       # nur noch fuer Tests/Kompatibilitaet; der Queue sendet selbst
         self.listen_port = int(os.environ.get("CUE_LISTEN_PORT", "0"))   # 0 = beliebig
@@ -90,6 +93,7 @@ class CueSensor:
         self.lost = 0
         self.rate = 0.0
         self.button = None                # zuletzt gesehener Zaehler "knopf"
+        self.strokes = None               # zuletzt gesehener Zaehler "stoesse"
         self.rejected = 0                 # unplausible Pakete (verworfen)
         self.last_error = ""
         self.state = self._idle_state()
@@ -282,7 +286,7 @@ class CueSensor:
                 v = None
             if key in d:
                 d[key] = v
-        pressed = False
+        pressed = stroke = False
         with self.lock:
             old = self.data
             if old and "seq" in d and "seq" in old:
@@ -297,6 +301,15 @@ class CueSensor:
             if isinstance(k, int):
                 pressed = self.button is not None and k > self.button
                 self.button = k
+            n = d.get("stoesse")
+            if isinstance(n, int):
+                stroke = self.strokes is not None and n > self.strokes
+                self.strokes = n
+        if stroke and self.on_stroke:
+            try:
+                self.on_stroke(d.get("stoss"))
+            except Exception as e:                  # darf den Empfang nie stoppen
+                print(f"[queue] Stoss: {e}", flush=True)
         if pressed and self.on_button:
             try:
                 self.on_button()
