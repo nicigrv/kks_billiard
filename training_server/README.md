@@ -36,6 +36,17 @@ Braucht Pillow und numpy – das Dockerfile installiert beides (nach dem Update 
 Tastatur: Enter = speichern, Ziffern = Nummer (zweistellig schnell hintereinander: 1, 2 = 12),
 W = Weiße, Entf = Kugel entfernen, Esc = abwählen.
 
+## Trainings-ZIP direkt in Google Colab laden
+
+Ohne greylo-Login, mit eigenem Schlüssel (`EXPORT_KEY` in `.env`, legt `update.sh server` an und zeigt ihn an):
+
+```
+!curl -fL -H "X-Export-Key: <EXPORT_KEY>" -o daten.zip https://billard.server.greylo.de/api/export.zip
+```
+
+`?modus=einig` (nur einstimmige) bzw. `?modus=alle` (inkl. unfertige) wie auf der Admin-Seite.
+Ohne `EXPORT_KEY` in `.env` ist der Export aus. Den Schlüssel nicht weitergeben – damit kann man alle fertigen Bilder laden.
+
 ## Einrichten (VPS)
 
 ```bash
