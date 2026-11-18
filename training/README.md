@@ -103,7 +103,8 @@ Oder von Hand – in Colab (TensorFlow ist dort schon installiert, eine GPU hilf
 4. `ausgabe/billard_klassen_edgetpu.tflite` herunterladen und im Admin-Panel unter
    „Modell / Farben hochladen“ hochladen. Im Admin-Panel steht dann bei Stufe 2 + 3 „KI-Chip“.
 
-- Ohne Edge-TPU-Compiler (nicht Linux x86) entsteht nur `billard_klassen.tflite`. Das läuft auch,
+- Den Edge-TPU-Compiler (16.0) lädt das Skript selbst herunter (Googles apt-Quelle gibt es nicht mehr).
+  Ohne Compiler (nicht Linux x86) entsteht nur `billard_klassen.tflite`. Das läuft auch,
   aber auf dem Prozessor des Pi. In Colab umwandeln: `!edgetpu_compiler -s billard_klassen.tflite`.
 - Fehlt das Modell oder lädt es nicht, rechnet der Pi automatisch wieder mit der Statistik
   (`billard_merkmale.json`). „Klassen-Modell löschen“ im Admin-Panel schaltet zurück.
