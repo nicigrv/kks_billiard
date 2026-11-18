@@ -20,6 +20,7 @@ nie ganz genau. Die Farbe selbst wird kaum veraendert: sie unterscheidet rot / o
 """
 
 import argparse
+import platform
 import shutil
 import subprocess
 import sys
@@ -144,21 +145,36 @@ def report(km, y_true, probs, title):
     return float(np.mean(y_true == pred))
 
 
-def compile_edgetpu(src, out_dir):
-    """edgetpu_compiler aufrufen (Linux x86). In Colab wird er bei Bedarf installiert."""
-    if shutil.which("edgetpu_compiler") is None and sys.platform.startswith("linux"):
-        print("Edge-TPU-Compiler fehlt - versuche ihn zu installieren (wie in Colab) ...")
-        cmd = ("curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | "
-               "gpg --dearmor -o /usr/share/keyrings/coral-edgetpu.gpg && "
-               "echo 'deb [signed-by=/usr/share/keyrings/coral-edgetpu.gpg] https://packages.cloud.google.com/apt "
-               "coral-edgetpu-stable main' > /etc/apt/sources.list.d/coral-edgetpu.list && "
-               "apt-get update -qq && apt-get install -y -qq edgetpu-compiler")
-        if subprocess.run(cmd, shell=True).returncode != 0:
-            subprocess.run(f"sudo sh -c \"{cmd}\"", shell=True)
-    if shutil.which("edgetpu_compiler") is None:
+COMPILER_URL = ("https://github.com/ultralytics/assets/releases/download/v0.0.0/"
+                "edgetpu-compiler_16.0_amd64.tar.gz")   # Googles edgetpu-compiler 16.0, unveraendert
+
+
+def find_compiler():
+    """edgetpu_compiler suchen; fehlt er (Googles apt-Quelle gibt es nicht mehr), Version 16.0
+    herunterladen - dieselben Dateien wie das alte Debian-Paket, bereitgestellt von Ultralytics."""
+    found = shutil.which("edgetpu_compiler")
+    if found:
+        return found
+    if not (sys.platform.startswith("linux") and platform.machine() in ("x86_64", "AMD64")):
         return None
-    r = subprocess.run(["edgetpu_compiler", "-s", "-o", str(out_dir), str(src)], capture_output=True, text=True)
-    print(r.stdout[-1500:])
+    home = Path.home() / ".cache" / "edgetpu-compiler"
+    exe = home / "usr" / "bin" / "edgetpu_compiler"
+    if not exe.is_file():
+        print("Edge-TPU-Compiler fehlt - lade Version 16.0 ...")
+        home.mkdir(parents=True, exist_ok=True)
+        r = subprocess.run(f"curl -fsSL {COMPILER_URL} | tar xz -C {home}", shell=True)
+        if r.returncode != 0 or not exe.is_file():
+            return None
+    return str(exe)
+
+
+def compile_edgetpu(src, out_dir):
+    """Fuer den Coral umwandeln (edgetpu_compiler, nur Linux x86 - z. B. Colab)."""
+    exe = find_compiler()
+    if exe is None:
+        return None
+    r = subprocess.run([exe, "-s", "-o", str(out_dir), str(src)], capture_output=True, text=True)
+    print(r.stdout[-2500:])
     if r.returncode != 0:
         print(r.stderr[-800:])
         return None
