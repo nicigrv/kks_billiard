@@ -308,7 +308,7 @@ def make_handler(app, auth: Auth):
                     return self._send(400, {"error": "Datei fehlt oder ist zu groß"})
                 data = self.rfile.read(n)
                 try:
-                    msg = app.save_model(data)
+                    msg = app.save_model(data, unquote(self.headers.get("X-Filename", "")))
                 except UserError as e:
                     return self._send(400, {"error": str(e)})
                 return self._send(200, {"ok": True, "message": msg, "state": app.state_dict()})

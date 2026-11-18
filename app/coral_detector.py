@@ -3,9 +3,13 @@ Kugelerkennung in drei Stufen:
 
     1. Kugeln finden    KI-Chip (Coral, YOLOv8n mit 1 Klasse "Kugel")
                         Draufsicht -> verkleinern (Letterbox) -> [Coral] -> Kaesten
-    2. gestreift?       kugel_merkmale.py: Weisse / schwarze 8 / voll / halb
-    3. Farbe            kugel_merkmale.py: gelb, blau, rot, violett, orange, gruen, weinrot
+    2. gestreift?       Weisse / schwarze 8 / voll / halb                          } KI-Chip, wenn ein Klassen-
+    3. Farbe            gelb, blau, rot, violett, orange, gruen, weinrot           } Modell da ist, sonst Statistik
     -> Nummer (0 = Weisse, 1-7 Volle, 8, 9-15 Halbe); jede Nummer gibt es nur einmal.
+
+Stufe 2 + 3 auf dem KI-Chip: ein kleines Netz (training/train_klassen.py) bekommt einen Ausschnitt
+um jede gefundene Kugel und liefert direkt die Wahrscheinlichkeit je Nummer 0-15. Ohne dieses Modell
+(oder wenn es nicht laedt) rechnet der Pi wie bisher mit Statistik (kugel_merkmale.py).
 
 Stufe 2 + 3 schauen sich jede gefundene Kugel in der vollen Draufsicht an (nicht im
 verkleinerten Coral-Bild) und lernen aus festgelegten Bildern (billard_merkmale.json).
@@ -15,7 +19,10 @@ Kugel ist - die Nummer bestimmen Stufe 2 + 3.
 Coral-Modell:
     /data/models/billard_edgetpu.tflite      eigenes Modell (Upload im Admin-Panel)
     /app/models/start_edgetpu.tflite         Startmodell (mit Simulator-Bildern trainiert)
-Merkmale (Stufe 2 + 3):
+Stufe 2 + 3 auf dem KI-Chip (optional):
+    /data/models/billard_klassen_edgetpu.tflite   aus training/train_klassen.py (Upload im Admin-Panel);
+                                                  ohne Edge-TPU-Teil laeuft es auf dem Prozessor
+Merkmale (Stufe 2 + 3, Statistik - Rueckfall):
     /data/models/billard_merkmale.json       gelernt (Admin-Panel oder train_coral.py)
     /app/models/start_merkmale.json          Startwerte aus dem Simulator
 Wird eine Datei ersetzt, laedt der Detektor sie von selbst.
@@ -31,7 +38,7 @@ import cv2
 import numpy as np
 
 from ballnum import Ball
-from kugel_merkmale import ClassifierStore
+from kugel_merkmale import COLORS, ClassifierStore, crop
 
 MODEL_CLASSES = (1, 16)             # 1 = "Kugel" (neu), 16 = Kugelnummern (aeltere Modelle)
 MODELS_DIR = os.path.join(os.environ.get("DATA_DIR", "/data"), "models")
@@ -39,6 +46,7 @@ DATA_MODEL = os.path.join(os.environ.get("DATA_DIR", "/data"), "models", "billar
 START_MODEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "start_edgetpu.tflite")
 DATA_FEATURES = os.path.join(MODELS_DIR, "billard_merkmale.json")
 START_FEATURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "start_merkmale.json")
+DATA_KLASSEN = os.path.join(MODELS_DIR, "billard_klassen_edgetpu.tflite")
 EDGETPU_LIB = "libedgetpu.so.1"
 
 
@@ -59,13 +67,36 @@ def _default_interpreter(path):
     return Interpreter(model_path=path, experimental_delegates=[delegate])
 
 
+def is_edgetpu_model(path):
+    """Fuer den Coral umgewandelt (edgetpu_compiler)? Sonst laeuft es nur auf dem Prozessor."""
+    try:
+        with open(path, "rb") as f:
+            return b"edgetpu-custom-op" in f.read()
+    except OSError:
+        return False
+
+
+def _auto_interpreter(path):
+    """Klassen-Modell: auf dem Coral, wenn umgewandelt - sonst auf dem Prozessor (1 Kern)."""
+    if is_edgetpu_model(path):
+        return _default_interpreter(path)
+    try:
+        from tflite_runtime.interpreter import Interpreter
+    except ImportError as e:
+        raise CoralNotReady("tflite_runtime fehlt (Programm mit dem Dockerfile bauen)") from e
+    return Interpreter(model_path=path, num_threads=1)
+
+
 class CoralEngine:
     """Haelt das Modell auf dem Coral. Wird nur aus dem Erkennungs-Thread benutzt;
     status() darf von ueberall gelesen werden."""
 
     def __init__(self, model_paths=(DATA_MODEL, START_MODEL), make_interpreter=_default_interpreter,
-                 retry_s=5.0, clock=time.monotonic):
+                 retry_s=5.0, clock=time.monotonic, check=None, name="coral", missing=None):
         self.model_paths = model_paths
+        self.check = check or _check_yolo           # Ausgabeform pruefen -> Klassenzahl
+        self.name = name
+        self.missing = missing or "Kein Modell vorhanden (im Admin-Panel hochladen)"
         self.make_interpreter = make_interpreter
         self.retry_s = retry_s
         self.clock = clock
@@ -97,7 +128,7 @@ class CoralEngine:
         if now < self._next_try:
             return False
         if path is None:
-            return self._fail("Kein Modell vorhanden (im Admin-Panel hochladen)")
+            return self._fail(self.missing)
         if time.time() - mtime < 2:
             return self._fail("Modell wird gerade geschrieben", 1.0)
         try:
@@ -108,23 +139,19 @@ class CoralEngine:
             interp.set_tensor(inp["index"], np.zeros(inp["shape"], inp["dtype"]))
             interp.invoke()                     # erster Lauf kopiert das Modell auf den Stick
             out = interp.get_output_details()[0]
-            shape = [int(v) for v in out["shape"]]
-            nc = next((k for k in MODEL_CLASSES if 4 + k in shape), None)
-            if nc is None:
-                raise CoralNotReady(f"Modell hat das falsche Format {shape} - gebraucht wird ein "
-                                    f"Kugel-Modell aus training/train_coral.py (1 Klasse)")
+            nc = self.check([int(v) for v in inp["shape"]], [int(v) for v in out["shape"]])
         except CoralNotReady as e:
             return self._fail(str(e))
         except (ValueError, RuntimeError) as e:
             return self._fail(f"Modell laesst sich nicht laden: {e}")
         self.interp, self.model, self.error, self.nc = interp, (path, mtime), "", nc
-        print(f"[coral] Modell geladen in {time.monotonic() - t0:.1f} s: {os.path.basename(path)} "
+        print(f"[{self.name}] Modell geladen in {time.monotonic() - t0:.1f} s: {os.path.basename(path)} "
               f"{[int(v) for v in inp['shape']]}", flush=True)
         return True
 
     def _fail(self, msg, retry=None):
         if msg != self.error:
-            print(f"[coral] {msg}", flush=True)
+            print(f"[{self.name}] {msg}", flush=True)
         self.interp, self.model, self.error = None, None, msg
         self._next_try = self.clock() + (self.retry_s if retry is None else retry)
         return False
@@ -163,7 +190,38 @@ class CoralEngine:
             "error": self.error,
             "ms": None if self.ms is None else round(self.ms, 1),
             "classes": self.nc,
+            "on_tpu": None if path is None else is_edgetpu_model(path),
         }
+
+
+def _check_yolo(inp_shape, out_shape):
+    nc = next((k for k in MODEL_CLASSES if 4 + k in out_shape), None)
+    if nc is None:
+        raise CoralNotReady(f"Modell hat das falsche Format {out_shape} - gebraucht wird ein "
+                            f"Kugel-Modell aus training/train_coral.py (1 Klasse)")
+    return nc
+
+
+def _check_klassen(inp_shape, out_shape):
+    if len(inp_shape) != 4 or inp_shape[0] != 1 or inp_shape[1] != inp_shape[2] or inp_shape[3] != 3 \
+            or out_shape[-1] != 16:
+        raise CoralNotReady(f"Klassen-Modell hat das falsche Format {inp_shape} -> {out_shape} - "
+                            "gebraucht wird billard_klassen_edgetpu.tflite aus training/train_klassen.py")
+    return 16
+
+
+def klassen_engine(path=DATA_KLASSEN, make_interpreter=_auto_interpreter, **kw):
+    """Stufe 2 + 3 auf dem KI-Chip (optional; ohne Datei rechnet der Pi mit Statistik)."""
+    return CoralEngine((path,), make_interpreter, check=_check_klassen, name="klassen",
+                       missing="kein Klassen-Modell (optional, training/train_klassen.py)", **kw)
+
+
+def scores_to_parts(s):
+    """16 Wahrscheinlichkeiten (Nummern) -> (Art {art: p}, Farbe {farbe: p}) wie bei der Statistik."""
+    pk = {"cue": float(s[0]), "eight": float(s[8]), "solid": float(s[1:8].sum()), "stripe": float(s[9:16].sum())}
+    pc = s[1:8] + s[9:16]
+    pc = pc / max(float(pc.sum()), 1e-9)
+    return pk, {c: float(p) for c, p in zip(COLORS, pc)}
 
 
 # -------------------------------------------------------------- YOLO-Auswertung
@@ -249,11 +307,13 @@ class CoralDetector:
 
     name = "coral"
 
-    def __init__(self, radius_px, engine: CoralEngine, conf=0.35, features: ClassifierStore = None):
+    def __init__(self, radius_px, engine: CoralEngine, conf=0.35, features: ClassifierStore = None,
+                 klassen: CoralEngine = None):
         self.r = float(radius_px)
         self.engine = engine
         self.conf = conf
         self.features = features or default_features()
+        self.klassen = klassen              # Stufe 2 + 3 auf dem KI-Chip (None = nur Statistik)
 
     def find(self, warped):
         """Stufe 1 (KI-Chip): wo liegen Kugeln? -> [{"x", "y", "det"}]"""
@@ -280,13 +340,34 @@ class CoralDetector:
                 kept.append(c)
         return kept
 
+    def classify_tpu(self, warped, cands):
+        """Stufe 2 + 3 auf dem KI-Chip: Ausschnitt je Kugel -> 16 Wahrscheinlichkeiten. False = nicht bereit."""
+        k = self.klassen
+        if k is None or not k.ready():
+            return False
+        shape, dt, scale_q, zp = k.input_info()
+        size = shape[1]
+        try:
+            for c in cands:
+                patch = cv2.cvtColor(crop(warped, c["x"], c["y"], self.r, out=size), cv2.COLOR_BGR2RGB)
+                s = k.run(quantize_input(patch, dt, scale_q, zp)[None]).reshape(-1)[:16]
+                s = np.clip(s, 1e-6, None)
+                s = s / s.sum()
+                c["scores"] = s
+                c["p_kind"], c["p_color"] = scores_to_parts(s)
+        except CoralNotReady:
+            return False
+        return True
+
     def detect(self, warped):
         kept = self.find(warped)
-        clf = self.features.get()
-        if clf is None:
-            raise CoralNotReady("Keine Farb-/Streifen-Werte (models/start_merkmale.json fehlt)")
-        for c in kept:                                   # Stufe 2 + 3
-            c["scores"], c["p_kind"], c["p_color"] = clf.classify(warped, c["x"], c["y"], self.r)
+        if not self.classify_tpu(warped, kept):          # Stufe 2 + 3 auf dem Prozessor (Statistik)
+            clf = self.features.get()
+            if clf is None:
+                raise CoralNotReady("Keine Farb-/Streifen-Werte (models/start_merkmale.json fehlt)")
+            for c in kept:
+                c["scores"], c["p_kind"], c["p_color"] = clf.classify(warped, c["x"], c["y"], self.r)
+        for c in kept:
             c["number"] = int(np.argmax(c["scores"]))
             c["score"] = float(c["scores"][c["number"]])
         return [Ball.from_number(c["x"], c["y"], self.r, c["number"], c["score"]) for c in assign_unique(kept)]

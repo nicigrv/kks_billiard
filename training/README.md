@@ -73,11 +73,38 @@ python train_coral.py --nur-farben billard-training-20261110.zip
 → `ausgabe/billard_merkmale.json` hochladen. Lohnt sich nach jedem neuen Schwung festgelegter Bilder
 oder wenn das Licht anders ist. Noch einfacher: Admin-Panel → „Farben aus festgelegten Bildern lernen“.
 
+## Variante D: Stufe 2 + 3 auf dem KI-Chip (entlastet den Pi)
+
+Statt Statistik auf dem Prozessor bestimmt ein kleines neuronales Netz auf dem Coral Art und Farbe:
+Der Pi schneidet um jede gefundene Kugel einen kleinen Ausschnitt aus (40×40 Pixel), der Coral
+liefert direkt die Wahrscheinlichkeit für jede Nummer 0–15. Gelernt wird aus derselben ZIP –
+die **Einzelkugel-Bilder** sind dafür besonders gut (viele Beispiele je Nummer).
+
+In Colab (TensorFlow ist dort schon installiert, eine GPU hilft, ist aber nicht nötig):
+
+1. `train_klassen.py`, `train_coral.py`, **`kugel_merkmale.py`** (aus `app/`) und die ZIP(s) hochladen.
+2. ```
+   !python train_klassen.py billard-training-20261118.zip
+   ```
+3. Dauer: wenige Minuten. Am Ende steht für die Prüfbilder, wie oft Art, Farbe und Nummer stimmen –
+   **neues Netz und bisherige Statistik nebeneinander**, damit ihr seht, ob es sich lohnt.
+4. `ausgabe/billard_klassen_edgetpu.tflite` herunterladen und im Admin-Panel unter
+   „Modell / Farben hochladen“ hochladen. Im Admin-Panel steht dann bei Stufe 2 + 3 „KI-Chip“.
+
+- Ohne Edge-TPU-Compiler (nicht Linux x86) entsteht nur `billard_klassen.tflite`. Das läuft auch,
+  aber auf dem Prozessor des Pi. In Colab umwandeln: `!edgetpu_compiler -s billard_klassen.tflite`.
+- Fehlt das Modell oder lädt es nicht, rechnet der Pi automatisch wieder mit der Statistik
+  (`billard_merkmale.json`). „Klassen-Modell löschen“ im Admin-Panel schaltet zurück.
+- Im Training wird jede Kugel gedreht, gespiegelt, leicht verschoben und heller/dunkler gemacht.
+  Die Farbe selbst bleibt fast unverändert – sie unterscheidet rot, orange und weinrot.
+- Optionen: `--epochs 40` (Standard), `--kopien 6` (veränderte Kopien je Kugel), `--val 0.15`.
+
 ## Was im Modell steckt
 
 - Stufe 1: YOLOv8n (klein), Eingabe 640×640, **1 Klasse = Kugel**. Datei ca. 4 MB. Im Training wird
   Farbton/Helligkeit stark verändert – die Farbe ist für Stufe 1 egal, so findet es jede Kugel.
-- Stufe 2 + 3: pro Art bzw. Farbe eine Normalverteilung über wenige Merkmale (`app/kugel_merkmale.py`),
+- Stufe 2 + 3 auf dem KI-Chip (Variante D): kleines CNN, Eingabe 40×40, 16 Klassen (Nummern), ca. 100 KB.
+- Stufe 2 + 3 als Statistik: pro Art bzw. Farbe eine Normalverteilung über wenige Merkmale (`app/kugel_merkmale.py`),
   ein paar KB als JSON. Fehlen Beispiele für eine Kugel, bleiben dafür die Startwerte aus dem Simulator.
 - In der ZIP steht weiter die Kugelnummer als Klasse (0 = Weiße, 1–15); `train_coral.py` macht für
   Stufe 1 daraus „Kugel“ und lernt Stufe 2 + 3 aus den Nummern.

@@ -68,12 +68,13 @@ def split_number(n):
 
 
 # ------------------------------------------------------------------ Merkmale
-def crop(img, x, y, r):
-    """Ausschnitt um die Kugel (BGR), auf CROP x CROP gebracht. Ragt er ueber den Rand, wird
-    der Rand fortgesetzt (das Innere der Kugel liegt praktisch immer im Bild)."""
+def crop(img, x, y, r, out=CROP):
+    """Ausschnitt um die Kugel (BGR, 2 * SPAN * r breit), auf out x out gebracht. Ragt er ueber den
+    Rand, wird der Rand fortgesetzt (das Innere der Kugel liegt praktisch immer im Bild).
+    Auch fuer das Coral-Modell von Stufe 2 + 3 (out = Eingabegroesse des Modells)."""
     size = max(4, int(math.ceil(2 * SPAN * r)))
     patch = cv2.getRectSubPix(img, (size, size), (float(x), float(y)))
-    return cv2.resize(patch, (CROP, CROP), interpolation=cv2.INTER_AREA if size > CROP else cv2.INTER_LINEAR)
+    return cv2.resize(patch, (out, out), interpolation=cv2.INTER_AREA if size > out else cv2.INTER_LINEAR)
 
 
 def features(patch):
