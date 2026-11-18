@@ -1,7 +1,7 @@
 """
 Tests fuer KI-Chip und Trainingsbilder (ohne echten Coral-Stick):
-  * Trainingsbilder: aufnehmen -> festlegen/pruefen -> nichts geht verloren -> Export
-  * Trefferquote des Modells (Vorschlag gegen festgelegtes Ergebnis)
+  * Trainingsbilder: aufnehmen (mit Vorschlag des KI-Chips), Einzelkugel, nach dem Upload loeschen
+    (festgelegt und gelernt wird nur auf der Trainingsseite im Netz, nicht auf dem Pi)
   * CoralEngine/CoralDetector mit einem Ersatz-Interpreter, der wie ein Edge-TPU-Modell
     aus dem Training antwortet (int8, 1 Klasse "Kugel" bzw. aeltere 16 Kugelnummern, Kaesten 0..1);
     die Nummer kommt aus Stufe 2 + 3 (gestreift? Farbe?) am Simulator-Bild
@@ -14,7 +14,6 @@ import json
 import os
 import sys
 import tempfile
-import zipfile
 
 import numpy as np
 
@@ -25,7 +24,7 @@ import kugel_merkmale as km
 from coral_detector import CoralDetector, CoralEngine, CoralNotReady, default_features, klassen_engine, letterbox
 from geometry import TABLE_SIZES, WARP_H, WARP_W, Table
 from pipeline import Pipeline
-from recorder import SINGLE_MODEL, Recorder
+from recorder import Recorder
 from sim.render import DEFAULT_CORNERS, SimBall, render_topdown, to_camera
 
 FAILS = []
@@ -39,78 +38,47 @@ def check(cond, text):
 
 # ---------------------------------------------------------------- Trainingsbilder
 def test_training_data():
-    print("Trainingsbilder aufnehmen und festlegen")
+    print("Trainingsbilder aufnehmen (für die Trainingsseite)")
     with tempfile.TemporaryDirectory() as d:
         rec = Recorder(d)
         img = np.zeros((400, 800, 3), np.uint8)
-        # 1. ohne Modell: Bild ohne Vorschlag
         n1 = rec.save_pending(img, [], 10.0)
-        # 2./3. mit Modell-Vorschlag
         sugg = [Ball.from_number(100, 100, 10, 0), Ball.from_number(300, 200, 10, 3), Ball.from_number(500, 300, 10, 10)]
         n2 = rec.save_pending(img, sugg, 10.0, model="eigenes Modell vom 01.12.2026")
-        n3 = rec.save_pending(img, sugg, 10.0, model="eigenes Modell vom 01.12.2026")
-        check(n1 and n2 and n3 and rec.pending == 3, "Bilder auch ohne Modell (leer) aufgenommen")
-        item = rec.next_pending()
-        check(item["name"] == n1 and item["balls"] == [] and item["model"] is None, "aeltestes zuerst, ohne Vorschlag")
+        check(n1 and n2 and n1 != n2 and rec.pending == 2, "Bilder auch ohne Modell (leer) aufgenommen")
+        with open(os.path.join(rec.pending_dir, n2 + ".json")) as f:
+            meta = json.load(f)
+        check([b["number"] for b in meta["balls"]] == [0, 3, 10] and meta["model"].startswith("eigenes"),
+              "Vorschlag des KI-Chips (Nummern) liegt dabei")
+        e1 = rec.save_single(img, 5, 10.0, b"\xff\xd8leer")
+        e2 = rec.save_single(img, 5, 10.0, b"\xff\xd8leer")
+        leer = [n for n in os.listdir(rec.single_dir) if n.startswith("leer-")]
+        check(e1 and e2 and rec.single == 2 and len(leer) == 1, "Einzelkugel: 2 Bilder, leerer Tisch nur einmal")
+        check(rec.waiting == 4, f"wartet auf den Upload: {rec.waiting}")
+        rec.remove(os.path.join(rec.pending_dir, n1 + ".jpg"), os.path.join(rec.pending_dir, n1 + ".json"))
+        check(rec.pending == 1 and not os.path.exists(os.path.join(rec.pending_dir, n1 + ".jpg")),
+              "nach dem Upload gelöscht")
 
-        # von Hand festlegen: Kugeln ohne Nummer werden abgelehnt
-        try:
-            rec.review(n1, [{"x": 50, "y": 60, "kind": "solid", "color": ""}])
-            check(False, "Kugel ohne Nummer wird abgelehnt")
-        except ValueError as e:
-            check("ohne Nummer" in str(e), "Kugel ohne Nummer wird abgelehnt")
-        rec.review(n1, [{"x": 50, "y": 60, "kind": "solid", "color": "rot", "changed": True},
-                        {"x": 400, "y": 200, "kind": "cue", "color": "", "changed": True}])
-        lbl = open(os.path.join(d, "geprueft", "labels", n1 + ".txt")).read().split("\n")
-        check(lbl[0].startswith("3 0.06250 0.15000") and lbl[1].startswith("0 0.50000 0.50000"),
-              "YOLO-Label: Klasse = Kugelnummer")
-
-        # Vorschlag pruefen: 2 von 3 richtig (10 war eigentlich die 11)
-        item2 = rec.next_pending()
-        final = [dict(b) for b in item2["balls"]]
-        final[2].update(kind="stripe", color="rot", number=None, changed=True)
-        rec.review(n2, final)
-        q = rec.model_quality()
-        check(q and q["percent"] == 67 and q["images"] == 1, f"Trefferquote des Modells ({q})")
-        rec.review(n3, item2["balls"])                     # alles richtig
-        q = rec.model_quality()
-        check(q["percent"] == 83 and q["images"] == 2, f"Trefferquote ueber mehrere Bilder ({q['percent']} %)")
-
-        # verwerfen loescht nicht
-        n4 = rec.save_pending(img, [], 10.0)
-        rec.review(n4, [], discard=True)
-        check(rec.discarded == 1 and os.path.isfile(os.path.join(d, "verworfen", n4 + ".jpg")),
-              "verworfene Bilder werden aufgehoben, nicht geloescht")
-
-        # Export fuer das Training: nur festgelegte, Labels aus den .json neu gebaut
-        zp = os.path.join(d, "train.zip")
-        n = rec.export_zip(zp)
-        names = zipfile.ZipFile(zp).namelist()
-        check(n == 3 and sum(x.startswith("images/") for x in names) == 3, "Trainings-Export: 3 festgelegte Bilder")
-        # Alle Bilder
-        n5 = rec.save_pending(img, [], 10.0)
-        za = os.path.join(d, "alle.zip")
-        k = rec.export_all_zip(za)
-        names = zipfile.ZipFile(za).namelist()
-        check(k == 5 and any(x.startswith("verworfen/") for x in names) and f"offen/{n5}.jpg" in names,
-              "Alle Bilder: offene, festgelegte und verworfene")
-
-        # Speicher voll -> nichts mehr aufnehmen
         rec.min_free_bytes = 1 << 62
-        check(rec.save_pending(img, [], 10.0) is None and not rec.disk_ok(),
+        check(rec.save_pending(img, [], 10.0) is None and rec.save_single(img, 1, 10.0) is None and not rec.disk_ok(),
               "Speicher fast voll -> keine Aufnahme mehr")
         rec.min_free_bytes = 0
 
-        # Alle Bilder loeschen
+        # Ablage aus aelteren Versionen (am Pi festgelegt / verworfen)
+        os.makedirs(rec.ok_img)
+        os.makedirs(rec.ok_lbl)
+        os.makedirs(rec.discard_dir)
+        old = "20261101-120000-000"
+        for p in (os.path.join(rec.ok_img, old + ".jpg"), os.path.join(rec.ok_lbl, old + ".json"),
+                  os.path.join(rec.ok_lbl, old + ".txt"), os.path.join(rec.discard_dir, old + ".jpg")):
+            with open(p, "w") as f:
+                f.write("{}")
+        check(rec.waiting == 4, "alte festgelegte Bilder warten auch auf den Upload")
+        rec.remove(os.path.join(rec.ok_img, old + ".jpg"), os.path.join(rec.ok_lbl, old + ".json"))
+        check(rec.verified == 0 and not os.listdir(rec.ok_lbl), "alte Bilder samt YOLO-Datei nach dem Upload gelöscht")
         k = rec.delete_all()
-        check(k == 5 and rec.pending == 0 and rec.verified == 0 and rec.discarded == 0
-              and rec.model_quality() is None, f"Alle Bilder loeschen ({k} Bilder, Trefferquote zurueckgesetzt)")
+        check(k == 4 and rec.waiting == 0 and not os.path.exists(rec.discard_dir), f"Alle Bilder löschen ({k} Bilder)")
         check(rec.save_pending(img, [], 10.0) is not None and rec.pending == 1, "danach geht Aufnehmen wieder")
-
-        # Einzelkugel-Serie (Vorschlag aus dem Bildvergleich, nicht vom KI-Chip): zaehlt nicht in die Trefferquote
-        ns = rec.save_pending(img, [Ball.from_number(200, 100, 10, 5)], 10.0, model=SINGLE_MODEL)
-        rec.review(ns, [{"x": 200, "y": 100, "kind": "solid", "color": "orange"}])
-        check(rec.model_quality() is None, "Einzelkugel-Serie verfaelscht die Trefferquote des KI-Chips nicht")
 
 
 # ------------------------------------------------------------------ KI-Chip
@@ -373,40 +341,11 @@ def test_pipeline_without_chip():
         check(rec.pending == 3, "Schalter aus -> wieder nur per Knopf")
 
 
-def test_claims():
-    print("Spaeter festlegen: mehrere Pruefer, jeder ein anderes Bild")
-    with tempfile.TemporaryDirectory() as d:
-        rec = Recorder(d)
-        t = [1000.0]
-        rec.clock = lambda: t[0]
-        warped = np.zeros((400, 800, 3), np.uint8)
-        names = [rec.save_pending(warped, [Ball(100 + 50 * i, 100, 10, "cue", "")], 10.0, [0]) for i in range(3)]
-        a = rec.next_pending(who="Anna")
-        b = rec.next_pending(who="Ben")
-        check(a["name"] == names[0] and b["name"] == names[1], "Anna und Ben bekommen verschiedene Bilder")
-        check(a["pending"] == 3 and b["free"] == 2, "Zaehler: 3 offen, fuer Ben 2 frei")
-        try:
-            rec.review(a["name"], a["balls"], by="Ben")
-            check(False, "fremdes Bild speichern abgelehnt")
-        except ValueError as e:
-            check("Anna" in str(e), f"fremdes Bild speichern abgelehnt ({e})")
-        check(rec.review(a["name"], a["balls"], by="Anna") == "übernommen", "Anna speichert ihr Bild")
-        with open(os.path.join(rec.ok_lbl, a["name"] + ".json")) as f:
-            check(json.load(f).get("labeled_by") == "Anna", "festgelegt von Anna (steht im Label)")
-        c = rec.next_pending(who="Anna")
-        check(c["name"] == names[2], "Anna bekommt das naechste freie Bild")
-        rec.release("Ben")
-        check(rec.next_pending(who="Clara")["name"] == names[1], "Ben gibt frei -> Clara bekommt es")
-        t[0] += 700
-        check(rec.next_pending(who="Dora")["name"] == names[1], "nach 10 Minuten ohne Speichern wieder frei")
-
-
 if __name__ == "__main__":
     test_training_data()
     test_engine()
     test_klassen()
     test_pipeline_without_chip()
-    test_claims()
     print()
     if FAILS:
         print(f"{len(FAILS)} FEHLER")

@@ -5,7 +5,7 @@ Tests fuer Stufe 2 + 3 der Kugelerkennung (kugel_merkmale.py): gestreift? Farbe?
   * Lernen aus Simulator-Bildern, Pruefen auf anderen Bildern (auch wenn Stufe 1 die Kugel
     ein paar Pixel daneben findet)
   * Speichern/Laden, falsche Dateien werden abgelehnt, neue Datei wird von selbst geladen
-  * Lernen aus den festgelegten Bildern auf dem Pi (Recorder)
+  * Lernen aus gespeicherten JPEG-Bildern (so wie die Trainingsseite im Netz lernt)
   * Klassen mit zu wenig Beispielen behalten die Startwerte
 
     python3 -m sim.test_merkmale
@@ -16,12 +16,12 @@ import os
 import sys
 import tempfile
 
+import cv2
 import numpy as np
 
 import kugel_merkmale as km
-from ballnum import Ball, color_of_number, kind_of_number
+from ballnum import color_of_number, kind_of_number
 from coral_detector import START_FEATURES
-from recorder import Recorder
 from sim.make_start_merkmale import sim_samples
 
 FAILS = []
@@ -100,15 +100,21 @@ def test_inherit():
         check("weinrot" in str(e), "ohne Startwerte: Fehlermeldung nennt die Farbe")
 
 
-def test_from_recorder():
-    print("Lernen aus festgelegten Bildern auf dem Pi")
+def test_from_jpegs():
+    """Wie auf der Trainingsseite (training_server/modelle.py): fertige Bilder als JPEG, eins nach dem anderen lesen."""
+    print("Lernen aus gespeicherten JPEG-Bildern (wie auf der Trainingsseite)")
     with tempfile.TemporaryDirectory() as d:
-        rec = Recorder(d)
-        for img, balls, r in sim_samples(25, 31):
-            rec.save_verified(img, [Ball.from_number(x, y, r, n) for x, y, n in balls], r, [n for _, _, n in balls])
-        got = list(rec.verified_samples())
-        check(len(got) == 25 and all(len(b) == 12 for _, b, _ in got), "25 Bilder mit je 12 Kugeln gelesen")
-        clf, res = km.learn(rec.verified_samples(), fallback=km.BallClassifier.load(START_FEATURES))
+        files = []
+        for i, (img, balls, r) in enumerate(sim_samples(25, 31)):
+            p = os.path.join(d, f"{i}.jpg")
+            cv2.imwrite(p, img, [cv2.IMWRITE_JPEG_QUALITY, 92])
+            files.append((p, balls, r))
+        check(len(files) == 25 and all(len(b) == 12 for _, b, _ in files), "25 Bilder mit je 12 Kugeln gespeichert")
+
+        def samples():
+            for p, balls, r in files:
+                yield cv2.imread(p), balls, r
+        clf, res = km.learn(samples(), fallback=km.BallClassifier.load(START_FEATURES))
         check(res["nummer"] >= 0.85, f"aus JPEGs gelernt: Nummer {res['nummer']:.2f} richtig")
 
 
@@ -116,7 +122,7 @@ if __name__ == "__main__":
     test_numbers()
     test_learn()
     test_inherit()
-    test_from_recorder()
+    test_from_jpegs()
     print()
     if FAILS:
         print(f"{len(FAILS)} FEHLER")

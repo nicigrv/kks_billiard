@@ -5,7 +5,7 @@ Anmeldung am Portal.
     Ist keine PIN gesetzt, ist jeder Admin.
   * Spiel: PIN (GAME_PIN, z. B. 1212) -> Spiel-Panel unter / (Spiel starten, Korrekturen,
     Schlagverbesserung, Queue an/aus). Ohne GAME_PIN ist das Spiel-Panel offen.
-  * Pruefer: eigener 4-stelliger Code, den der Admin im Admin-Panel vergibt (config.json).
+  (Pruefer mit eigenen Codes gibt es am Pi nicht mehr - festgelegt wird auf der Trainingsseite im Netz.)
 
 Nach der Anmeldung merkt sich der Browser ein Sitzungs-Cookie (30 Tage). So funktionieren
 auch Bilder und Download-Links, die keine Kopfzeilen mitschicken koennen. Sitzungen
@@ -36,12 +36,12 @@ class LoginError(ValueError):
 
 
 class Auth:
-    def __init__(self, pin, data_dir, reviewers, clock=time.time, game_pin=""):
-        """reviewers: Funktion, die die aktuelle Pruefer-Liste [{"name", "code"}] liefert."""
+    ROLES = ("admin", "spiel")
+
+    def __init__(self, pin, data_dir, clock=time.time, game_pin=""):
         self.pin = pin or ""
         self.game_pin = game_pin or ""
         self.path = os.path.join(data_dir, "sitzungen.json")
-        self.reviewers = reviewers
         self.clock = clock
         self.lock = threading.Lock()
         self.fails = {}
@@ -53,7 +53,8 @@ class Auth:
             with open(self.path) as f:
                 data = json.load(f)
             now = self.clock()
-            return {t: s for t, s in data.items() if now - s.get("t", 0) < MAX_AGE}
+            # alte Pruefer-Sitzungen (fruehere Versionen) gelten nicht mehr
+            return {t: s for t, s in data.items() if now - s.get("t", 0) < MAX_AGE and s.get("role") in self.ROLES}
         except (OSError, ValueError):
             return {}
 
@@ -68,7 +69,7 @@ class Auth:
             pass
 
     def login(self, secret, ip=""):
-        """PIN oder Pruefer-Code pruefen. Liefert (sitzung, token)."""
+        """Admin- oder Spiel-PIN pruefen. Liefert (sitzung, token)."""
         secret = str(secret or "").strip()
         now = self.clock()
         with self.lock:
@@ -80,14 +81,9 @@ class Auth:
                 sess = {"role": "admin", "name": "Admin"}
             elif self.game_pin and same(secret, self.game_pin):
                 sess = {"role": "spiel", "name": "Spiel"}
-            else:
-                for r in self.reviewers():
-                    if same(secret, r.get("code")):
-                        sess = {"role": "pruefer", "name": r["name"]}
-                        break
             if sess is None:
                 self.fails[ip] = recent + [now]
-                raise LoginError("Falscher PIN bzw. Code")
+                raise LoginError("Falsche PIN")
             self.fails.pop(ip, None)
             token = secrets.token_urlsafe(24)
             self.sessions[token] = dict(sess, t=now)
@@ -108,18 +104,9 @@ class Auth:
             if self.sessions.pop(token, None) is not None:
                 self._save()
 
-    def revoke(self, name):
-        """Pruefer entfernt / neuer Code: seine Sitzungen beenden."""
-        with self.lock:
-            gone = [t for t, s in self.sessions.items() if s["role"] == "pruefer" and s["name"] == name]
-            for t in gone:
-                del self.sessions[t]
-            if gone:
-                self._save()
-
     # --------------------------------------------------------------- Abfrage
     def who(self, cookie_header, pin_header="", ip=""):
-        """-> {"role": "admin"|"spiel"|"pruefer"|None, "name": ...} fuer eine Anfrage.
+        """-> {"role": "admin"|"spiel"|None, "name": ...} fuer eine Anfrage.
         pin_header: Admin-PIN als Kopfzeile X-Admin-Pin (fuer Skripte, z. B. sim/fake_cue.py) -
         Fehlversuche zaehlen wie bei der Anmeldung, sonst liesse sich die PIN durchprobieren."""
         if not self.pin:
@@ -133,9 +120,9 @@ class Auth:
                     return {"role": "admin", "name": "Admin"}
                 self.fails[ip] = recent + [now]
             s = self.sessions.get(token)
-            if s is not None and s["role"] == "pruefer" and \
-                    not any(r["name"] == s["name"] for r in self.reviewers()):
-                s = None                                      # Pruefer wurde entfernt
+            if s is not None and self.clock() - s.get("t", 0) >= MAX_AGE:
+                self.sessions.pop(token, None)                # abgelaufen (auch ohne Neustart)
+                s = None
             if s is None:
                 if not self.game_pin:                         # Spiel-Panel ohne PIN: offen
                     return {"role": "spiel", "name": "Spiel", "open": True}

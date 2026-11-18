@@ -59,7 +59,8 @@ def main():
     model = DATA_MODEL if os.path.isfile(DATA_MODEL) else START_MODEL
     if not os.path.isfile(model):
         print("Noch kein Modell - Stick und Treiber sind in Ordnung. Nach dem Training das Modell")
-        print("im Admin-Panel hochladen und den Test wiederholen, dann wird auch die Geschwindigkeit gemessen.")
+        print("auf der Trainingsseite (oder im Admin-Panel) hochladen und den Test wiederholen,\n"
+              "dann wird auch die Geschwindigkeit gemessen.")
         return 0
     print("Modell:", "eigenes Modell" if model == DATA_MODEL else "Startmodell")
     t0 = time.monotonic()

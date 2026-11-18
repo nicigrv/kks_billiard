@@ -1,8 +1,9 @@
-# Billard-Training im Netz: Python-Standardbibliothek + Pillow/numpy (Einzelkugel-Erkennung), Daten im Volume /data
+# Billard-Training im Netz: Python-Standardbibliothek + Pillow/numpy (Einzelkugel-Erkennung)
+# + OpenCV (Farben lernen fuer den Pi, kugel_merkmale.py), Daten im Volume /data
 FROM python:3.12-slim-bookworm
 WORKDIR /app
-RUN pip install --no-cache-dir pillow==11.* numpy==2.*
-COPY server.py einzelkugel.py trainieren.html admin.html notify.js ./
+RUN pip install --no-cache-dir pillow==11.* numpy==2.* opencv-python-headless==4.10.0.84
+COPY server.py einzelkugel.py modelle.py kugel_merkmale.py start_merkmale.json trainieren.html admin.html notify.js ./
 RUN useradd -u 10001 -M -d /app billard && mkdir /data && chown 10001 /data
 USER 10001
 ENV DATA_DIR=/data PORT=8000 PYTHONUNBUFFERED=1

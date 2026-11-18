@@ -7,21 +7,23 @@ Die Erkennung hat drei Stufen:
 3. **Farbe** – gelb, blau, rot, violett, orange, grün, weinrot (mittlere Farbe)           } `billard_merkmale.json`
 
 `train_coral.py` macht beides. Stufe 2 + 3 allein dauern nur Sekunden (`--nur-farben`, ohne
-Grafikkarte) – oder direkt im Admin-Panel: „Farben aus festgelegten Bildern lernen“.
+Grafikkarte) – oder direkt auf der Trainingsseite im Netz: Admin → „Farben aus fertigen Bildern lernen“.
+
+**Auf dem Pi wird nichts festgelegt oder trainiert** – er nimmt nur Bilder auf und schickt sie zur
+Trainingsseite (`training_server/`). Von dort holt er sich auch die fertigen Modelle selbst.
 
 Ablauf in Kürze:
 
 1. **Bilder speichern** – am Tisch im Spiel-Panel („Bild speichern“ oder automatisch nach jedem
-   Stoß), im Admin-Panel oder im Trainingsmodus (`/training`). Festgelegt wird später in Ruhe:
-   Prüfer unter `/pruefen` (jeder bekommt ein anderes Bild) oder der Admin unter `/training`.
-2. **Kugeln festlegen (iPad)** – Admin-Panel → „KI-Training: Kugeln festlegen“: Kugel antippen, Nummer
-   wählen (bzw. mit Modell: Vorschlag prüfen, „Passt alles“). Nur festgelegte Bilder kommen ins
-   Training; jede Kugel braucht ihre Nummer.
-3. **Trainieren** – Admin-Panel → „KI-Modell (Coral)“ → „Trainingsdaten laden“ (ZIP), dann eine der
-   Varianten unten.
-4. **Hochladen** – `billard_edgetpu.tflite` und `billard_merkmale.json` im Admin-Panel unter
-   „Modell / Farben hochladen“ (beide auf einmal). Der Pi nimmt sie sofort, das Admin-Panel zeigt den
-   Stand aller drei Stufen und mit jedem geprüften Bild, wie oft die Erkennung richtig lag.
+   Stoß) oder im Admin-Panel → „Bilder & Modelle“. Der Pi schickt sie zur Trainingsseite.
+2. **Kugeln festlegen** – auf der Trainingsseite: jeder Trainer mit seinem Code, jedes Bild mehrfach,
+   die Mehrheit zählt (`training_server/README.md`). Nur fertige Bilder kommen ins Training.
+3. **Trainieren** – Trainings-ZIP von der Admin-Seite der Trainingsseite (oder direkt in Colab mit
+   `EXPORT_KEY`, siehe Variante A), dann eine der Varianten unten.
+4. **Hochladen** – `billard_edgetpu.tflite` (und ggf. `billard_klassen_edgetpu.tflite`,
+   `billard_merkmale.json`) auf der **Admin-Seite der Trainingsseite** unter „Modelle für den Pi“.
+   Der Pi holt sie innerhalb weniger Minuten und nimmt sie sofort; im Admin-Panel des Pi steht unter
+   „Bilder & Modelle“, was er übernommen hat. (Ohne Trainingsseite: im Admin-Panel des Pi „von Hand hochladen“.)
 
 **Wie viele Bilder?** Brauchbar ab etwa 200–300 geprüften Bildern, besser 500+, bei
 verschiedenem Licht (Tag/Abend, Lampen an/aus). Nachtrainieren mit mehr Bildern lohnt sich:
@@ -70,8 +72,9 @@ Im Repo-Ordner `training/` (braucht nur `numpy` und `opencv-python`, keine Grafi
 python train_coral.py --nur-farben billard-training-20261110.zip
 ```
 
-→ `ausgabe/billard_merkmale.json` hochladen. Lohnt sich nach jedem neuen Schwung festgelegter Bilder
-oder wenn das Licht anders ist. Noch einfacher: Admin-Panel → „Farben aus festgelegten Bildern lernen“.
+→ `ausgabe/billard_merkmale.json` auf der Trainingsseite hochladen. Lohnt sich nach jedem neuen Schwung
+festgelegter Bilder oder wenn das Licht anders ist. Noch einfacher: Admin-Seite der Trainingsseite →
+„Farben aus fertigen Bildern lernen“.
 
 ## Variante D: Stufe 2 + 3 auf dem KI-Chip (entlastet den Pi)
 
@@ -100,8 +103,8 @@ Oder von Hand – in Colab (TensorFlow ist dort schon installiert, eine GPU hilf
    ```
 3. Dauer: wenige Minuten. Am Ende steht für die Prüfbilder, wie oft Art, Farbe und Nummer stimmen –
    **neues Netz und bisherige Statistik nebeneinander**, damit ihr seht, ob es sich lohnt.
-4. `ausgabe/billard_klassen_edgetpu.tflite` herunterladen und im Admin-Panel unter
-   „Modell / Farben hochladen“ hochladen. Im Admin-Panel steht dann bei Stufe 2 + 3 „KI-Chip“.
+4. `ausgabe/billard_klassen_edgetpu.tflite` herunterladen und auf der Admin-Seite der Trainingsseite unter
+   „Modelle für den Pi“ hochladen. Der Pi holt es selbst; im Admin-Panel des Pi steht dann bei Stufe 2 + 3 „KI-Chip“.
 
 - Den Edge-TPU-Compiler (16.0) lädt das Skript selbst herunter (Googles apt-Quelle gibt es nicht mehr).
   Ohne Compiler (nicht Linux x86) entsteht nur `billard_klassen.tflite`. Das läuft auch,

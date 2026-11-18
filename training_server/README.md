@@ -1,12 +1,15 @@
 # Billard-Training im Netz
 
-Die Bilder vom Tisch landen automatisch auf dem Server. Jeder Trainer legt sie zuhause mit seinem
-eigenen Code fest, am Ende lädt der Admin die Trainings-ZIP für `training/train_coral.py`.
+Die Bilder vom Tisch landen automatisch auf dem Server (und werden danach auf dem Pi gelöscht). Jeder
+Trainer legt sie zuhause mit seinem eigenen Code fest. Der Server lernt daraus die Farben (Stufe 2 + 3),
+der Admin lädt die Trainings-ZIP für `training/train_coral.py` und lädt die fertigen Modelle hier hoch –
+der Pi holt sich alles von selbst. **Auf dem Pi wird nichts festgelegt oder gelernt.**
 
 ```
 Pi am Tisch ──(„Bild speichern“ / „nach jedem Stoß“)──▶ https://billard.server.greylo.de/api/upload
 Trainer zuhause ──▶ https://billard.server.greylo.de        Code (6 Ziffern)
 Admin           ──▶ https://billard.server.greylo.de/admin  greylo-Login, Gruppe „admins“
+Pi am Tisch ◀──(alle 5 Minuten: neue Modelle?)── GET /api/modelle, /api/modell?name=…
 ```
 
 ## Ablauf der Bilder
@@ -24,7 +27,7 @@ Admin           ──▶ https://billard.server.greylo.de/admin  greylo-Login, 
 Am Tisch schon festgelegte Bilder werden genauso dreimal online festgelegt; die Kugeln vom Tisch bleiben nur
 in der Datenbank stehen. Wie oft jedes Bild festgelegt wird, stellt `FESTLEGUNGEN` ein (Standard 3).
 
-**Einzelkugel-Bilder** (am Pi im Admin-Panel → KI-Training → Einzelkugel-Serie → „Bild jetzt aufnehmen“):
+**Einzelkugel-Bilder** (am Pi im Admin-Panel → Bilder & Modelle → Einzelkugel per Knopf → „Bild jetzt aufnehmen“):
 Der Pi schickt das Bild mit der dort gewählten Kugelnummer und dem Bild des leeren Tisches. Eine einfache
 Bilderkennung hier auf dem Server (`einzelkugel.py`: was sich gegenüber dem leeren Tisch verändert hat und
 so groß wie eine Kugel ist) zieht den Kreis. Genau eine Kugel gefunden → das Bild ist sofort **fertig**
@@ -35,6 +38,28 @@ Braucht Pillow und numpy – das Dockerfile installiert beides (nach dem Update 
 
 Tastatur: Enter = speichern, Ziffern = Nummer (zweistellig schnell hintereinander: 1, 2 = 12),
 W = Weiße, Entf = Kugel entfernen, Esc = abwählen.
+
+## Modelle für den Pi
+
+Admin-Seite → **„Modelle für den Pi“**:
+
+| Datei | woher | was |
+|---|---|---|
+| `billard_merkmale.json` | **„Farben aus fertigen Bildern lernen“** (Sekunden) oder hochladen | Stufe 2 + 3 als Statistik (gestreift? Farbe?) |
+| `billard_edgetpu.tflite` | `training/train_coral.py` in Colab → hier hochladen | Stufe 1: Kugeln finden (KI-Chip) |
+| `billard_klassen_edgetpu.tflite` | `training/train_klassen.py` in Colab → hier hochladen | Stufe 2 + 3 auf dem KI-Chip |
+
+- **Farben lernen** nimmt alle fertigen Bilder (je Kugel die Mehrheit) und prüft dabei ehrlich an
+  zurückgehaltenen Kugeln. Unter 50 festgelegten Kugeln wird nichts veröffentlicht – die bisherigen Farben bleiben.
+  Nach Änderungen am Licht neu lernen.
+- **Hochladen:** `.tflite` und `.json` (auch mehrere auf einmal). Der Server erkennt die Art wie der Pi
+  (kleines Modell = Klassen-Modell) und prüft die Datei. Die vorherige Fassung bleibt als `.vorher` in
+  `data/modelle/` liegen.
+- **Der Pi holt** alle 5 Minuten die Liste (`GET /api/modelle`, mit `X-Upload-Key`), lädt Neues
+  (`GET /api/modell?name=…`), prüft die Prüfsumme und die Datei und nimmt sie sofort. In der Tabelle steht,
+  wann der Pi eine Datei abgeholt hat; im Admin-Panel des Pi unter „Bilder & Modelle“, was er übernommen hat.
+- Braucht OpenCV – das Dockerfile installiert es (nach dem Update einmal neu bauen: `docker compose up -d --build`).
+  `kugel_merkmale.py` und `start_merkmale.json` sind Kopien aus `app/` (die Formprüfung in CI achtet darauf).
 
 ## Trainings-ZIP direkt in Google Colab laden
 

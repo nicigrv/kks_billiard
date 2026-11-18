@@ -7,15 +7,15 @@ Trainiert die Kugelerkennung (drei Stufen) und wandelt Stufe 1 fuer den Coral um
 
     pip install "ultralytics>=8.3,<8.5"   (getestet mit 8.4)
     python train_coral.py billard-training-20261110.zip
-    -> ausgabe/billard_edgetpu.tflite   (Stufe 1)       } beide im Admin-Portal unter
-    -> ausgabe/billard_merkmale.json    (Stufe 2 + 3)   } "KI-Modell (Coral)" hochladen
+    -> ausgabe/billard_edgetpu.tflite   (Stufe 1)       } beide auf der Trainingsseite (Admin) unter
+    -> ausgabe/billard_merkmale.json    (Stufe 2 + 3)   } "Modelle fuer den Pi" hochladen - der Pi holt sie
 
     python train_coral.py --nur-farben billard-training-20261110.zip
     -> nur Stufe 2 + 3 (Sekunden, ohne Grafikkarte und ohne ultralytics)
 
 Braucht kugel_merkmale.py (liegt in app/; in Google Colab mit hochladen).
 
-Eingabe: die ZIP-Datei aus dem Admin-Portal ("Trainingsdaten laden"), mehrere ZIPs
+Eingabe: die Trainings-ZIP der Trainingsseite (Admin bzw. /api/export.zip), mehrere ZIPs
 oder entpackte Ordner gehen auch (z. B. von mehreren Abenden). Benutzt werden nur
 Bilder, die auf dem iPad geprueft wurden. In den Labels steht die Kugelnummer
 (0 = Weisse, 1-7 Volle, 8, 9-15 Halbe); fuer Stufe 1 wird daraus "Kugel".
@@ -181,7 +181,7 @@ def export_edgetpu(weights, yaml, imgsz, out):
 
 def main():
     ap = argparse.ArgumentParser(description="Kugelmodell fuer den Coral trainieren")
-    ap.add_argument("data", nargs="*", help="ZIP(s) aus dem Admin-Portal oder entpackte Ordner")
+    ap.add_argument("data", nargs="*", help="ZIP(s) der Trainingsseite oder entpackte Ordner")
     ap.add_argument("--epochs", type=int, default=120)
     ap.add_argument("--imgsz", type=int, default=640, help="Eingabegroesse (Kugeln ~18 px bei 640)")
     ap.add_argument("--batch", type=int, default=16)
@@ -209,7 +209,7 @@ def main():
         if not pairs:
             sys.exit("Keine geprueften Bilder gefunden (Ordner images/ + labels/).")
         target = train_merkmale(pairs, args.val, out, km)
-        print(f"\nFertig: {target}  -> im Admin-Portal unter 'KI-Modell (Coral)' hochladen")
+        print(f"\nFertig: {target}  -> auf der Trainingsseite (Admin) unter 'Modelle für den Pi' hochladen")
         return
 
     from ultralytics import YOLO
@@ -221,7 +221,7 @@ def main():
             yaml, _, _ = build_dataset(pairs, work, args.val)   # Bilder fuer die int8-Kalibrierung
         target = export_edgetpu(Path(args.export_only), yaml, args.imgsz, out)
         if target:
-            print(f"\nFertig: {target}  -> im Admin-Portal hochladen")
+            print(f"\nFertig: {target}  -> auf der Trainingsseite (Admin) hochladen")
         return
 
     if not args.data:
@@ -266,7 +266,7 @@ def main():
     target = export_edgetpu(best, yaml, args.imgsz, out)
     if target:
         print(f"\nFertig: {target}" + (f" und {merkmale}" if merkmale else "")
-              + "  -> beide im Admin-Portal unter 'KI-Modell (Coral)' hochladen")
+              + "  -> beide auf der Trainingsseite (Admin) unter 'Modelle für den Pi' hochladen")
 
 
 if __name__ == "__main__":
