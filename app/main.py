@@ -25,6 +25,10 @@ import time
 
 import cv2
 
+# OpenCV startet sonst pro Kern einen Hilfsthread. Bei den kleinen Bildern hier kostet das
+# auf dem Pi mehr (Kontextwechsel, Waerme) als es bringt.
+cv2.setNumThreads(1)
+
 import config
 import web
 from ballnum import ball_number
@@ -43,6 +47,10 @@ from sound import Sound
 from scene import SceneRenderer, bar_balls, surface_to_bgr
 from cameras import SOURCE_NAMES, SOURCES, make_reader
 from single_ball import SingleBall
+
+# Bildraten (weniger CPU -> der Pi bleibt kuehler und drosselt nicht)
+DISPLAY_FPS = 10          # HDMI-Bild (Beamer); reicht fuer Scoreboard und Kamerabild
+IDLE_PROCESS_FPS = 10     # Erkennung, solange sich auf dem Tisch nichts bewegt (sonst jedes Bild)
 
 KINDS = ("cue", "eight", "solid", "stripe")
 # Farbe der Teams auf der LED am Queue (wer dran ist). Rot/Gruen sind fuer die Verbindung reserviert.
@@ -182,13 +190,20 @@ class App:
     # ------------------------------------------------------------ Erkennung
     def _process_loop(self):
         last_id = -1
+        last_t = 0.0
         n, t0 = 0, time.monotonic()
         while not self._stop.is_set():
             frame, fid, age = self.reader.latest()
             if frame is None or fid == last_id or age > 2.0:
                 time.sleep(0.01)
                 continue
+            # Ruhiger Tisch: gedrosselt; Bewegung oder Verdeckung: jedes Bild (Stoss sauber erfassen)
+            if not (self.pipe.moving or self.pipe.occluded) and \
+                    time.monotonic() - last_t < 1.0 / IDLE_PROCESS_FPS:
+                time.sleep(0.01)
+                continue
             last_id = fid
+            last_t = time.monotonic()
             try:
                 ev = self.pipe.process(frame)
                 if isinstance(ev, tuple):
@@ -965,7 +980,7 @@ def main():
             frame, fid, _ = app.reader.latest()
             disp.draw(frame, fid, app.pipe, app.reader, app.scene())
             app.offer_beamer(disp.screen)
-            clock.tick(20)
+            clock.tick(DISPLAY_FPS)
     finally:
         app.display_active = False
         app.stop()
