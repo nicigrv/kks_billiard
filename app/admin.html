@@ -453,6 +453,25 @@ input[type=text], input[type=password], input[type=number], select {
         </div>
         <p class="hint small" style="margin-top:8px">Dreht sich der helle Queue in der Grafik falsch herum: „Drehrichtung umkehren“.</p>
       </div>
+
+      <div class="card">
+        <h2>Firmware des Queues</h2>
+        <p class="hint">Neue Firmware über das WLAN aufspielen – ohne USB-Kabel. Der Queue muss verbunden sein, der Pi braucht für „Neueste Version“ Internet.</p>
+        <p class="statusline" id="cueFwStatus">-</p>
+        <progress id="cueFwBar" max="100" value="0" style="width:100%;height:16px" hidden></progress>
+        <div class="grid two" style="margin-top:8px">
+          <button class="quiet" type="button" id="cueFwCheck">Nach Update suchen</button>
+          <button class="primary" type="button" id="cueFwUpdate">Neueste Version installieren</button>
+        </div>
+        <button class="quiet block" type="button" id="cueFwFileBtn" style="margin-top:8px">Eigene .bin hochladen</button>
+        <input type="file" id="cueFwFile" accept=".bin" hidden>
+        <details class="help">
+          <summary>So funktioniert das</summary>
+          <p>Der Pi holt aus dem neuesten <b>Release</b> auf GitHub die Datei <b>queue-ota-&lt;board&gt;.bin</b> und schickt sie an den Queue. Die LED blinkt dabei <b>blau</b>, danach startet der Queue neu (ca. 10 s) und verbindet sich wieder.</p>
+          <p>Bricht die Übertragung ab, läuft einfach die alte Firmware weiter. Eigene Builds: <code>cue_sensor/.pio/build/&lt;board&gt;/firmware.bin</code> hochladen – nicht die Datei für USB (ab 0x0).</p>
+          <p>Ohne Pi geht es auch im Browser: <b>http://&lt;IP des Queues&gt;/update</b>. Online-Update gibt es ab Firmware 3.3.0; ältere Queues einmal per USB aktualisieren.</p>
+        </details>
+      </div>
     </div>
   </section>
 
@@ -832,6 +851,7 @@ input[type=text], input[type=password], input[type=number], select {
 
   function renderExtras(s) {
     refreshGraphic(s);
+    renderCueFw(s);
     const c = s.cue || {};
     $("cueUse").setAttribute("aria-checked", c.enabled ? "true" : "false");
     const cs = $("cueStatus");
@@ -872,6 +892,42 @@ input[type=text], input[type=password], input[type=number], select {
   $("cueTol").addEventListener("change", () => post("cue_settings", { tolerance: Number($("cueTol").value) }));
   $("cueUse").addEventListener("click", () => post("cue_use", { enabled: !(state && state.cue && state.cue.enabled) }));
   $("cueCalib").addEventListener("click", () => post("cue_calibrate", {}));
+
+  // ---------------- Firmware des Queues ----------------
+  function renderCueFw(s) {
+    const f = s.cue_fw || {}, c = s.cue || {};
+    const st = $("cueFwStatus");
+    st.innerHTML = "";
+    const add = (label, value, cls) => {
+      const b = document.createElement("b"); b.textContent = value; if (cls) b.className = cls;
+      if (st.childNodes.length) st.appendChild(document.createTextNode("  ·  "));
+      st.appendChild(document.createTextNode(label)); st.appendChild(b);
+    };
+    if (f.release || f.fw) add("Queue: ", (f.release || "?") + " (Firmware " + (f.fw || "?") + (f.board ? ", " + f.board : "") + ")");
+    if (f.latest) add("Neueste: ", f.latest, f.release && f.release !== f.latest ? "bad" : "good");
+    if (f.state) add("", f.state, f.ok === true ? "good" : f.ok === false ? "bad" : "");
+    if (!st.childNodes.length) add("", c.connected ? "„Nach Update suchen“ drücken" : "Queue nicht verbunden");
+    const bar = $("cueFwBar");
+    bar.hidden = !(f.busy && f.progress !== null && f.progress !== undefined);
+    if (!bar.hidden) bar.value = f.progress;
+    for (const id of ["cueFwCheck", "cueFwUpdate", "cueFwFileBtn"]) $(id).disabled = !!f.busy || !c.connected;
+  }
+  $("cueFwCheck").addEventListener("click", () => post("cue_fw_check", {}));
+  $("cueFwUpdate").addEventListener("click", () => {
+    if (confirm("Neueste Firmware auf den Queue spielen? Er startet danach neu.")) post("cue_fw_update", {});
+  });
+  $("cueFwFileBtn").addEventListener("click", () => $("cueFwFile").click());
+  $("cueFwFile").addEventListener("change", async () => {
+    const f = $("cueFwFile").files[0];
+    $("cueFwFile").value = "";
+    if (!f || !confirm(f.name + " auf den Queue spielen? Er startet danach neu.")) return;
+    try {
+      const r = await fetch("/api/cue_firmware", { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: f });
+      const d = await r.json().catch(() => ({}));
+      if (d.state) render(d.state);
+      toast(r.ok ? (d.message || "Übertragung gestartet") : (d.error || "Fehler " + r.status), !r.ok);
+    } catch (e) { toast("Verbindung zum Pi unterbrochen", true); }
+  });
 
   // ---------------- QR-Code ----------------
   let qrKey = "";

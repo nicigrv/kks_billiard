@@ -29,6 +29,7 @@ class BeamerNotReady(OSError):
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MAX_MODEL_BYTES = 64 * 1024 * 1024
+MAX_FIRMWARE_BYTES = 4 * 1024 * 1024
 MAX_JSON_BYTES = 2 * 1024 * 1024                         # Befehle und Festlegungen sind klein
 BEAMER_SIZES = {"sd": (960, 540), "hd": (1280, 720), "fhd": (1920, 1080)}
 
@@ -350,6 +351,19 @@ def make_handler(app, auth: Auth):
                 data = self.rfile.read(n)
                 try:
                     msg = app.save_model(data)
+                except UserError as e:
+                    return self._send(400, {"error": str(e)})
+                return self._send(200, {"ok": True, "message": msg, "state": app.state_dict()})
+            if path == "/api/cue_firmware":
+                # Queue-Firmware hochladen (Datei roh im Body), der Pi schickt sie per WLAN an den Queue
+                try:
+                    n = self._length(MAX_FIRMWARE_BYTES)
+                except ValueError:
+                    n = 0
+                if not n:
+                    return self._send(400, {"error": "Datei fehlt oder ist zu groß"})
+                try:
+                    msg = app.cue_firmware(self.rfile.read(n))
                 except UserError as e:
                     return self._send(400, {"error": str(e)})
                 return self._send(200, {"ok": True, "message": msg, "state": app.state_dict()})
