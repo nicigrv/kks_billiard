@@ -18,7 +18,8 @@ Jede Version hat diese Dateien:
 |---|---|---|
 | `billard-rasp.zip` | Raspberry Pi | `app/` + `docker-compose.yml` |
 | `billard-server.zip` | Server (VPS) | Trainingsseite (`training_server/`) |
-| `billard-queue.zip` | Queue (Gyroskop) | Quellcode + fertige `.bin` für den Atom Matrix, Anleitung in `firmware/FLASHEN.md` |
+| `billard-queue.zip` | Queue (Gyroskop) | Quellcode, `.bin` für USB (Atom Matrix) und für das Update über WLAN, Anleitung in `firmware/FLASHEN.md` |
+| `queue-ota-<board>.bin` | Queue | Firmware-Update über WLAN (holt das Admin-Panel selbst) |
 | `billard-gesamt.zip` | alles | komplettes Repository |
 | `update.sh` | Pi + Server | Skript für Installation und Update |
 
@@ -56,8 +57,10 @@ Beim Update bleiben `data/`, `.env` und die Einstellungen ganz oben in `docker-c
 (`x-web-port`, `x-admin-pin`, `x-game-pin`) erhalten. Die alte Datei liegt als `docker-compose.yml.alt` daneben.
 Welche Version läuft, steht in der Datei `VERSION`.
 
-Den **Queue** aktualisiert ihr von Hand: `billard-queue.zip` herunterladen und die `.bin` aufspielen (`firmware/FLASHEN.md`)
-oder mit PlatformIO neu bauen (`cue_sensor/README.md`).
+Den **Queue** aktualisiert ihr über das WLAN, ohne USB-Kabel (ab Firmware 3.3.0):
+Admin-Panel → Reiter **Queue** → **Firmware des Queues** → „Neueste Version installieren“.
+Ohne Pi geht es im Browser unter `http://<IP des Queues>/update` (Datei `queue-ota-<board>.bin`).
+Das erste Mal (oder ältere Firmware) per USB: `billard-queue.zip`, Anleitung in `firmware/FLASHEN.md`.
 
 ---
 
@@ -344,6 +347,12 @@ seinem **Castcode**:
 **An/aus:** Schalter „Queue mit Gyroskop“ im Spiel-Panel (bzw. „Queue benutzen“ im Admin-Panel).
 Aus = der Pi sucht und fragt nichts ab. Details zur Firmware: `cue_sensor/README.md`.
 
+**Firmware-Update ohne Kabel:** Admin-Panel → Queue → „Firmware des Queues“. „Nach Update suchen“
+zeigt die Version auf dem Queue und die neueste auf GitHub, „Neueste Version installieren“ lädt
+`queue-ota-<board>.bin` aus dem Release und schickt sie per WLAN an den Queue (LED blinkt blau,
+danach Neustart). Eigene Builds: „Eigene .bin hochladen“ (`cue_sensor/.pio/build/<board>/firmware.bin`).
+Geht etwas schief, läuft die alte Firmware weiter.
+
 ## 3c. Spielaufzeichnung
 
 Spiel-Panel → „Runde aufzeichnen“. Bei jedem Zug wird die **grafische Ansicht** gespeichert
@@ -486,5 +495,6 @@ python3 -m sim.test_coral         # KI-Chip (Stufe 1-3), Bilder aufnehmen/festle
 python3 -m sim.test_merkmale      # Stufe 2 + 3: gestreift? Farbe? lernen und prüfen
 python3 -m sim.test_review        # Prüfrunden (Mehrheit), Anmeldung, Ding-Ton
 python3 -m sim.test_cue_link      # Queue: Castcode, Suche im WLAN, Abfrage der Lage, an/aus
+python3 -m sim.test_cue_update    # Queue: Firmware-Update über WLAN (simulierter Queue + GitHub)
 python3 -m sim.test_panels        # Spiel-/Admin-Panel (PINs), QR-Code und Meldungen auf dem Beamer
 ```

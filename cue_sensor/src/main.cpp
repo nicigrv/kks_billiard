@@ -27,7 +27,12 @@
  *   GET  /api/lage   Lage als JSON (Kopfzeile X-Castcode oder ?code=... noetig)
  *        {"castcode":"K7P2QM","seq":123,"yaw":37.52,"pitch":-4.1,"still":0,"bat":3.91,
  *         "stoss":4.2,"stoesse":7,"ms":123456}     stoss = Spitze des letzten Stosses in g
- *   GET  /api/info   Geraet + Firmware (ohne Castcode)
+ *   GET  /api/info   Geraet, Firmware, Release-Version, Board (ohne Castcode)
+ *   GET  /update     Firmware-Update im Browser (.bin hochladen, Castcode noetig) - auch im Hotspot
+ *   POST /update     Firmware als Multipart-Upload (Feld "firmware"), Kopfzeile X-Castcode oder ?code=...
+ *                    Das macht auch das Admin-Panel des Pi ("Queue-Firmware aktualisieren").
+ *   OTA  3232        ArduinoOTA fuer PlatformIO: QUEUE_IP=<ip> QUEUE_CASTCODE=<code> pio run -e <board>-ota -t upload
+ *                    (Passwort = Castcode, siehe platformio.ini)
  *   GET  /demo       Demo-Anzeige (auch im Hotspot), Messwerte dazu: GET /demo/lage (ohne Castcode)
  *   UDP  5005        Suche: {"suche":"K7P2QM"} -> Antwort {"castcode":"K7P2QM","ip":"...","port":80}
  *                    Abo:   {"abo":"K7P2QM","farbe":[0,90,255]}  (farbe null = kein Spiel)
@@ -52,9 +57,11 @@
  */
 
 #include <Arduino.h>
+#include <ArduinoOTA.h>
 #include <DNSServer.h>
 #include <ESPmDNS.h>
 #include <Preferences.h>
+#include <Update.h>
 #include <WebServer.h>
 #include <WiFi.h>
 #include <WiFiUdp.h>
@@ -62,6 +69,13 @@
 #include <math.h>
 
 #include "config.h"
+
+#ifndef BOARD_ENV
+#define BOARD_ENV "unbekannt"            // setzt platformio.ini (Name der Umgebung, z. B. m5stack-atom)
+#endif
+#ifndef RELEASE_VERSION
+#define RELEASE_VERSION "dev"            // setzt scripts/build_release.sh (z. B. v0.1.8), selbst gebaut: dev
+#endif
 
 #if LED_PIN >= 0
 #include <Adafruit_NeoPixel.h>
@@ -284,6 +298,11 @@ static DNSServer dns;
 static WiFiUDP udp;
 static String scanOptions;
 static uint32_t restartAt = 0, portalSince = 0;
+
+// Firmware-Update ueber das Netz (Browser, Pi oder PlatformIO)
+static bool otaActive = false;
+static uint32_t otaBytes = 0;
+static String otaError;
 static uint32_t seq = 0;
 
 // Abo des Pi: an diese Adresse wird gesendet, solange Lebenszeichen kommen
@@ -430,6 +449,114 @@ static void scanWifi() {
   WiFi.scanDelete();
 }
 
+// ======================================================== Firmware-Update ueber das Netz
+// Ohne USB-Kabel: .bin (nur das Programm, "firmware.bin" bzw. queue-ota-<board>.bin aus dem Release)
+// per Browser hochladen, vom Admin-Panel des Pi schicken lassen oder mit PlatformIO (ArduinoOTA).
+// Das neue Programm landet in der zweiten App-Partition; erst wenn es vollstaendig und geprueft ist,
+// startet der Queue damit. Bricht die Uebertragung ab, laeuft einfach die alte Firmware weiter.
+static bool authorized();
+static void ledColor(uint8_t r, uint8_t g, uint8_t b);
+
+static const char UPDATE_PAGE[] = R"HTML(<h1>Firmware aktualisieren</h1>
+<p>Aktuell: <b>%FW%</b> (Release %REL%, Board <b>%BOARD%</b>)</p>
+<p><small>Datei aus dem Release: <b>queue-ota-%BOARD%.bin</b> (in billard-queue.zip unter firmware/ oder
+einzeln unter Releases auf GitHub). Nicht die Datei fuer USB (ab 0x0) nehmen.</small></p>
+<label>Castcode</label><input id=c value="%CODE%" autocapitalize=characters>
+<label>Firmware-Datei (.bin)</label><input id=f type=file accept=".bin">
+<button id=b>Hochladen und neu starten</button>
+<progress id=p max=100 value=0 style="width:100%;height:22px;display:none"></progress><p id=m></p>
+<p><a href="/">Zurueck</a></p>
+<script>(function(){var $=function(i){return document.getElementById(i)};
+$('b').onclick=function(){var f=$('f').files[0];if(!f){$('m').textContent='Bitte eine .bin-Datei waehlen.';return}
+var fd=new FormData();fd.append('firmware',f,f.name);var x=new XMLHttpRequest();x.open('POST','/update');
+x.setRequestHeader('X-Castcode',$('c').value.trim().toUpperCase());$('b').disabled=true;$('p').style.display='block';
+x.upload.onprogress=function(e){if(e.lengthComputable){$('p').value=e.loaded*100/e.total;
+$('m').textContent='Uebertrage ... '+Math.round(e.loaded*100/e.total)+' %'}};
+x.onload=function(){var d={};try{d=JSON.parse(x.responseText)}catch(e){}
+if(x.status==200){$('m').innerHTML='<b class=ok>Fertig.</b> Der Queue startet neu (ca. 10 s). <a href="/">Zur Statusseite</a>'}
+else{$('m').innerHTML='<b class=bad>Fehler:</b> '+(d.error||x.status);$('b').disabled=false}};
+x.onerror=function(){$('m').textContent='Verbindung abgebrochen - alte Firmware laeuft weiter.';$('b').disabled=false};
+x.send(fd)}})();</script>)HTML";
+
+static void updatePage() {
+  String h(UPDATE_PAGE);
+  h.replace("%FW%", FW_VERSION);
+  h.replace("%REL%", RELEASE_VERSION);
+  h.replace("%BOARD%", BOARD_ENV);
+  h.replace("%CODE%", portal ? castcode : "");     // im Hotspot steht der Castcode ohnehin auf der Seite
+  sendPage(h);
+}
+
+// Kopf eines ESP32-Programms pruefen: Magic 0xE9 und passender Chip (ESP32, ESP32-C3, ESP32-S3 ...)
+static bool imageHeaderOk(const uint8_t* b, size_t n) {
+  if (n < 16 || b[0] != 0xE9) { otaError = "keine ESP32-Firmware (.bin aus dem Release nehmen, nicht die fuer 0x0)"; return false; }
+#ifdef CONFIG_IDF_FIRMWARE_CHIP_ID
+  uint16_t chip = b[12] | (b[13] << 8);
+  if (chip != CONFIG_IDF_FIRMWARE_CHIP_ID) { otaError = "Firmware ist fuer einen anderen Chip (falsches Board?)"; return false; }
+#endif
+  return true;
+}
+
+static void updateUpload() {
+  HTTPUpload& up = server.upload();
+  if (up.status == UPLOAD_FILE_START) {
+    otaError = "";
+    otaBytes = 0;
+    if (!authorized()) { otaError = "falscher Castcode"; return; }
+    otaActive = true;
+    ledColor(0, 0, 255);                           // blau: Firmware wird uebertragen
+    Serial.printf("Firmware-Update: %s\n", up.filename.c_str());
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) otaError = String("Start: ") + Update.errorString();
+  } else if (up.status == UPLOAD_FILE_WRITE) {
+    if (otaError.length() || !otaActive) return;
+    if (otaBytes == 0 && !imageHeaderOk(up.buf, up.currentSize)) { Update.abort(); return; }
+    if (Update.write(up.buf, up.currentSize) != up.currentSize) {
+      otaError = String("Schreiben: ") + Update.errorString();
+      Update.abort();
+      return;
+    }
+    otaBytes += up.currentSize;
+  } else if (up.status == UPLOAD_FILE_END) {
+    if (otaError.length() || !otaActive) return;
+    if (otaBytes < 100000) { otaError = "Datei zu klein"; Update.abort(); return; }
+    if (!Update.end(true)) otaError = String("Pruefung: ") + Update.errorString();   // prueft auch die Pruefsumme
+  } else if (up.status == UPLOAD_FILE_ABORTED) {
+    Update.abort();
+    otaError = "Uebertragung abgebrochen";
+  }
+}
+
+static void updateDone() {
+  otaActive = false;
+  if (otaError.length() || !Update.isFinished()) {
+    String e = otaError.length() ? otaError : String("keine Datei empfangen");
+    e.replace("\"", "'");
+    Serial.println("Firmware-Update fehlgeschlagen: " + e);
+    server.send(e == "falscher Castcode" ? 403 : 400, "application/json", "{\"error\":\"" + e + "\"}");
+    return;
+  }
+  Serial.printf("Firmware-Update ok (%lu Bytes) - Neustart\n", (unsigned long)otaBytes);
+  server.send(200, "application/json", "{\"ok\":true,\"bytes\":" + String(otaBytes) + "}");
+  restartAt = millis() + 1000;
+}
+
+static void apiInfo() {
+  server.send(200, "application/json",
+              "{\"geraet\":\"billard-queue\",\"fw\":\"" FW_VERSION "\",\"release\":\"" RELEASE_VERSION
+              "\",\"board\":\"" BOARD_ENV "\",\"ota\":1}");
+}
+
+static void startArduinoOta(const String& host) {
+  ArduinoOTA.setHostname(host.c_str());
+  ArduinoOTA.setPassword(castcode.c_str());
+  ArduinoOTA.setMdnsEnabled(false);                // mDNS laeuft schon (startStation)
+  MDNS.enableArduino(3232, true);
+  ArduinoOTA.onStart([]() { otaActive = true; Serial.println("ArduinoOTA: Update startet"); });
+  ArduinoOTA.onEnd([]() { otaActive = false; Serial.println("ArduinoOTA: fertig"); });
+  ArduinoOTA.onError([](ota_error_t e) { otaActive = false; Serial.printf("ArduinoOTA: Fehler %u\n", e); });
+  ArduinoOTA.begin();
+}
+
 // ---- Captive Portal: Schritt 1 (WLAN), Schritt 2 (Castcode + Haken)
 static void portalRoot() {
   String h = "<h1>Billard-Queue</h1>";
@@ -440,7 +567,7 @@ static void portalRoot() {
        "</select><label>oder Name von Hand</label><input name=ssid2 placeholder='(nur wenn nicht in der Liste)'>"
        "<label>WLAN-Passwort</label><input name=pass type=password autocomplete=off>"
        "<button>Weiter</button></form><p><a href='/scan'>WLAN-Liste neu laden</a></p>"
-       "<p><small>Firmware " FW_VERSION "</small></p>";
+       "<p><small>Firmware " FW_VERSION " (" RELEASE_VERSION ") &middot; <a href='/update'>Firmware aktualisieren</a></small></p>";
   sendPage(h);
 }
 
@@ -499,6 +626,11 @@ static void startPortal() {
   server.on("/verbinden", HTTP_POST, portalConnect);
   server.on("/demo", HTTP_GET, demoPage);
   server.on("/demo/lage", HTTP_GET, demoLage);
+  server.on("/update", HTTP_GET, updatePage);
+  server.on("/update", HTTP_POST, updateDone, updateUpload);
+  server.on("/api/info", HTTP_GET, apiInfo);
+  const char* hdrs[] = {"X-Castcode"};
+  server.collectHeaders(hdrs, 1);
   // Erkennung der Handys/Laptops ("Anmeldung im Netzwerk erforderlich") -> Einrichtungsseite
   for (const char* u : {"/generate_204", "/gen_204", "/hotspot-detect.html", "/library/test/success.html",
                         "/connecttest.txt", "/ncsi.txt", "/fwlink", "/redirect", "/canonical.html"})
@@ -536,7 +668,9 @@ static void staRoot() {
              String(lastStroke, 1) + " g &middot; "
              "<a href='/demo'>Demo-Anzeige (live)</a></p>"
              "<form method=post action='/einrichten' onsubmit=\"return confirm('WLAN neu einrichten? Der Queue oeffnet danach wieder den Hotspot.')\">"
-             "<button>WLAN neu einrichten</button></form><p><small>Firmware " FW_VERSION "</small></p>";
+             "<button>WLAN neu einrichten</button></form>"
+             "<p><small>Firmware " FW_VERSION " (" RELEASE_VERSION ", " BOARD_ENV ") &middot; "
+             "<a href='/update'>Firmware aktualisieren</a></small></p>";
   sendPage(h);
 }
 
@@ -546,9 +680,9 @@ static void startStation() {
   server.on("/api/lage", HTTP_GET, apiLage);
   server.on("/demo", HTTP_GET, demoPage);
   server.on("/demo/lage", HTTP_GET, demoLage);
-  server.on("/api/info", HTTP_GET, []() {
-    server.send(200, "application/json", "{\"geraet\":\"billard-queue\",\"fw\":\"" FW_VERSION "\"}");
-  });
+  server.on("/api/info", HTTP_GET, apiInfo);
+  server.on("/update", HTTP_GET, updatePage);
+  server.on("/update", HTTP_POST, updateDone, updateUpload);
   server.on("/einrichten", HTTP_POST, []() {
     saveWifi("", "");
     sendPage("<h1>Neu einrichten</h1><p>Der Queue startet neu und oeffnet den Hotspot.</p>");
@@ -562,6 +696,7 @@ static void startStation() {
   String host = "queue-" + castcode;
   host.toLowerCase();
   if (MDNS.begin(host.c_str())) MDNS.addService("http", "tcp", API_PORT);
+  startArduinoOta(host);
   Serial.printf("Im WLAN: http://%s  (%s.local), Castcode %s\n", WiFi.localIP().toString().c_str(),
                 host.c_str(), castcode.c_str());
 }
@@ -610,9 +745,11 @@ static void handleUdp() {
   String code = jsonStr(msg, "suche");
   code.toUpperCase();
   if (code == castcode) {                         // {"suche":"K7P2QM"} -> wer bin ich, wo bin ich
-    char out[160];
-    int m = snprintf(out, sizeof(out), "{\"castcode\":\"%s\",\"ip\":\"%s\",\"port\":%d,\"fw\":\"%s\"}",
-                     castcode.c_str(), WiFi.localIP().toString().c_str(), API_PORT, FW_VERSION);
+    char out[220];
+    int m = snprintf(out, sizeof(out),
+                     "{\"castcode\":\"%s\",\"ip\":\"%s\",\"port\":%d,\"fw\":\"%s\",\"release\":\"%s\",\"board\":\"%s\"}",
+                     castcode.c_str(), WiFi.localIP().toString().c_str(), API_PORT, FW_VERSION, RELEASE_VERSION,
+                     BOARD_ENV);
     udp.beginPacket(udp.remoteIP(), udp.remotePort());
     udp.write((const uint8_t*)out, m);
     udp.endPacket();
@@ -665,7 +802,7 @@ static void sendLage() {
 }
 
 // ======================================================== LED und Knopf
-static uint32_t ledLast = 0xFFFFFFFF;           // zuletzt gesetzte Farbe (alle LEDs gleich)
+[[maybe_unused]] static uint32_t ledLast = 0xFFFFFFFF;           // zuletzt gesetzte Farbe (alle LEDs gleich)
 
 static void ledColor(uint8_t r, uint8_t g, uint8_t b) {
 #if LED_PIN >= 0
@@ -717,6 +854,11 @@ static LedState ledState() {
 
 static void updateLed() {
   uint32_t ms = millis();
+  if (otaActive) {                                 // Firmware wird uebertragen: blau blinken
+    bool on = (ms / 150) % 2 == 0;
+    ledColor(0, 0, on ? 255 : 0);
+    return;
+  }
   if (ms - lastGoodRead > 500) {                   // Sensor liefert keine gueltigen Werte
     bool on = (ms / 300) % 2 == 0;
 #ifdef HAS_MATRIX
@@ -806,6 +948,7 @@ void loop() {
     dns.processNextRequest();
     if (ssid.length() && ms - portalSince > PORTAL_RETRY_MS) restartAt = ms;   // WLAN spaeter nochmal versuchen
   } else {
+    ArduinoOTA.handle();
     handleUdp();
     if (fresh) {                                   // neuer gepruefter Mittelwert (ca. 17x pro Sekunde)
       fresh = false;

@@ -71,6 +71,26 @@ In **VS Code**: Erweiterung „PlatformIO IDE“ installieren, **nur den Ordner 
 Pfeil = Upload, Stecker = serieller Monitor. Die LED-Bibliothek (Adafruit NeoPixel) lädt PlatformIO selbst. Dort steht nach dem Start, welcher Sensor gefunden wurde. WLAN-Daten müssen **nicht** in den Code –
 die Einrichtung läuft übers Handy.
 
+## Update ohne Kabel (über WLAN)
+Ist der Queue zusammengebaut, kommt man nicht mehr an die USB-Buchse. Ab Firmware **3.3.0** geht
+das Update über das WLAN. Die neue Firmware landet in der zweiten App-Partition; erst wenn sie
+vollständig übertragen und geprüft ist (Prüfsumme, passender Chip), startet der Queue damit neu.
+Bricht die Übertragung ab, läuft die alte Firmware einfach weiter. Die LED blinkt dabei **blau**.
+
+| Weg | So geht's |
+|---|---|
+| **Admin-Panel des Pi** (am einfachsten) | Reiter *Queue* → *Firmware des Queues* → „Neueste Version installieren“. Der Pi holt `queue-ota-<board>.bin` aus dem neuesten GitHub-Release. Oder „Eigene .bin hochladen“. |
+| **Browser** (ohne Pi) | `http://<IP des Queues>/update` öffnen, Castcode eingeben, Datei wählen. Geht auch im Einrichtungs-Hotspot (`http://192.168.4.1/update`). |
+| **PlatformIO** (eigene Änderungen) | `QUEUE_IP=192.168.88.60 QUEUE_CASTCODE=K7P2QM pio run -e m5stack-atom-ota -t upload` (für die anderen Boards `<board>-ota`). Windows PowerShell: `$env:QUEUE_IP="…"; $env:QUEUE_CASTCODE="…"; pio run -e m5stack-atom-ota -t upload` |
+
+- Die richtige Datei ist **nur das Programm**: `queue-ota-<board>.bin` aus dem Release bzw.
+  `.pio/build/<board>/firmware.bin`. Die Datei für USB (`queue-atom-matrix.bin`, ab Adresse 0x0) lehnen
+  Queue und Pi ab.
+- Geschützt ist das Update mit dem **Castcode** (Kopfzeile `X-Castcode` bzw. Passwort bei PlatformIO).
+- Welches Board und welche Version läuft, steht auf der Statusseite des Queues (`http://<IP>/`) und unter
+  `GET /api/info`: `{"fw":"3.3.0","release":"v0.1.8","board":"m5stack-atom","ota":1}`.
+- Ältere Firmware (bis 3.2) kann das noch nicht: einmal per USB aufspielen, danach geht es kabellos.
+
 ## Einrichten (Captive Portal + Castcode)
 1. Queue einschalten und **2 Sekunden ruhig hinlegen** (Gyroskop-Nullpunkt).
 2. Ohne gespeichertes WLAN öffnet der Queue den Hotspot **„Billard-Queue-XXXX“**. Mit dem Handy

@@ -36,7 +36,7 @@ jobs:
         # alle Tests laufen lassen (nicht beim ersten Fehler aufhoeren), am Ende die roten nennen
         run: |
           rot=""
-          for t in game features coral merkmale review cue_link panels; do
+          for t in game features coral merkmale review cue_link cue_update panels; do
             echo "::group::sim.test_$t"
             python -m "sim.test_$t" || rot="$rot sim.test_$t"
             echo "::endgroup::"

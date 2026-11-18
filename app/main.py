@@ -31,6 +31,7 @@ from ballnum import ball_number
 import kugel_merkmale
 from coral_detector import DATA_FEATURES, START_FEATURES, CoralDetector, CoralEngine, default_features
 from cue_sensor import AlignChecker, CueSensor, clean_castcode
+from cue_update import CueUpdater
 from geometry import Table, TABLE_SIZES
 from notices import Notices
 from pipeline import Pipeline
@@ -87,6 +88,7 @@ class App:
                              enabled=self.cfg.get("cue_enabled", True),
                              on_button=self._cue_button, led_color=self._cue_led).start()
         self.align = AlignChecker(self.cfg.get("cue_tolerance", 2.0))
+        self.cue_fw = CueUpdater(self.cue)                    # Firmware des Queues ueber das WLAN
         self.rounds = RoundRecorder(os.path.join(config.DATA_DIR, "recordings"))
         self.sound = Sound()                                  # Ding ueber HDMI
         self.reviews = RoundManager(self.recorder, config.DATA_DIR, self.sound)   # Pruefrunden
@@ -505,6 +507,10 @@ class App:
         os.replace(tmp, path)
         return f"Modell gespeichert ({len(data) / 1e6:.1f} MB). Der Coral lädt es in wenigen Sekunden."
 
+    def cue_firmware(self, data: bytes):
+        """Hochgeladene Queue-Firmware (.bin) ueber das WLAN aufspielen."""
+        return self.cue_fw.start_file(data)
+
     def save_features(self, data: bytes):
         try:
             clf = kugel_merkmale.BallClassifier.from_dict(json.loads(data))
@@ -670,6 +676,7 @@ class App:
             "scene_version": self.scene_version,
             "cue": dict(self.cue.status(), tolerance=self.align.tolerance,
                         ok=self.align.ok, err=None if self.align.err is None else round(self.align.err, 1)),
+            "cue_fw": self.cue_fw.status(),
             "qr": dict(self.cfg.get("qr") or {}, url=self.qr_text(), panel_url=self.panel_url),
             "notices": self.notices(),
             "round": self.rounds.status(),
@@ -844,6 +851,10 @@ class App:
             self.cfg["cue_offset"] = self.cue.calibrate()
             config.save(self.cfg)
             return "Queue kalibriert: Lage an der Bande ist jetzt 0°"
+        if name == "cue_fw_check":
+            return self.cue_fw.check()
+        if name == "cue_fw_update":
+            return self.cue_fw.start_github()
         if name == "cue_settings":
             if "flip" in p:
                 self.cue.flip = self.cfg["cue_flip"] = bool(p["flip"])

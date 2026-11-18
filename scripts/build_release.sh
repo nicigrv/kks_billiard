@@ -4,7 +4,8 @@
 # Ergebnis in dist/:
 #   billard-rasp.zip     Raspberry Pi (app/ + docker-compose.yml)
 #   billard-server.zip   Trainingsserver für den VPS (training_server/)
-#   billard-queue.zip    Queue-Firmware (Quellcode + fertige .bin für den Atom Matrix)
+#   billard-queue.zip    Queue-Firmware (Quellcode, .bin für USB und für das Update über WLAN)
+#   queue-ota-<board>.bin  Firmware-Update über WLAN (einzeln, lädt das Admin-Panel des Pi)
 #   billard-gesamt.zip   das komplette Repository
 #   update.sh            Installations-/Update-Skript für Pi und Server
 # Braucht: git, zip, PlatformIO (pio) und esptool.
@@ -40,38 +41,49 @@ packe billard billard-rasp.zip "$SRC/app" "$SRC/docker-compose.yml" "$SRC/README
 # Server (Inhalt von training_server/ direkt im Ordner)
 packe billard-training billard-server.zip "$SRC"/training_server/* "$SRC/scripts/update.sh" "$SRC/VERSION"
 
-# Queue: Firmware für den Atom Matrix bauen und zu einer .bin zusammenfügen (Flash ab Adresse 0x0)
+# Queue: Firmware für alle Boards bauen. Die Release-Version steckt in der Firmware (RELEASE_VERSION),
+# so erkennt das Admin-Panel, ob der Queue aktuell ist.
+#   queue-ota-<board>.bin   nur das Programm: Online-Update über WLAN (Admin-Panel, http://<queue>/update)
+#   queue-atom-matrix.bin   alles zusammen ab Adresse 0x0: erstes Aufspielen per USB
 FW="$BAU/firmware"
 mkdir -p "$FW"
-baue() {   # baue <projektordner> <env> <zielname>
-  local p="$1" env="$2" ziel="$3"
-  cp -a "$p" "$BAU/build-$(basename "$p")"
-  local b
-  b="$BAU/build-$(basename "$p")"
-  pio run -d "$b" -e "$env" >/dev/null
-  local o="$b/.pio/build/$env"
-  local app0
-  app0="$(find "$HOME/.platformio/packages/framework-arduinoespressif32" -name boot_app0.bin | head -1)"
-  esptool --chip esp32 merge-bin -o "$FW/$ziel" \
-    0x1000 "$o/bootloader.bin" 0x8000 "$o/partitions.bin" 0xe000 "$app0" 0x10000 "$o/firmware.bin" >/dev/null
-}
-baue "$SRC/cue_sensor" m5stack-atom queue-atom-matrix.bin
+QB="$BAU/build-cue_sensor"
+cp -a "$SRC/cue_sensor" "$QB"
+export PLATFORMIO_BUILD_FLAGS="-DRELEASE_VERSION='\"$VERSION\"'"
+pio run -d "$QB" >/dev/null                          # alle Boards (default_envs)
+unset PLATFORMIO_BUILD_FLAGS
+for env in esp32dev xiao_esp32c3 m5stack-atom m5stack-atoms3; do
+  cp "$QB/.pio/build/$env/firmware.bin" "$FW/queue-ota-$env.bin"
+  cp "$FW/queue-ota-$env.bin" "$OUT/"               # einzeln im Release: das Admin-Panel lädt sie direkt
+done
+o="$QB/.pio/build/m5stack-atom"
+app0="$(find "$HOME/.platformio/packages/framework-arduinoespressif32" -name boot_app0.bin | head -1)"
+esptool --chip esp32 merge-bin -o "$FW/queue-atom-matrix.bin" \
+  0x1000 "$o/bootloader.bin" 0x8000 "$o/partitions.bin" 0xe000 "$app0" 0x10000 "$o/firmware.bin" >/dev/null
 cat > "$FW/FLASHEN.md" <<MD
-# Fertige Firmware aufspielen ($VERSION)
+# Firmware aufspielen ($VERSION)
 
-| Datei | Programm |
+| Datei | Wofür |
 |---|---|
-| \`queue-atom-matrix.bin\` | Queue mit Gyroskop (\`cue_sensor\`): Richtung + Stoßstärke, M5Stack Atom Matrix / Atom Lite |
+| \`queue-atom-matrix.bin\` | **erstes Aufspielen per USB-Kabel** (M5Stack Atom Matrix / Atom Lite), ab Adresse 0x0 |
+| \`queue-ota-<board>.bin\` | **Update über WLAN**, ohne Kabel (nur das Programm) |
 
-Die Dateien enthalten alles (Bootloader, Partitionen, Programm) und werden ab **Adresse 0x0** geschrieben.
+## Update über WLAN (Queue zusammengebaut)
+- **Admin-Panel des Pi** → Reiter *Queue* → *Firmware des Queues* → "Neueste Version installieren".
+  Der Pi holt die passende Datei selbst von GitHub.
+- **Browser:** \`http://<IP des Queues>/update\` öffnen, Castcode eingeben, \`queue-ota-<board>.bin\` wählen.
+  Board und IP stehen auf der Statusseite des Queues (\`http://<IP des Queues>/\`).
 
+Die LED blinkt blau, danach startet der Queue neu. Bricht etwas ab, läuft die alte Firmware weiter.
+
+## Erstes Aufspielen per USB
 **Im Browser (Chrome/Edge):** https://espressif.github.io/esptool-js/ öffnen, Atom per USB-C anstecken,
-*Connect* (Baudrate 115200), Adresse \`0x0\`, Datei wählen, *Program*.
+*Connect* (Baudrate 115200), Adresse \`0x0\`, \`queue-atom-matrix.bin\` wählen, *Program*.
 
 **Mit esptool:** \`esptool --chip esp32 --baud 115200 write-flash 0x0 queue-atom-matrix.bin\`
 
 Danach den Queue wie in \`cue_sensor/README.md\` beschrieben über den Hotspot einrichten.
-Andere Boards (XIAO, AtomS3, ESP32-DevKit): Quellcode mit PlatformIO selbst bauen.
+Andere Boards per USB: mit PlatformIO bauen und hochladen.
 MD
 packe billard-queue billard-queue.zip "$SRC/cue_sensor" "$FW" "$SRC/VERSION"
 
