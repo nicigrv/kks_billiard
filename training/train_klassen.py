@@ -6,7 +6,7 @@ Prozessor (kugel_merkmale.py). Dieses Skript trainiert stattdessen ein kleines C
 Ausschnitt um die Kugel direkt die Nummer 0-15 bestimmt - und das laeuft auf dem Coral.
 
     python train_klassen.py billard-training-20261118.zip [weitere.zip ...]
-    -> ausgabe/billard_klassen_edgetpu.tflite   im Admin-Panel unter "Modell / Farben hochladen"
+    -> ausgabe/billard_klassen_edgetpu.tflite   auf der Trainingsseite (Admin) unter "Modelle fuer den Pi" hochladen
 
 Braucht TensorFlow (in Google Colab schon da) und kugel_merkmale.py (aus app/, in Colab mit hochladen).
 Der Edge-TPU-Compiler laeuft nur auf Linux x86 (Colab). Fehlt er, entsteht billard_klassen.tflite:
@@ -288,7 +288,7 @@ def main():
         target = out / "billard_klassen_edgetpu.tflite"
         if compiled != target:
             shutil.move(str(compiled), target)
-        print(f"\nFertig: {target}  -> im Admin-Panel unter 'Modell / Farben hochladen'")
+        print(f"\nFertig: {target}  -> auf der Trainingsseite (Admin) unter 'Modelle für den Pi' hochladen")
     else:
         print(f"\n[!] Kein Edge-TPU-Compiler (nur Linux x86, z. B. Colab). {tfl} geht auch - "
               "läuft dann aber auf dem Prozessor des Pi. In Colab umwandeln: "

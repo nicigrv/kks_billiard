@@ -1,7 +1,7 @@
 """
 Startwerte fuer Stufe 2 + 3 (gestreift? Farbe?) aus Simulator-Bildern -> models/start_merkmale.json
 
-Gelten nur, bis echte Farben gelernt sind (Admin-Panel "Farben aus festgelegten Bildern lernen"
+Gelten nur, bis echte Farben gelernt sind (Trainingsseite im Netz, Admin: "Farben aus fertigen Bildern lernen"
 oder training/train_coral.py). Echte Kamera + Lampe sehen anders aus als der Simulator.
 
     python3 -m sim.make_start_merkmale [bilder] [ziel]

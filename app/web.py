@@ -2,9 +2,8 @@
 Webserver (Port 8080). Nur Python-Standardbibliothek, keine Zusatzpakete.
 
   /          Spiel-Panel (PIN 1212): Spiel starten, Korrekturen, Schlagverbesserung, Queue an/aus
-  /admin     Admin-Panel (PIN 1902): Kamera, Tisch, Queue koppeln, QR-Code, Pruefer, KI-Training
-  /pruefen   Pruefer (eigener Code): Bilder der Pruefrunde festlegen
-  /training  Trainingsmodus (Admin)
+  /admin     Admin-Panel (PIN 1902): Kamera, Tisch, Queue koppeln, QR-Code, Bilder & Modelle
+  (Kugeln festlegen und KI trainieren: nur auf der Trainingsseite im Netz, training_server/)
 
 Schutz (auth.py): Die Seiten selbst und die Anmeldung sind offen, alles
 andere braucht die passende Rolle. Der Admin darf alles, was das Spiel-Panel darf.
@@ -14,9 +13,8 @@ import json
 import os
 import re
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import unquote, urlsplit
 
 from auth import Auth, LoginError
 from config import UserError
@@ -25,18 +23,14 @@ from config import UserError
 HERE = os.path.dirname(os.path.abspath(__file__))
 MAX_MODEL_BYTES = 64 * 1024 * 1024
 MAX_FIRMWARE_BYTES = 4 * 1024 * 1024
-MAX_JSON_BYTES = 2 * 1024 * 1024                         # Befehle und Festlegungen sind klein
+MAX_JSON_BYTES = 2 * 1024 * 1024                         # Befehle sind klein
 
 
-PAGES = {"/": "game", "/index.html": "game", "/admin": "admin", "/training": "training",
-         "/pruefen": "training"}                       # Pruefer: gleiche Seite wie der Trainingsmodus, eigene Rolle
+PAGES = {"/": "game", "/index.html": "game", "/admin": "admin"}
 STATIC = {"/notify.js": ("notify.js", "application/javascript; charset=utf-8")}
 PUBLIC_GET = set(PAGES) | set(STATIC) | {"/api/me"}
 SPIEL_GET = {"/api/game", "/api/graphic.jpg"}            # + /videos/...
-PRUEFER_GET = {"/api/round", "/api/round/image"}
-STORED_GET = {"/api/review/next", "/api/review/image"}   # gespeicherte Bilder: Admin und Pruefer
 PUBLIC_POST = {"/api/login", "/api/logout"}
-PRUEFER_POST = {"/api/round/submit", "/api/review_save", "/api/review_release"}
 STREAM_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError)
 # Diese Befehle darf auch das Spiel-Panel (PIN 1212); alle anderen nur der Admin
 GAME_COMMANDS = {"start", "new_rack", "abort", "foul", "switch_turn", "undo", "undo_shot", "set_group",
@@ -50,10 +44,6 @@ def needed_role(path):
         return None
     if path in SPIEL_GET or path.startswith("/videos/"):
         return "spiel"
-    if path in PRUEFER_GET:
-        return "pruefer"
-    if path in STORED_GET:
-        return "stored"
     return "admin"
 
 
@@ -145,13 +135,11 @@ def make_handler(app, auth: Auth):
 
         def do_GET(self):
             url = urlsplit(self.path)
-            path, query = url.path, parse_qs(url.query)
+            path = url.path
             if len(path) > 1 and path.endswith("/") and path.rstrip("/") in PAGES:
                 path = path.rstrip("/")                          # /admin/ -> /admin
             who = self._who()
             need = needed_role(path)
-            if need == "stored":
-                need = "pruefer" if who["role"] == "pruefer" else "admin"
             if need is not None and not Auth.can(who["role"], need):
                 return self._denied(who, need)
             if path in PAGES:
@@ -173,18 +161,6 @@ def make_handler(app, auth: Auth):
                 if png is None:
                     return self._send(404, {"error": "Kein QR-Code"})
                 return self._send(200, png, "image/png")
-            if path == "/api/round":
-                if who["role"] == "pruefer":
-                    app.reviews.heartbeat(who["name"])
-                    return self._send(200, dict(app.reviews.view(who["name"]), me=who["name"],
-                                            stored=app.recorder.pending))
-                return self._send(200, {"status": app.reviews.status(), "me": who["name"]})
-            if path == "/api/round/image":
-                rid = query.get("id", [""])[0]
-                fpath = os.path.join(app.reviews.dir, rid + ".jpg")
-                if not re.fullmatch(r"[0-9]{8}-[0-9]{6}-[0-9]{3}", rid) or not os.path.isfile(fpath):
-                    return self._send(404, {"error": "Bild nicht gefunden"})
-                return self._send_file(fpath, "image/jpeg")
             if path == "/api/graphic.jpg":
                 jpg = app.graphic_jpeg()
                 if jpg is None:
@@ -194,56 +170,6 @@ def make_handler(app, auth: Auth):
                 if app.single.preview is None:
                     return self._send(404, {"error": "Noch kein Bild"})
                 return self._send(200, app.single.preview, "image/jpeg")
-            if path == "/api/snapshot":
-                snap = app.snapshot()
-                if snap is None:
-                    return self._send(503, {"error": "Noch kein Bild - ist der Tisch eingerichtet?"})
-                return self._send(200, snap)
-            if path == "/api/snapshot.jpg":
-                try:
-                    jpg = app.snapshot_jpeg(int(query.get("id", ["0"])[0]))
-                except ValueError:
-                    jpg = None
-                if jpg is None:
-                    return self._send(404, {"error": "Bild nicht mehr vorhanden"})
-                return self._send(200, jpg, "image/jpeg")
-            if path == "/api/review/next":
-                item = app.recorder.next_pending(query.get("after", [None])[0], who=who["name"])
-                if item is None:
-                    return self._send(404, {"error": "Keine Bilder zu prüfen"})
-                return self._send(200, item)
-            if path == "/api/review/image":
-                fpath = app.recorder.pending_image(query.get("name", [""])[0])
-                if fpath is None:
-                    return self._send(404, {"error": "Bild nicht gefunden"})
-                return self._send_file(fpath, "image/jpeg")
-            if path == "/api/all-images.zip":
-                # ALLE Bilder vom Pi (auch offene und verworfene) zum Aufheben
-                tmp = os.path.join(os.path.dirname(app.recorder.base_dir), f"alle-bilder-{threading.get_ident()}.zip")
-                try:
-                    if app.recorder.export_all_zip(tmp) == 0:
-                        return self._send(404, {"error": "Noch keine Bilder"})
-                    return self._send_file(tmp, "application/zip",
-                                           filename=time.strftime("billard-alle-bilder-%Y%m%d.zip"))
-                except STREAM_GONE:
-                    return None
-                finally:
-                    if os.path.exists(tmp):
-                        os.remove(tmp)
-            if path == "/api/dataset.zip":
-                # Trainingsdaten herunterladen (fuer training/train_coral.py)
-                tmp = os.path.join(os.path.dirname(app.recorder.base_dir), f"trainingsdaten-{threading.get_ident()}.zip")
-                try:
-                    n = app.recorder.export_zip(tmp)
-                    if n == 0:
-                        return self._send(404, {"error": "Noch keine geprüften Bilder"})
-                    return self._send_file(tmp, "application/zip",
-                                           filename=time.strftime("billard-training-%Y%m%d.zip"))
-                except STREAM_GONE:
-                    return None
-                finally:
-                    if os.path.exists(tmp):
-                        os.remove(tmp)
             if path.startswith("/videos/"):
                 fpath = app.rounds.video_path(unquote(path[len("/videos/"):]))
                 if fpath is None:
@@ -273,27 +199,6 @@ def make_handler(app, auth: Auth):
             if path == "/api/logout":
                 auth.logout(Auth.token_from(self.headers.get("Cookie", "")))
                 return self._send(200, {"ok": True}, headers={"Set-Cookie": Auth.clear_cookie()})
-            if path == "/api/review_release" and who["role"] in ("pruefer", "admin"):
-                # Bild, das man offen hatte, wieder freigeben (Seite verlassen, Wechsel in eine Pruefrunde)
-                app.recorder.release(who["name"])
-                return self._send(200, {"ok": True})
-            if path == "/api/review_save" and who["role"] == "pruefer":
-                # Pruefer legt ein gespeichertes Bild fest (spaeter, in Ruhe)
-                try:
-                    msg = app.review_as(self._read_json(), who["name"])
-                except UserError as e:
-                    return self._send(400, {"error": str(e)})
-                except (KeyError, ValueError, TypeError) as e:
-                    return self._send(400, {"error": f"Ungültige Daten: {e}"})
-                return self._send(200, {"ok": True, "message": msg, "stored": app.recorder.pending})
-            if path in PRUEFER_POST and who["role"] == "pruefer":
-                try:
-                    data = self._read_json()
-                    res = app.reviews.submit(who["name"], str(data["id"]), list(data.get("balls", [])))
-                except (KeyError, ValueError, TypeError) as e:
-                    return self._send(400, {"error": str(e)})
-                msg = "Gespeichert - warte auf die anderen" if res is None else "Gespeichert - alle fertig!"
-                return self._send(200, dict(app.reviews.view(who["name"]), ok=True, message=msg, me=who["name"]))
             name = path.removeprefix("/api/")
             need = "spiel" if name in GAME_COMMANDS else "admin"
             if not Auth.can(who["role"], need):
@@ -344,7 +249,7 @@ def make_handler(app, auth: Auth):
 
 
 class PortalServer(ThreadingHTTPServer):
-    # Viele iPads gleichzeitig (z. B. 10 Pruefer + Admin): Standard waeren nur
+    # Viele iPads gleichzeitig (Spieler, Zuschauer, Admin): Standard waeren nur
     # 5 wartende Verbindungen, dann werden Anfragen abgewiesen.
     request_queue_size = 128
     daemon_threads = True
@@ -353,7 +258,7 @@ class PortalServer(ThreadingHTTPServer):
 def start(app, port=8080):
     pin = os.environ.get("ADMIN_PIN", "")
     game_pin = os.environ.get("GAME_PIN", "")
-    auth = Auth(pin, os.environ.get("DATA_DIR", "/data"), app.reviewer_list, game_pin=game_pin)
+    auth = Auth(pin, os.environ.get("DATA_DIR", "/data"), game_pin=game_pin)
     app.auth = auth
     server = PortalServer(("0.0.0.0", port), make_handler(app, auth))
     server.daemon_threads = True

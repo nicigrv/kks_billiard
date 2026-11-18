@@ -4,6 +4,7 @@ Tests fuer die Trainingsseite (ohne Netz, ohne Docker):
   * Anmeldung mit Code, Sperre nach Fehlversuchen
   * jedes Bild 3x von verschiedenen Personen, ohne Vorschlaege; Mehrheit in der ZIP
   * Admin nur mit Authelia-Kopfzeilen, Trainings-ZIP im Format des Pi
+  * Modelle fuer den Pi: Farben lernen auf dem Server, hochladen, Pi holt sie (echter Uploader)
 
     python3 test_server.py
 """
@@ -70,7 +71,8 @@ def main():
         import server
         server.UPLOAD_KEY = "test-schluessel-123"
         daten = server.Daten(os.path.join(d, "srv"))
-        srv = server.http.server.ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(daten))
+        mod = server.modelle.Modelle(os.path.join(d, "srv"))
+        srv = server.http.server.ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(daten, mod))
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         base = f"http://127.0.0.1:{srv.server_address[1]}"
         admin = Client(base, {"Remote-User": "nicolas", "Remote-Groups": "admins,m365-admins"})
@@ -97,6 +99,8 @@ def main():
         check(falsch.error == "Server antwortet 403" and daten.zaehler()["offen"] == 0, "falscher Schlüssel wird abgelehnt")
         up = Uploader(rec, base, "test-schluessel-123")
         check(up.run_once() == 4, "4 Bilder hochgeladen")
+        check(rec.waiting == 0 and not [n for n in os.listdir(rec.pending_dir) if n.endswith(".jpg")]
+              and not os.listdir(rec.ok_img), "nach dem Upload auf dem Pi gelöscht (Speicher)")
         check(up.run_once() == 0, "beim nächsten Mal nichts doppelt")
         check(Uploader(rec, base, "test-schluessel-123").run_once() == 0, "auch nach Neustart nichts doppelt (hochgeladen.txt)")
         z = daten.zaehler()
@@ -245,6 +249,84 @@ def main():
               "erkannte Einzelkugel-Bilder sind in der Trainings-ZIP (Klasse 3)")
         nicht = Client(base).call("POST", "/api/upload", {"name": "20261113-130000-000"})
         check(nicht[0] == 403, "Upload ohne Schlüssel weiter gesperrt")
+
+        print("Modelle für den Pi")
+        def roh(pfad, data, name):
+            req = urllib.request.Request(base + pfad, data=data, method="POST", headers={
+                "Remote-User": "nicolas", "Remote-Groups": "admins", "Content-Type": "application/octet-stream",
+                "X-Dateiname": name})
+            try:
+                with urllib.request.urlopen(req) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, json.loads(e.read() or b"{}")
+        pi = Client(base, {"X-Upload-Key": "test-schluessel-123"})
+        check(Client(base).call("GET", "/api/modelle")[0] == 403, "Modell-Liste nur mit Schlüssel des Pi")
+        check(pi.call("GET", "/api/modelle") == (200, {"dateien": []}), "am Anfang keine Modelle")
+        with open(os.path.join(HIER, "start_merkmale.json"), "rb") as f:
+            merkmale = f.read()
+        st, res = roh("/api/admin/modell", merkmale, "billard_merkmale.json")
+        check(st == 200 and "billard_merkmale.json" in res["message"], f"Farben hochgeladen ({st} {res})")
+        klassen = b"\0\0\0\0TFL3" + b"x" * 5000 + b"edgetpu-custom-op"
+        st, res = roh("/api/admin/modell", klassen, "irgendwas.tflite")
+        check(st == 200 and "billard_klassen_edgetpu.tflite" in res["message"], "kleines Modell = Klassen-Modell")
+        check(roh("/api/admin/modell", b"kein modell" * 200, "x.tflite")[0] == 400, "keine Modelldatei abgelehnt")
+        check(roh("/api/admin/modell", b"{\"falsch\": 1}", "billard_merkmale.json")[0] == 400, "falsche JSON abgelehnt")
+        st, res = Client(base).call("POST", "/api/admin/lernen", {})
+        check(st == 403, "Lernen nur für Admins")
+        liste = pi.call("GET", "/api/modelle")[1]["dateien"]
+        check(sorted(f["name"] for f in liste) == ["billard_klassen_edgetpu.tflite", "billard_merkmale.json"]
+              and all(len(f["sha256"]) == 64 for f in liste), "Pi sieht beide Dateien mit Prüfsumme")
+        bekommen = {}
+
+        def install(name, data):
+            if name == "billard_klassen_edgetpu.tflite" and "kaputt" in bekommen:
+                raise ValueError("unbrauchbar")
+            bekommen[name] = data
+            return "ok"
+        zustand = os.path.join(d, "pi", "vom-vps.json")
+        sync = Uploader(rec, base, "test-schluessel-123", install=install, state_path=zustand)
+        check(sorted(sync.sync_models()) == ["billard_klassen_edgetpu.tflite", "billard_merkmale.json"]
+              and bekommen["billard_merkmale.json"] == merkmale, "Pi holt neue Modelle und übernimmt sie")
+        check(sync.sync_models() == [], "unveränderte Modelle werden nicht nochmal geladen")
+        check(Uploader(rec, base, "test-schluessel-123", install=install, state_path=zustand).sync_models() == [],
+              "auch nach Neustart nicht (Prüfsummen gemerkt)")
+        abgeholt = {f["name"]: f["abgeholt"] for f in admin.call("GET", "/api/admin/stand")[1]["modelle"]["dateien"]}
+        check(all(abgeholt.values()), "Admin sieht, dass der Pi die Dateien abgeholt hat")
+        bekommen["kaputt"] = True
+        roh("/api/admin/modell", klassen + b"neu", "billard_klassen.tflite")
+        check(sync.sync_models() == [] and sync.models["billard_klassen_edgetpu.tflite"]["ok"] is False,
+              "unbrauchbare Datei: Pi behält seine, merkt sich den Fehler")
+        check(sync.sync_models() == [], "... und lädt sie nicht immer wieder")
+        st, res = admin.call("POST", "/api/admin/modell/loeschen", {"name": "billard_klassen_edgetpu.tflite"})
+        check(st == 200 and [f["name"] for f in pi.call("GET", "/api/modelle")[1]["dateien"]] == ["billard_merkmale.json"],
+              "Admin entfernt ein Modell")
+
+        print("Farben lernen auf dem Server")
+        st, res = admin.call("POST", "/api/admin/lernen", {})
+        while mod.lernen_laeuft:
+            time.sleep(0.05)
+        vorher = pi.call("GET", "/api/modelle")[1]["dateien"][0]["sha256"]
+        check(st == 200 and mod.lernen_ergebnis["ok"] is False and "Zu wenig" in mod.lernen_ergebnis["text"]
+              and pi.call("GET", "/api/modelle")[1]["dateien"][0]["sha256"] == vorher,
+              "zu wenig festgelegte Kugeln: nichts veröffentlicht, bisherige Farben bleiben")
+        from sim.make_start_merkmale import sim_samples
+        import cv2
+        beispiele = []
+        for i, (img, kugeln, radius) in enumerate(sim_samples(12, 5, jitter=1.0)):
+            pfad = os.path.join(d, f"sim{i}.jpg")
+            cv2.imwrite(pfad, img, [cv2.IMWRITE_JPEG_QUALITY, 92])
+            beispiele.append((pfad, kugeln, radius))
+        alt_sha = pi.call("GET", "/api/modelle")[1]["dateien"][0]["sha256"]
+        mod.lernen(lambda: beispiele, len(beispiele), warten=True)
+        e = mod.lernen_ergebnis
+        neu = pi.call("GET", "/api/modelle")[1]["dateien"][0]
+        check(e["ok"] and e["kugeln"] > 100 and neu["sha256"] != alt_sha, f"Farben aus Bildern gelernt ({e['text'][:60]})")
+        from kugel_merkmale import BallClassifier
+        with open(mod.pfad("billard_merkmale.json")) as f:
+            clf = BallClassifier.from_dict(json.load(f))
+        check(clf.info.get("quelle", "").startswith("VPS"), "gelernte Datei ist gültig, Quelle VPS")
+        check(sync.sync_models() == ["billard_merkmale.json"], "Pi holt die neu gelernten Farben")
 
         print("Umstellung alter Daten")
         alt = server.Daten(os.path.join(d, "alt"))

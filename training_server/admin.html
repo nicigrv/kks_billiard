@@ -53,6 +53,8 @@ tr.gesperrt td { opacity: .5; }
 .hinweis { color: var(--dim); font-size: 14px; margin: 10px 0 0; }
 .neu-code { margin-top: 12px; padding: 12px 14px; border-radius: var(--r); background: #1d3a2c; border: 1px solid var(--ok); }
 .scroll { overflow-x: auto; }
+.lern { white-space: pre-line; background: var(--bg); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; margin-top: 12px; font-size: 14px; }
+.lern.bad { border-color: var(--bad); }
 @media (max-width: 700px) { .zahlen { grid-template-columns: 1fr 1fr; } }
 </style>
 </head>
@@ -84,6 +86,25 @@ tr.gesperrt td { opacity: .5; }
       unabhängig voneinander fest. In die ZIP kommt je Kugel die Mehrheit: gleiche Nummer an fast gleicher Stelle.
       „Nur einstimmige“ nimmt nur Bilder, bei denen alle dasselbe festgelegt haben. „Inkl. unfertige“ nimmt auch Bilder mit,
       die erst teilweise festgelegt sind – mehr Bilder, aber evtl. mit Fehlern.</p>
+  </section>
+
+  <section class="box" id="modelleBox">
+    <h2>Modelle für den Pi</h2>
+    <p class="hinweis" style="margin:0 0 12px">Der Pi lernt nichts selbst. Er holt sich alle paar Minuten, was hier liegt, und prüft es,
+      bevor er es benutzt. Farben + Streifen (Stufe 2 + 3) lernt dieser Server aus den fertigen Bildern; die Modelle für den
+      KI-Chip kommen aus Google Colab (<code>train_coral.py</code>, <code>train_klassen.py</code>) und werden hier hochgeladen.</p>
+    <div class="reihe">
+      <button type="button" class="primary" id="lernenBtn">Farben aus fertigen Bildern lernen</button>
+      <button type="button" class="quiet" id="hochBtn">Modell hochladen (.tflite / .json)</button>
+      <input type="file" id="hochDatei" accept=".tflite,.json" multiple hidden>
+    </div>
+    <div class="lern" id="lernErgebnis" hidden></div>
+    <div class="scroll" style="margin-top:12px">
+      <table>
+        <thead><tr><th>Datei</th><th>Stand</th><th>Größe</th><th>vom Pi abgeholt</th><th></th></tr></thead>
+        <tbody id="modelle"></tbody>
+      </table>
+    </div>
   </section>
 
   <section class="box">
@@ -218,11 +239,66 @@ tr.gesperrt td { opacity: .5; }
     });
   }
 
+  // ---------------- Modelle fuer den Pi ----------------
+  function modelleZeigen(m) {
+    $("modelleBox").hidden = !m;
+    if (!m) return;
+    const tb = $("modelle");
+    tb.innerHTML = "";
+    if (!m.dateien.length) {
+      const tr = document.createElement("tr");
+      zelle(tr, "Noch keine Modelle – der Pi nimmt seine Startwerte.").colSpan = 5;
+      tb.appendChild(tr);
+    }
+    for (const f of m.dateien) {
+      const tr = document.createElement("tr");
+      const name = document.createElement("div");
+      name.innerHTML = "<b></b><br><span class='dim'></span>";
+      name.querySelector("b").textContent = f.name;
+      name.querySelector("span").textContent = f.text;
+      zelle(tr, name);
+      zelle(tr, new Date(f.zeit * 1000).toLocaleString("de-DE"));
+      zelle(tr, f.groesse > 1e6 ? (f.groesse / 1e6).toFixed(1).replace(".", ",") + " MB" : Math.round(f.groesse / 1e3) + " KB", "zahl-z");
+      zelle(tr, f.abgeholt && f.abgeholt >= f.zeit ? seit(f.abgeholt) : "noch nicht");
+      zelle(tr, knopf("Entfernen", "danger", () => {
+        if (confirm(f.name + " entfernen? Der Pi behält seine Kopie, bekommt aber keine neue.")) post("modell/loeschen", { name: f.name });
+      }));
+      tb.appendChild(tr);
+    }
+    const l = m.lernen;
+    $("lernenBtn").disabled = m.lernen_laeuft;
+    $("lernenBtn").textContent = m.lernen_laeuft ? "Lerne Farben …" : "Farben aus fertigen Bildern lernen";
+    $("lernErgebnis").hidden = !l;
+    if (l) {
+      $("lernErgebnis").className = "lern" + (l.ok ? "" : " bad");
+      $("lernErgebnis").textContent = seit(l.zeit) + " · " + (l.bilder || 0) + " Bilder" +
+        (l.dauer ? " · " + String(l.dauer).replace(".", ",") + " s" : "") + "\n" + l.text;
+    }
+    if (m.lernen_laeuft) setTimeout(laden, 2000);
+  }
+  $("lernenBtn").addEventListener("click", () => post("lernen", {}));
+  $("hochBtn").addEventListener("click", () => $("hochDatei").click());
+  $("hochDatei").addEventListener("change", async () => {
+    const files = Array.from($("hochDatei").files);
+    $("hochDatei").value = "";
+    for (const f of files) {
+      try {
+        const r = await fetch("/api/admin/modell", { method: "POST", body: f,
+          headers: { "Content-Type": "application/octet-stream", "X-Dateiname": encodeURIComponent(f.name) } });
+        const d = await r.json().catch(() => ({}));
+        toast(f.name + ": " + (d.message || d.error || ("Fehler " + r.status)), !r.ok);
+      } catch (e) { toast("Keine Verbindung", true); }
+    }
+    laden();
+  });
+
   async function laden() {
     try {
       const r = await fetch("/api/admin/stand", { cache: "no-store" });
       if (!r.ok) { toast("Kein Zugriff (" + r.status + ")", true); return; }
-      zeigen(await r.json());
+      const d = await r.json();
+      zeigen(d);
+      modelleZeigen(d.modelle);
     } catch (e) { /* naechster Versuch */ }
   }
 

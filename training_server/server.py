@@ -8,12 +8,16 @@ Billard-Training im Netz (VPS): Bilder vom Tisch zuhause festlegen.
     Bilder, denen nur noch wenig fehlt, kommen zuerst.
     -> fertig; die Trainings-ZIP nimmt je Kugel die Mehrheit (gleiche Nummer an fast gleicher Stelle).
   Admin (/admin, hinter Authelia): Trainer und Codes, Stand, ZIP fuer training/train_coral.py.
+  Modelle fuer den Pi (modelle.py): der VPS lernt die Farben (Stufe 2 + 3) aus den fertigen Bildern,
+    Coral-Modelle aus Colab werden hier hochgeladen; der Pi holt alles von selbst
+    (GET /api/modelle, GET /api/modell?name=..., beides mit X-Upload-Key). Auf dem Pi wird nichts gelernt.
   Einzelkugel-Bilder (am Pi per Knopf, Nummer am Pi festgelegt): die Kugel findet eine einfache
     Bilderkennung hier auf dem Server (einzelkugel.py, Vergleich mit dem leeren Tisch). Genau eine
     Kugel gefunden -> Bild ist sofort fertig ("Bilderkennung"); sonst legen es Trainer wie gewohnt fest.
 
-Python-Standardbibliothek, fuer die Einzelkugel-Erkennung zusaetzlich Pillow + numpy.
-Daten in DATA_DIR: billard.sqlite, bilder/<name>.jpg, bilder/leer/<hash>.jpg, geheim.key.
+Python-Standardbibliothek, fuer die Einzelkugel-Erkennung zusaetzlich Pillow + numpy, fuers
+Farben-Lernen OpenCV + numpy (kugel_merkmale.py, Kopie aus app/).
+Daten in DATA_DIR: billard.sqlite, bilder/<name>.jpg, bilder/leer/<hash>.jpg, geheim.key, modelle/.
 """
 
 import base64
@@ -35,6 +39,10 @@ try:
     import einzelkugel                 # Pillow + numpy; ohne: Einzelkugel-Bilder legen Trainer fest
 except ImportError:
     einzelkugel = None
+try:
+    import modelle                     # OpenCV + numpy; ohne: keine Modelle fuer den Pi
+except ImportError:
+    modelle = None
 
 HIER = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
@@ -549,6 +557,19 @@ class Daten:
                             "verworfen_von": namen.get(r["verworfen_von"]), "kugeln": len(kugeln)})
         return out
 
+    # --------------------------------------------------------------- Lernen (Farben, Stufe 2 + 3)
+    def lern_beispiele(self):
+        """Fertige Bilder mit dem Ergebnis der Festlegungen (Mehrheit) -> [(bildpfad, [(x, y, nummer)], radius)].
+        Nur kleine Daten; die Bilder selbst liest das Lernen eins nach dem anderen."""
+        out = []
+        with self.lock:
+            for r in self.db.execute("SELECT name, radius FROM bilder WHERE status = 'fertig' ORDER BY name"):
+                kugeln, _ = self._ergebnis(r["name"], r["radius"])
+                pfad = os.path.join(self.bilder, r["name"] + ".jpg")
+                if kugeln and os.path.isfile(pfad):
+                    out.append((pfad, [(k["x"], k["y"], int(k["number"])) for k in kugeln], float(r["radius"])))
+        return out
+
     # --------------------------------------------------------------- Export
     def zip_bauen(self, ziel, modus="fertig"):
         """Trainings-ZIP wie am Pi ("Trainingsdaten laden"): classes.txt, images/, labels/ (YOLO + json).
@@ -585,7 +606,8 @@ def ist_admin_pfad(pfad):
     return pfad in ("/admin", "/admin/") or pfad.startswith("/api/admin/")
 
 
-def make_handler(daten: Daten):
+def make_handler(daten: Daten, mod=None):
+    """mod: modelle.Modelle (Farben lernen, Modelle fuer den Pi) oder None (ohne OpenCV)."""
     class Handler(http.server.BaseHTTPRequestHandler):
         server_version = "BillardTraining"
         sys_version = ""
@@ -676,6 +698,8 @@ def make_handler(daten: Daten):
                     return self._datei(os.path.join(HIER, SEITEN[pfad]), "text/html; charset=utf-8")
                 if pfad.startswith("/api/admin/"):
                     return self._admin_get(pfad, q)
+                if pfad in ("/api/modelle", "/api/modell"):
+                    return self._modell_get(pfad, q)
                 if pfad == "/api/export.zip":
                     key = self.headers.get("X-Export-Key", "")
                     if not EXPORT_KEY or not hmac.compare_digest(key, EXPORT_KEY):
@@ -702,6 +726,27 @@ def make_handler(daten: Daten):
                 return self._send(404, {"error": "Nicht gefunden"})
             except Fehler as e:
                 self._send(e.code, {"error": str(e)})
+
+        def _pi(self):
+            """Der Pi am Tisch (gleicher Schluessel wie beim Hochladen der Bilder)?"""
+            key = self.headers.get("X-Upload-Key", "")
+            return bool(UPLOAD_KEY) and hmac.compare_digest(key, UPLOAD_KEY)
+
+        def _modell_get(self, pfad, q):
+            """Pi holt Modelle: Liste mit Pruefsummen bzw. eine Datei."""
+            if not self._pi():
+                return self._send(403, {"error": "Kein Zugriff"})
+            if mod is None:
+                return self._send(503, {"error": "Modelle auf dem Server nicht verfügbar (OpenCV fehlt)"})
+            if pfad == "/api/modelle":
+                return self._send(200, {"dateien": [{k: f[k] for k in ("name", "sha256", "groesse", "zeit")}
+                                                    for f in mod.liste()]})
+            name = (q.get("name") or [""])[0]
+            p = mod.pfad(name)
+            if p is None:
+                return self._send(404, {"error": "Datei nicht gefunden"})
+            mod.abgeholt(name)
+            return self._datei(p, "application/octet-stream", name)
 
         def _zip(self, q):
             """Trainings-ZIP bauen und schicken (Admin-Seite oder /api/export.zip mit Schluessel)."""
@@ -737,7 +782,8 @@ def make_handler(daten: Daten):
             if pfad == "/api/admin/stand":
                 return self._send(200, {"zaehler": daten.zaehler(), "personen": daten.personen(),
                                         "letzte": daten.letzte(), "upload": bool(UPLOAD_KEY),
-                                        "letzter_eingang": daten.letzter_eingang()})
+                                        "letzter_eingang": daten.letzter_eingang(),
+                                        "modelle": mod.status() if mod else None})
             if pfad == "/api/admin/bild":
                 name = (q.get("name") or [""])[0]
                 jpg = daten.bild_pfad(name)
@@ -792,6 +838,8 @@ def make_handler(daten: Daten):
         def _admin_post(self, pfad):
             if not self._admin():
                 return self._send(403, {"error": "Nur für Admins"})
+            if pfad.startswith("/api/admin/modell") or pfad == "/api/admin/lernen":
+                return self._modell_post(pfad)
             d = self._json()
             if pfad == "/api/admin/person":
                 code = daten.person_anlegen(d.get("name"))
@@ -810,15 +858,45 @@ def make_handler(daten: Daten):
                 return self._send(200, {"message": "Bild ist wieder in Runde 1"})
             return self._send(404, {"error": "Nicht gefunden"})
 
+        def _modell_post(self, pfad):
+            if mod is None:
+                return self._send(503, {"error": "Modelle auf dem Server nicht verfügbar (OpenCV fehlt)"})
+            try:
+                if pfad == "/api/admin/modell":
+                    # Datei roh im Body, Dateiname in X-Dateiname (Klassen-Modell erkennt man am Namen)
+                    try:
+                        n = int(self.headers.get("Content-Length") or 0)
+                    except ValueError:
+                        n = -1
+                    if not 0 < n <= modelle.MAX_MODELL:
+                        raise Fehler("Datei fehlt oder ist zu groß", 413 if n > 0 else 400)
+                    name = mod.hochladen(self.rfile.read(n), urllib.parse.unquote(self.headers.get("X-Dateiname", "")))
+                    return self._send(200, {"message": f"{name} gespeichert – der Pi holt es in den nächsten Minuten",
+                                            "modelle": mod.status()})
+                d = self._json()
+                if pfad == "/api/admin/lernen":
+                    beispiele = daten.lern_beispiele()
+                    text = mod.lernen(lambda: beispiele, len(beispiele))
+                    return self._send(200, {"message": text, "modelle": mod.status()})
+                if pfad == "/api/admin/modell/loeschen":
+                    name = mod.loeschen(str(d.get("name", "")))
+                    return self._send(200, {"message": f"{name} entfernt (liegt als .vorher daneben) – "
+                                                       "der Pi behält seine Kopie", "modelle": mod.status()})
+            except modelle.ModellFehler as e:
+                raise Fehler(str(e)) from None
+            return self._send(404, {"error": "Nicht gefunden"})
+
     return Handler
 
 
 def main():
     daten = Daten(DATA_DIR)
+    mod = modelle.Modelle(DATA_DIR) if modelle else None
     port = int(os.environ.get("PORT", "8000"))
-    srv = http.server.ThreadingHTTPServer(("0.0.0.0", port), make_handler(daten))
+    srv = http.server.ThreadingHTTPServer(("0.0.0.0", port), make_handler(daten, mod))
     srv.daemon_threads = True
-    print(f"Billard-Training auf Port {port}, Daten in {DATA_DIR}, Upload {'an' if UPLOAD_KEY else 'AUS (UPLOAD_KEY fehlt)'}", flush=True)
+    print(f"Billard-Training auf Port {port}, Daten in {DATA_DIR}, Upload {'an' if UPLOAD_KEY else 'AUS (UPLOAD_KEY fehlt)'}, "
+          f"Modelle fuer den Pi {'an' if mod else 'AUS (OpenCV fehlt)'}", flush=True)
     srv.serve_forever()
 
 

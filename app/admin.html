@@ -139,9 +139,6 @@ a.btnlink.quiet { background: transparent; border: 2px solid var(--rail-light); 
 .videos a { color: var(--chalk); font-weight: 700; text-decoration: none; padding: 8px 0; }
 .player { width: 100%; border-radius: 10px; margin-top: 12px; background: #000; display: none; }
 .player.show { display: block; }
-.fixcanvas { display: block; width: 100%; height: auto; border-radius: 10px; background: #000; touch-action: manipulation; cursor: pointer; }
-.picker { display: none; margin-top: 12px; padding: 12px; border: 2px solid var(--rail-light); border-radius: 12px; }
-.picker.show { display: block; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .chip { min-height: 44px; min-width: 44px; padding: 8px 12px; border-radius: 22px; border: 2px solid transparent; font-weight: 700; }
 .chip.sel { border-color: var(--ivory); box-shadow: 0 0 0 2px var(--felt-dark) inset; }
@@ -245,13 +242,6 @@ input[type=text], input[type=password], input[type=number], select {
 .login form { width: min(380px, 100%); display: grid; gap: 14px; text-align: center; }
 .login h2 { margin: 0; }
 .login input { font: 700 32px/1 var(--body); letter-spacing: 8px; text-align: center; }
-.reviewers { list-style: none; padding: 0; margin: 8px 0 12px; }
-.reviewers li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(239, 230, 210, .08); flex-wrap: wrap; }
-.reviewers .nm { font-weight: 700; flex: 1 1 120px; }
-.reviewers .code { font: 700 20px/1 var(--display); letter-spacing: 3px; color: var(--ivory); }
-.reviewers button { min-height: 40px; padding: 6px 10px; font-size: 14px; }
-.dot { width: 12px; height: 12px; border-radius: 50%; background: #55645C; display: inline-block; }
-.dot.on { background: #7FE0A0; }
 .addrow { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
 .switchrow { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 16px;
   border-radius: 14px; background: rgba(10, 47, 37, .7); border: 2px solid rgba(122, 75, 46, .55); margin-bottom: 10px; }
@@ -284,8 +274,7 @@ input[type=text], input[type=password], input[type=number], select {
     <button type="button" role="tab" class="tab" data-tab="overview" id="tab-overview" aria-controls="panel-overview">Übersicht</button>
     <button type="button" role="tab" class="tab" data-tab="setup" id="tab-setup" aria-controls="panel-setup">Einrichtung</button>
     <button type="button" role="tab" class="tab" data-tab="queue" id="tab-queue" aria-controls="panel-queue">Queue</button>
-    <button type="button" role="tab" class="tab" data-tab="training" id="tab-training" aria-controls="panel-training">KI-Training <span class="badge" id="reviewBadge" hidden></span></button>
-    <button type="button" role="tab" class="tab" data-tab="review" id="tab-review" aria-controls="panel-review">Prüfer <span class="badge" id="roundBadge" hidden></span></button>
+    <button type="button" role="tab" class="tab" data-tab="training" id="tab-training" aria-controls="panel-training">Bilder &amp; Modelle <span class="badge" id="uploadBadge" hidden></span></button>
   </nav>
 
   <!-- ===================================================== Übersicht -->
@@ -474,11 +463,12 @@ input[type=text], input[type=password], input[type=number], select {
     </div>
   </section>
 
-  <!-- ===================================================== KI-Training -->
+  <!-- ===================================================== Bilder & Modelle -->
+  <!-- Festgelegt und gelernt wird NICHT auf dem Pi, sondern auf der Trainingsseite im Netz (VPS). -->
   <section class="panel" id="panel-training" role="tabpanel" aria-labelledby="tab-training" hidden>
     <div class="cards">
       <div class="card">
-        <h2>Bilder sammeln</h2>
+        <h2>Trainingsbilder</h2>
         <p class="statusline" id="trainInfo"></p>
         <div class="switchrow">
           <span class="lbl" id="autoLbl">Nach jedem Stoß automatisch<span class="sub">speichert ein Bild, sobald der Tisch ruhig ist</span></span>
@@ -486,77 +476,42 @@ input[type=text], input[type=password], input[type=number], select {
         </div>
         <div class="grid two">
           <button type="button" class="primary" id="captureBtn">Jetzt ein Bild aufnehmen</button>
-          <a class="btnlink" href="/training">Trainingsmodus (groß, Lupe)</a>
+          <a class="btnlink quiet" id="vpsLink" href="#" target="_blank" rel="noopener" hidden>Trainingsseite öffnen</a>
         </div>
         <details class="help">
           <summary>So läuft das Training</summary>
-          <p>Bilder entstehen per Knopf (hier oder „Bild speichern“ im Spiel-Panel) oder automatisch nach jedem Stoß. Festgelegt wird später in Ruhe: Prüfer melden sich unter <b>/pruefen</b> an und bekommen – solange keine Prüfrunde läuft – die gespeicherten Bilder, jeder ein anderes. Ihr legt die Kugeln unten fest: auf eine Kugel tippen, dann ihre Nummer; fehlt eine Kugel, auf die freie Stelle tippen. Sobald der KI-Chip ein Modell hat, schlägt er die Kugeln vor – dann nur noch prüfen und „Passt alles“. Nur festgelegte Bilder werden zum Training benutzt.</p>
+          <p>Der Pi nimmt nur Bilder auf – per Knopf (hier oder „Bild speichern“ im Spiel-Panel) oder automatisch nach jedem Stoß – und schickt sie an die <b>Trainingsseite im Netz</b>. Was dort angekommen ist, wird auf dem Pi gelöscht.</p>
+          <p>Festlegen, Farben lernen und das Trainieren der Modelle passieren nur dort bzw. in Google Colab. Neue Modelle holt sich der Pi von der Trainingsseite von selbst (alle paar Minuten) – so bleibt der Pi frei für Erkennung und Beamer.</p>
+          <p>Ohne Trainingsseite (<code>TRAINING_UPLOAD_URL</code>/<code>TRAINING_UPLOAD_KEY</code> in <code>.env</code>) bleiben die Bilder auf dem Pi liegen (es wird aufgenommen, solange mehr als 1 GB frei ist).</p>
         </details>
       </div>
 
       <div class="card">
-        <h2>KI-Modell</h2>
+        <h2>Modelle für die Erkennung</h2>
         <p class="statusline" id="modelStatus">-</p>
-        <p class="statusline" id="qualityInfo"></p>
-        <div class="grid two">
-          <button type="button" id="learnFeaturesBtn">Farben aus festgelegten Bildern lernen</button>
-          <button type="button" id="modelUploadBtn">Modell / Farben hochladen</button>
-        </div>
-        <p class="hint small" id="learnResult" hidden style="white-space:pre-line;margin-top:10px"></p>
+        <p class="statusline" id="vpsModels"></p>
+        <button type="button" class="quiet block" id="modelUploadBtn">Modell / Farben von Hand hochladen</button>
         <input type="file" id="modelFile" accept=".tflite,.json" multiple hidden>
         <details class="help">
-          <summary>Mehr: Herunterladen, Zurücksetzen, Erklärung</summary>
+          <summary>Mehr: Zurücksetzen, Erklärung</summary>
           <div class="grid two" style="margin:10px 0">
-            <a class="btnlink" id="datasetLink" href="/api/dataset.zip" download>Trainingsdaten laden</a>
-            <a class="btnlink quiet" id="allImagesLink" href="/api/all-images.zip" download>Alle Bilder laden</a>
-            <button type="button" class="quiet" id="resetFeaturesBtn">Gelernte Farben löschen</button>
+            <button type="button" class="quiet" id="resetFeaturesBtn">Farben auf Startwerte</button>
             <button type="button" class="quiet" id="resetKlassenBtn">Klassen-Modell löschen</button>
           </div>
-          <p>Die Erkennung läuft in drei Stufen: <b>1. Kugeln finden</b> (KI-Chip), <b>2. gestreift oder nicht</b> und <b>3. Farbe</b> (beides auf dem Pi, mit gelernten Werten). Aus Art und Farbe ergibt sich die Nummer. Ohne KI-Chip und Modell zählt der Pi nichts – er nimmt nur Bilder auf.</p>
-          <p>Stufe 1: Trainingsdaten laden, am PC oder in Google Colab trainieren (training/README.md), dann <b>billard_edgetpu.tflite</b> und <b>billard_merkmale.json</b> zusammen hochladen. Stufe 2 + 3 lernt der Pi in Sekunden selbst („Farben lernen“) – nach Änderungen am Licht neu lernen.</p>
-          <p><b>Stufe 2 + 3 auf dem KI-Chip</b> (entlastet den Pi): in Colab <code>train_klassen.py</code> mit derselben ZIP laufen lassen und <b>billard_klassen_edgetpu.tflite</b> hochladen. Dann bestimmt der KI-Chip Art und Farbe; die gelernten Farben bleiben als Rückfall, falls das Modell fehlt.</p>
+          <p>Die Erkennung läuft in drei Stufen: <b>1. Kugeln finden</b> (KI-Chip), <b>2. gestreift oder nicht</b> und <b>3. Farbe</b> – auf dem KI-Chip (Klassen-Modell) oder auf dem Pi mit gelernten Farben. Aus Art und Farbe ergibt sich die Nummer.</p>
+          <p>Die Dateien kommen von der Trainingsseite: dort lernt der Server die Farben aus den fertigen Bildern; <b>billard_edgetpu.tflite</b> und <b>billard_klassen_edgetpu.tflite</b> aus Google Colab werden dort hochgeladen. Der Pi prüft jede Datei, bevor er sie benutzt. „Von Hand hochladen“ geht weiterhin, z. B. ohne Trainingsseite.</p>
         </details>
       </div>
 
       <div class="card wide">
-        <div class="cardhead">
-          <h2>Kugeln festlegen</h2>
-          <div class="seg compact" role="radiogroup" aria-label="Welche Bilder">
-            <input type="radio" name="fixMode" id="modeReview" value="review" checked><label for="modeReview">Gesammelte Bilder</label>
-            <input type="radio" name="fixMode" id="modeLive" value="live"><label for="modeLive">Live-Bild jetzt</label>
-          </div>
-        </div>
-        <p class="statusline" id="editorTitle"></p>
-        <canvas class="fixcanvas" id="fixCanvas" width="800" height="400" aria-label="Tischbild mit zugeordneten Kugeln zum Prüfen"></canvas>
-        <div class="picker" id="picker">
-          <p class="hint" id="pickerTitle" style="margin:0">Kugel</p>
-          <div class="chips" id="kindChips"></div>
-          <div class="chips" id="colorChips"></div>
-        </div>
-        <div id="reviewActions" class="grid" style="margin-top:12px">
-          <button class="danger" type="button" id="reviewDiscard">Verwerfen</button>
-          <button class="quiet" type="button" id="reviewSkip">Später</button>
-          <button class="primary" type="button" id="reviewSave" disabled>Passt alles</button>
-        </div>
-        <p class="hint small" id="reviewHint" style="margin-top:8px">„Verwerfen“ bei unbrauchbaren Bildern (Arm im Bild, verwackelt).</p>
-        <div id="liveActions" hidden>
-          <label class="check"><input type="checkbox" id="applyFix" checked> Korrektur auch im laufenden Spiel übernehmen</label>
-          <div class="grid two">
-            <button class="quiet" type="button" id="fixReload">Neues Bild</button>
-            <button class="primary" type="button" id="fixSave" disabled>Korrektur speichern</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="card wide">
         <div class="switchrow plain">
-          <span class="lbl" id="singleLbl"><span class="h2">Einzelkugel-Serie</span><span class="sub">viele Bilder von einer Kugel – Nummer hier festlegen, Position findet der Pi selbst</span></span>
+          <span class="lbl" id="singleLbl"><span class="h2">Einzelkugel per Knopf</span><span class="sub">viele Bilder von einer Kugel – Nummer hier wählen, den Kreis zieht die Trainingsseite</span></span>
           <button class="switch" type="button" role="switch" id="singleSw" aria-checked="false" aria-labelledby="singleLbl"></button>
         </div>
         <div id="singleBox" hidden>
           <div class="single">
             <div>
-              <p class="hint small" style="margin-top:14px">1. Tisch leer räumen → „Leeren Tisch merken“. 2. Kugel wählen. 3. Kugel hinlegen und Bild aufnehmen oder Serie starten; zwischen den Bildern die Kugel woanders hinlegen.</p>
+              <p class="hint small" style="margin-top:14px">1. Tisch leer räumen → „Leeren Tisch merken“. 2. Kugel wählen. 3. Kugel hinlegen, „Bild jetzt aufnehmen“, Kugel woanders hinlegen, wieder aufnehmen …</p>
               <button type="button" class="quiet block" id="singleEmptyBtn">Leeren Tisch merken</button>
               <p class="statusline" id="singleEmptyInfo" style="margin-top:6px"></p>
               <label style="margin-top:10px">Kugel</label>
@@ -565,19 +520,8 @@ input[type=text], input[type=password], input[type=number], select {
               <p class="hint small" id="singleShotHint" style="margin:6px 0 4px"></p>
             </div>
             <div>
-              <h3>Automatisch als Serie</h3>
-              <p class="hint small">Der Pi wartet jeweils, bis genau eine ruhende Kugel zu sehen ist.</p>
-              <div class="grid two">
-                <div><label for="singleCount">Anzahl Bilder</label><input type="number" id="singleCount" min="1" max="500" value="50"></div>
-                <div><label for="singleInterval">Abstand (Sekunden)</label><input type="number" id="singleInterval" min="0.3" max="30" step="0.1" value="1"></div>
-              </div>
-              <label class="check"><input type="checkbox" id="singleOnlyNew" checked> Nur speichern, wenn die Kugel woanders liegt als beim letzten Bild</label>
-              <div class="grid two">
-                <button type="button" class="primary" id="singleStartBtn">Serie starten</button>
-                <button type="button" class="danger" id="singleStopBtn" disabled>Stoppen</button>
-              </div>
-              <p class="statusline" id="singleInfo" style="margin-top:10px"></p>
-              <img id="singleImg" alt="Zuletzt gespeichertes Bild der Serie" hidden class="singleimg">
+              <p class="statusline" id="singleInfo" style="margin-top:14px"></p>
+              <img id="singleImg" alt="Zuletzt aufgenommenes Einzelkugel-Bild" hidden class="singleimg">
             </div>
           </div>
         </div>
@@ -585,47 +529,10 @@ input[type=text], input[type=password], input[type=number], select {
 
       <div class="card wide danger-zone">
         <div>
-          <h2>Alle Bilder löschen</h2>
-          <p class="hint small" style="margin:0">Löscht offene, festgelegte, verworfene und Einzelkugel-Bilder. Das KI-Modell bleibt. Vorher ggf. „Alle Bilder laden“.</p>
+          <h2>Alle Bilder auf dem Pi löschen</h2>
+          <p class="hint small" style="margin:0">Auch die, die noch nicht hochgeladen sind. Was schon auf der Trainingsseite ist, bleibt dort. Die Modelle bleiben.</p>
         </div>
         <button type="button" class="danger" id="deleteAllBtn">Alle Bilder löschen</button>
-      </div>
-    </div>
-  </section>
-
-  <!-- ===================================================== Prüfer -->
-  <section class="panel" id="panel-review" role="tabpanel" aria-labelledby="tab-review" hidden>
-    <div class="cards">
-      <div class="card">
-        <h2>Prüfrunde</h2>
-        <p class="hint">Das aktuelle Kamerabild geht an alle angemeldeten Prüfer, jeder legt die Kugeln fest, die Mehrheit entscheidet.</p>
-        <button class="primary block" type="button" id="roundStartBtn">Bild an alle Prüfer</button>
-        <label class="check"><input type="checkbox" id="showAiToggle"> Prüfer sehen den KI-Vorschlag</label>
-        <p class="statusline" id="reviewRoundStatus"></p>
-        <div class="grid two" id="roundActions" hidden>
-          <button class="quiet" type="button" id="roundFinishBtn">Mit den bisherigen abschließen</button>
-          <button class="danger" type="button" id="roundCancelBtn">Runde abbrechen</button>
-        </div>
-        <details class="help">
-          <summary>So läuft eine Prüfrunde</summary>
-          <p>Haben alle gespeichert, zeigt der Beamer „Alle fertig – weiter!“ und es klingt ein Ding. Gibt es ein KI-Modell, macht der KI-Chip zu jedem Bild einen Vorschlag, der danach mit dem Ergebnis der Prüfer verglichen wird. Standardmäßig sehen die Prüfer den Vorschlag nicht (ehrlicher Vergleich). Wo die KI falsch lag oder die Prüfer uneinig sind, kommt ein „?“ – das Bild landet dann im KI-Training unter den gesammelten Bildern.</p>
-        </details>
-      </div>
-
-      <div class="card">
-        <h2>Prüfer</h2>
-        <p class="hint">Prüfer öffnen am iPad <b id="pruefenUrl">/pruefen</b> und melden sich mit ihrem Code an. Grüner Punkt = online.</p>
-        <ul class="reviewers" id="reviewerList"></ul>
-        <form class="addrow" id="addReviewer">
-          <input type="text" id="reviewerName" maxlength="20" placeholder="Name, z. B. Anna" aria-label="Name des Prüfers" autocomplete="off">
-          <button type="submit">Hinzufügen</button>
-        </form>
-      </div>
-
-      <div class="card">
-        <h2>Ding-Ton (HDMI)</h2>
-        <p class="statusline" id="soundInfo"></p>
-        <button class="quiet block" type="button" id="soundTestBtn">Ding testen</button>
       </div>
     </div>
   </section>
@@ -636,7 +543,7 @@ input[type=text], input[type=password], input[type=number], select {
     <p class="hint" id="loginHint" style="margin:0">Bitte den Admin-PIN eingeben.</p>
     <input type="password" id="loginInput" inputmode="numeric" maxlength="12" aria-label="Admin-PIN">
     <button class="primary" type="submit">Anmelden</button>
-    <p class="hint" style="margin:0">Spieler nehmen das Spiel-Panel (Startseite), Prüfer melden sich unter <b>/pruefen</b> mit ihrem Code an.</p>
+    <p class="hint" style="margin:0">Spieler nehmen das Spiel-Panel (Startseite).</p>
   </form>
 </div>
 
@@ -681,11 +588,9 @@ input[type=text], input[type=password], input[type=number], select {
         body: JSON.stringify({ secret: $("loginInput").value.trim() }) });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) { showLogin(data.error || "Anmeldung fehlgeschlagen"); return; }
-      if (data.role === "pruefer") { showLogin("Das ist ein Prüfer-Code. Prüfer nehmen die Seite /pruefen."); return; }
       if (data.role !== "admin") { showLogin("Das ist die Spiel-PIN. Hier braucht es die Admin-PIN."); return; }
       $("login").hidden = true;
       poll();
-      if (tab === "training") loadEditor();      // Bild konnte vor der Anmeldung nicht geladen werden
     } catch (err) { showLogin("Tisch nicht erreichbar"); }
   });
   $("logoutBtn").addEventListener("click", async () => {
@@ -750,7 +655,6 @@ input[type=text], input[type=password], input[type=number], select {
     renderTraining(s);
     renderSingle(s);
     renderCamera(s);
-    renderReview(s);
     renderStatus(s);
     $("tableInfo").textContent = s.calibrated
       ? "Eingerichtet · " + (TABLE_NAMES[s.table_size] || s.table_size || "") + " · Tuch " + (s.cloth === "gruen" ? "grün" : "blau")
@@ -780,30 +684,22 @@ input[type=text], input[type=password], input[type=number], select {
     else rows.push(f.learning ? ["warn", "Farben & Streifen", "werden gerade gelernt …", "training"]
       : !f.ready ? ["bad", "Farben & Streifen", f.error || "nicht bereit", "training"]
       : f.own ? ["ok", "Farben & Streifen", "gelernt" + (f.model_time ? " am " + f.model_time : ""), "training"]
-      : ["warn", "Farben & Streifen", "Startwerte aus dem Simulator – mit eigenen Bildern lernen", "training"]);
+      : ["warn", "Farben & Streifen", "Startwerte aus dem Simulator – lernt die Trainingsseite aus euren Bildern", "training"]);
     const q = s.cue || {};
     rows.push(!q.castcode ? ["off", "Queue", "nicht gekoppelt (optional)", "queue"]
       : !q.enabled ? ["off", "Queue", "ausgeschaltet", "queue"]
       : q.connected ? ["ok", "Queue", "verbunden" + (q.battery ? " · Akku " + fmtNum(q.battery, 2) + " V" : ""), "queue"]
       : ["warn", "Queue", q.state || "nicht verbunden", "queue"]);
-    const revs = s.reviewers || [], rv = s.review || {};
-    const online = revs.filter((r) => r.online).length;
-    rows.push(rv.active ? ["warn", "Prüfer", "Prüfrunde läuft · " + rv.done + "/" + rv.total + " fertig", "review"]
-      : revs.length ? [online ? "ok" : "off", "Prüfer", online + " von " + revs.length + " online", "review"]
-      : ["off", "Prüfer", "noch keine angelegt", "review"]);
-    const t = s.training || {};
-    rows.push([t.pending ? "warn" : "ok", "Trainingsbilder",
-      (t.pending || 0) + " offen · " + (t.verified || 0) + " festgelegt", "training"]);
-    const up = t.upload;
-    if (up) rows.push([up.error ? "warn" : "ok", "Trainingsseite",
-      up.error ? up.error + (up.waiting ? ", " + up.waiting + " warten" : "") : up.waiting ? up.waiting + " werden hochgeladen" : "alles hochgeladen", "training"]);
+    const t = s.training || {}, up = t.upload;
+    rows.push(!up ? ["off", "Trainingsseite", "nicht eingerichtet" + (t.pending ? " – " + t.pending + " Bilder liegen auf dem Pi" : ""), "training"]
+      : up.error || up.model_error ? ["warn", "Trainingsseite", up.error || up.model_error, "training"]
+      : ["ok", "Trainingsseite", (t.pending ? t.pending + " Bilder werden hochgeladen" : "alles hochgeladen") +
+         " · Modelle " + (up.model_check ? "geprüft " + seit(up.model_check) : "noch nicht geprüft"), "training"]);
     rows.push(t.disk_ok === false ? ["bad", "Speicher", "fast voll – es werden keine Bilder mehr aufgenommen", "training"]
       : ["ok", "Speicher", "genug frei", null]);
-    const snd = s.sound || {};
-    if (snd.error) rows.push(["warn", "Ding-Ton", snd.error, "review"]);
     return rows;
   }
-  const TAB_LABEL = { setup: "Einrichten", queue: "Öffnen", training: "Öffnen", review: "Öffnen" };
+  const TAB_LABEL = { setup: "Einrichten", queue: "Öffnen", training: "Öffnen" };
   function renderStatus(s) {
     const rows = statusRows(s);
     const key = JSON.stringify(rows);
@@ -951,237 +847,15 @@ input[type=text], input[type=password], input[type=number], select {
     if (await post("qr_settings", { text: $("qrText").value, label: $("qrLabel").value })) qrDirty = false;
   });
 
-  // ---------------- Kugeln korrigieren (KI-Training) ----------------
-  const KINDS = [["cue", "Weiße"], ["eight", "8"], ["solid", "Volle"], ["stripe", "Halbe"], ["none", "Keine Kugel"]];
-  const COLORS = [["gelb", "#F5C314", 1], ["blau", "#2355CD", 2], ["rot", "#D72D28", 3], ["violett", "#7837A0", 4],
-                  ["orange", "#F57D19", 5], ["gruen", "#198C41", 6], ["weinrot", "#871E2D", 7]];
-  const KIND_STROKE = { cue: "#FFFFFF", eight: "#9A9A9A", solid: "#F2B705", stripe: "#6FB3E0", none: "#D2453B" };
-  const fixCanvas = $("fixCanvas"), fctx = fixCanvas.getContext("2d");
-  const fixImg = new Image();
-  let snap = null, selected = -1;
-
-  function numberOf(b) {
-    if (b.kind === "eight") return 8;
-    const c = COLORS.find((x) => x[0] === b.color);
-    if (!c || (b.kind !== "solid" && b.kind !== "stripe")) return null;
-    return b.kind === "solid" ? c[2] : c[2] + 8;
-  }
-
-  function drawFix() {
-    fctx.clearRect(0, 0, fixCanvas.width, fixCanvas.height);
-    if (fixImg.complete && fixImg.naturalWidth) fctx.drawImage(fixImg, 0, 0, fixCanvas.width, fixCanvas.height);
-    if (!snap) return;
-    const r = snap.radius;
-    snap.balls.forEach((b, i) => {
-      fctx.lineWidth = i === selected ? 4 : 2;
-      fctx.strokeStyle = KIND_STROKE[b.kind] || "#fff";
-      fctx.setLineDash(b.kind === "none" ? [4, 4] : []);
-      fctx.beginPath(); fctx.arc(b.x, b.y, r + 4, 0, Math.PI * 2); fctx.stroke();
-      if (i === selected) { fctx.strokeStyle = "#6FB3E0"; fctx.beginPath(); fctx.arc(b.x, b.y, r + 9, 0, Math.PI * 2); fctx.stroke(); }
-      const n = numberOf(b);
-      const label = b.kind === "none" ? "×" : b.kind === "cue" ? "W" : (n === null ? "?" : String(n));
-      fctx.setLineDash([]);
-      fctx.font = "bold 13px sans-serif"; fctx.textAlign = "center"; fctx.textBaseline = "middle";
-      fctx.fillStyle = "rgba(0,0,0,.7)"; fctx.fillRect(b.x + r - 2, b.y - r - 14, 22, 16);
-      fctx.fillStyle = label === "?" ? "#FF8A80" : b.changed ? "#7FE0A0" : "#fff";
-      fctx.fillText(label, b.x + r + 9, b.y - r - 6);
-    });
-  }
-
-  // Nummer setzen: Typ und Farbe folgen daraus (der Server rechnet die Nummer daraus zurueck)
-  function setNumber(b, n) {
-    if (n === null) { b.kind = "none"; b.color = ""; }
-    else if (n === 0) { b.kind = "cue"; b.color = ""; }
-    else if (n === 8) { b.kind = "eight"; b.color = "schwarz"; }
-    else { const c = COLORS.find((x) => x[2] === (n < 8 ? n : n - 8)); b.kind = n < 8 ? "solid" : "stripe"; b.color = c[0]; }
-    b.changed = true;
-  }
-
-  function renderPicker() {
-    const pk = $("picker");
-    if (!snap || selected < 0) { pk.classList.remove("show"); return; }
-    pk.classList.add("show");
-    const b = snap.balls[selected];
-    const n = numberOf(b);
-    $("pickerTitle").textContent = "Welche Kugel ist das? " + (b.kind === "none" ? "(keine Kugel)" :
-      b.kind === "cue" ? "(jetzt: Weiße)" : n !== null ? "(jetzt: " + n + ")" : "(Nummer fehlt)");
-    const kc = $("kindChips"); kc.innerHTML = "";
-    const chip = (label, num, style) => {
-      const bt = document.createElement("button");
-      bt.type = "button";
-      const cur = num === null ? b.kind === "none" : (num === 0 ? b.kind === "cue" : n === num);
-      bt.className = "chip" + (cur ? " sel" : "");
-      bt.textContent = label;
-      Object.assign(bt.style, style || {});
-      bt.setAttribute("aria-label", num === null ? "Keine Kugel" : num === 0 ? "Weiße" : "Kugel " + num);
-      bt.addEventListener("click", () => { setNumber(b, num); selected = -1; afterEdit(); });
-      kc.appendChild(bt);
-    };
-    chip("W", 0, { background: "#F4F1E8", color: "#111" });
-    for (const [c, hex, num] of COLORS) chip(String(num), num, { background: hex, color: "#fff" });
-    chip("8", 8, { background: "#111", color: "#fff" });
-    for (const [c, hex, num] of COLORS) chip(String(num + 8), num + 8,
-      { background: "linear-gradient(#EFE6D2 28%, " + hex + " 28% 72%, #EFE6D2 72%)", color: "#111" });
-    chip("Keine Kugel", null, {});
-    $("colorChips").innerHTML = "";
-  }
-
-  let fixMode = "review";
-
-  function missingNumbers() {
-    return snap ? snap.balls.filter((b) => b.kind !== "none" && b.kind !== "cue" && numberOf(b) === null).length : 0;
-  }
-
-  function afterEdit() {
-    const changed = !!snap && snap.balls.some((b) => b.changed);
-    const missing = missingNumbers();
-    $("fixSave").disabled = !changed || missing > 0;
-    $("reviewSave").disabled = !snap || missing > 0;
-    $("reviewDiscard").disabled = !snap;
-    $("reviewSkip").disabled = !snap;
-    $("reviewSave").textContent = missing ? missing + " Nummer(n) fehlen" :
-      (snap && !snap.balls.length ? "Ohne Kugeln speichern" : changed ? "Speichern" : "Passt alles");
-    drawFix(); renderPicker();
-  }
-
-  function showMode() {
-    $("reviewActions").hidden = fixMode !== "review";
-    $("reviewHint").hidden = fixMode !== "review";
-    $("liveActions").hidden = fixMode !== "live";
-    fixCanvas.hidden = false;
-  }
-
-  async function loadSnapshot() {
-    snap = null; selected = -1; afterEdit();
-    $("editorTitle").textContent = "Aktuelles Kamerabild mit der Zuordnung des Systems";
-    try {
-      const r = await fetch("/api/snapshot", { cache: "no-store" });
-      const data = await r.json();
-      if (!r.ok) { toast(data.error || "Kein Bild", true); return; }
-      snap = data;
-      fixCanvas.width = data.width; fixCanvas.height = data.height;
-      fixImg.src = "/api/snapshot.jpg?id=" + data.id;
-      afterEdit();
-    } catch (e) { toast("Tisch nicht erreichbar", true); }
-  }
-
-  async function loadReview(after) {
-    snap = null; selected = -1; afterEdit();
-    try {
-      const r = await fetch("/api/review/next" + (after ? "?after=" + encodeURIComponent(after) : ""), { cache: "no-store" });
-      const data = await r.json();
-      if (r.status === 404) {
-        fctx.clearRect(0, 0, fixCanvas.width, fixCanvas.height);
-        fixCanvas.hidden = true;
-        $("editorTitle").textContent = "Keine Bilder offen. Mit „Jetzt ein Bild aufnehmen“ kommt ein neues dazu.";
-        return;
-      }
-      if (!r.ok) { toast(data.error || "Kein Bild", true); return; }
-      fixCanvas.hidden = false;
-      snap = data;
-      const t = data.name.slice(9, 11) + ":" + data.name.slice(11, 13);
-      $("editorTitle").textContent = "Bild von " + t + " Uhr, noch " + data.pending + " zu prüfen";
-      fixCanvas.width = data.width; fixCanvas.height = data.height;
-      fixImg.src = "/api/review/image?name=" + encodeURIComponent(data.name);
-      afterEdit();
-    } catch (e) { toast("Tisch nicht erreichbar", true); }
-  }
-
-  function loadEditor() { showMode(); if (fixMode === "review") loadReview(); else loadSnapshot(); }
-  fixImg.onload = drawFix;
-
-  document.querySelectorAll("input[name=fixMode]").forEach((r) => r.addEventListener("change", () => {
-    fixMode = document.querySelector("input[name=fixMode]:checked").value; loadEditor();
-  }));
-  $("reviewSave").addEventListener("click", async () => {
-    if (!snap) return;
-    if (!snap.balls.length && !confirm("Liegen auf diesem Bild wirklich KEINE Kugeln? Sonst erst die Kugeln antippen.")) return;
-    const res = await post("review_save", { name: snap.name, balls: snap.balls });
-    if (res) loadReview();
-  });
-  $("reviewDiscard").addEventListener("click", async () => {
-    if (!snap) return;
-    const res = await post("review_save", { name: snap.name, discard: true });
-    if (res) loadReview();
-  });
-  $("reviewSkip").addEventListener("click", () => { if (snap) loadReview(snap.name); });
-  $("captureBtn").addEventListener("click", async () => {
-    const res = await post("capture", {});
-    if (res && fixMode === "review" && !snap) loadReview();
-  });
+  // ---------------- Trainingsbilder (festgelegt wird auf der Trainingsseite) ----------------
+  $("captureBtn").addEventListener("click", () => post("capture", {}));
   $("deleteAllBtn").addEventListener("click", async () => {
-    const t = (state && state.training) || {};
-    const single = ((state && state.single) || {}).stored || 0;
-    const n = (t.pending || 0) + (t.verified || 0) + (t.discarded || 0) + single;
-    if (!n) { toast("Es gibt keine Bilder zum Löschen"); return; }
-    if (!confirm("ALLE " + n + " Trainingsbilder löschen (offene, festgelegte, verworfene" + (single ? ", Einzelkugel" : "") + ")?\n\nDas kann nicht rückgängig gemacht werden. Das KI-Modell bleibt erhalten.")) return;
-    if (await post("delete_images", { confirm: true })) loadEditor();
+    const n = ((state && state.training) || {}).pending || 0;
+    if (!n) { toast("Auf dem Pi liegen keine Bilder"); return; }
+    if (!confirm("ALLE " + n + " Bilder auf dem Pi löschen – auch die, die noch nicht hochgeladen sind?\n\n" +
+                 "Das kann nicht rückgängig gemacht werden. Die Modelle bleiben erhalten.")) return;
+    post("delete_images", { confirm: true });
   });
-
-  // ---------------- Prüfrunde ----------------
-  function renderReview(s) {
-    const rv = s.review || {};
-    const revs = s.reviewers || [];
-    const online = revs.filter((r) => r.online).length;
-    $("pruefenUrl").textContent = location.host + "/pruefen";
-    const badge = $("roundBadge");
-    badge.hidden = !rv.active;
-    badge.textContent = rv.active ? rv.done + "/" + rv.total : "";
-    $("roundStartBtn").disabled = !!rv.active || !online;
-    $("roundStartBtn").textContent = rv.active ? "Prüfrunde läuft …" :
-      online ? "Bild an alle Prüfer (" + online + " online)" : "Bild an alle Prüfer (niemand online)";
-    $("roundActions").hidden = !rv.active;
-    const st = $("reviewRoundStatus");
-    st.innerHTML = "";
-    if (rv.active) {
-      st.appendChild(document.createTextNode("Bild " + rv.no + ": "));
-      rv.participants.forEach((p, i) => {
-        if (i) st.appendChild(document.createTextNode("  ·  "));
-        const b = document.createElement("b");
-        b.className = p.done ? "good" : "";
-        b.textContent = (p.done ? "✓ " : "… ") + p.name;
-        st.appendChild(b);
-      });
-    } else if (rv.last && rv.last.text) {
-      st.textContent = "Zuletzt: " + rv.last.text;
-    }
-    const key = JSON.stringify(revs);
-    if (key !== renderReview.key) {
-      renderReview.key = key;
-      const ul = $("reviewerList");
-      ul.innerHTML = "";
-      if (!revs.length) { const li = document.createElement("li"); li.textContent = "Noch keine Prüfer – unten anlegen."; ul.appendChild(li); }
-      for (const r of revs) {
-        const li = document.createElement("li");
-        const dot = document.createElement("span"); dot.className = "dot" + (r.online ? " on" : "");
-        dot.title = r.online ? "online" : "nicht angemeldet";
-        const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = r.name;
-        const code = document.createElement("span"); code.className = "code"; code.textContent = r.code;
-        const nc = document.createElement("button"); nc.type = "button"; nc.className = "quiet"; nc.textContent = "Neuer Code";
-        nc.addEventListener("click", () => post("reviewer_newcode", { name: r.name }));
-        const rm = document.createElement("button"); rm.type = "button"; rm.className = "quiet"; rm.textContent = "Entfernen";
-        rm.addEventListener("click", () => { if (confirm(r.name + " entfernen?")) post("reviewer_remove", { name: r.name }); });
-        li.append(dot, nm, code, nc, rm);
-        ul.appendChild(li);
-      }
-    }
-    if (document.activeElement !== $("showAiToggle")) $("showAiToggle").checked = !!s.review_show_ai;
-    const snd = s.sound || {};
-    $("soundInfo").textContent = "Ton über: " + (snd.device || "-") + (snd.error ? "  ·  Problem: " + snd.error : "");
-  }
-  $("roundStartBtn").addEventListener("click", () => post("round_start", {}));
-  $("roundFinishBtn").addEventListener("click", () => {
-    if (confirm("Runde mit den bisherigen Ergebnissen abschließen? Wer noch nicht gespeichert hat, zählt nicht.")) post("round_finish", {});
-  });
-  $("roundCancelBtn").addEventListener("click", () => { if (confirm("Prüfrunde abbrechen?")) post("round_cancel", {}); });
-  $("addReviewer").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const name = $("reviewerName").value.trim();
-    if (!name) return;
-    if (await post("reviewer_add", { name })) $("reviewerName").value = "";
-  });
-  $("soundTestBtn").addEventListener("click", () => post("sound_test", {}));
-  $("showAiToggle").addEventListener("change", () => post("review_show_ai", { enabled: $("showAiToggle").checked }));
 
   // ---------------- Kamera ----------------
   let camDirty = false;
@@ -1221,7 +895,7 @@ input[type=text], input[type=password], input[type=number], select {
     if (res) camDirty = false;
   });
 
-  // ---------------- Einzelkugel-Serie ----------------
+  // ---------------- Einzelkugel per Knopf ----------------
   const SINGLE_HEX = { 0: ["#f4f1e8", "#222"], 8: ["#111", "#fff"] };
   [["#F5C314", 1], ["#2355CD", 2], ["#D72D28", 3], ["#7837A0", 4], ["#F07A1E", 5], ["#1F8A4C", 6], ["#7A1F2B", 7]]
     .forEach(([hex, n]) => { SINGLE_HEX[n] = [hex, "#fff"]; SINGLE_HEX[n + 8] = [hex, "#fff", true]; });
@@ -1249,20 +923,15 @@ input[type=text], input[type=password], input[type=number], select {
       const sel = Number(b.dataset.n) === g.number;
       b.classList.toggle("sel", sel);
       b.setAttribute("aria-pressed", sel ? "true" : "false");
-      b.disabled = !!g.active;
     }
     $("singleEmptyInfo").textContent = g.empty ? "Leerer Tisch gemerkt um " + g.empty : "Noch kein leerer Tisch gemerkt";
-    $("singleEmptyBtn").disabled = !!g.active;
-    $("singleStartBtn").disabled = !!g.active || g.number === null || g.number === undefined;
-    $("singleStopBtn").disabled = !g.active;
-    $("singleShotBtn").disabled = g.number === null || g.number === undefined;
-    $("singleShotHint").textContent = (g.upload
-      ? "Sofort ein Bild, ohne Warten – geht mit der Nummer zur Trainingsseite, dort zieht die Bilderkennung den Kreis. "
-      : "Sofort ein Bild – ohne Trainingsseite sucht der Pi die Kugel selbst. ") +
-      (g.shots ? g.shots + " Knopf-Bilder in dieser Sitzung" + (g.upload ? ", " + g.stored + " auf dem Pi." : ".") : "");
+    $("singleShotBtn").disabled = !g.upload || g.number === null || g.number === undefined;
+    $("singleShotHint").textContent = !g.upload
+      ? "Geht nur mit Trainingsseite (TRAINING_UPLOAD_URL/KEY) – dort wird der Kreis um die Kugel gezogen."
+      : "Geht mit der Nummer zur Trainingsseite, dort zieht die Bilderkennung den Kreis." +
+        (g.shots ? " " + g.shots + " Bilder in dieser Sitzung" + (g.stored ? ", " + g.stored + " warten noch auf den Upload." : ".") : "");
     $("singleInfo").textContent = (g.number === null || g.number === undefined) ? "Zuerst die Kugel wählen" :
-      g.name + (g.active ? "  ·  " + g.saved + "/" + g.target + " gespeichert" : "") +
-      (g.message ? "  ·  " + g.message : "");
+      g.name + (g.message ? "  ·  " + g.message : "");
     if (g.preview && g.preview_id !== singlePreview) {
       singlePreview = g.preview_id;
       $("singleImg").src = "/api/single.jpg?t=" + Date.now();
@@ -1271,42 +940,58 @@ input[type=text], input[type=password], input[type=number], select {
   }
   $("singleSw").addEventListener("click", () => post("single_mode", { enabled: !(state && state.single && state.single.enabled) }));
   $("singleEmptyBtn").addEventListener("click", () => post("single_empty", {}));
-  $("singleStartBtn").addEventListener("click", () => post("single_start", {
-    count: Number($("singleCount").value) || 50,
-    interval: Number($("singleInterval").value) || 1,
-    only_new: $("singleOnlyNew").checked,
-  }));
-  $("singleStopBtn").addEventListener("click", () => post("single_stop", {}));
   $("singleShotBtn").addEventListener("click", async () => {
     const b = $("singleShotBtn");
     b.disabled = true;                       // kein Doppel-Tippen
     await post("single_shot", {});
     b.disabled = false;
   });
-  setInterval(async () => {
-    if (!(state && state.single && state.single.active)) return;
-    try {
-      const r = await fetch("/api/state");
-      if (r.ok) render(await r.json());
-    } catch (e) { /* naechster Versuch */ }
-  }, 1000);
-
-  // ---------------- KI-Modell ----------------
+  // ---------------- Bilder & Modelle ----------------
+  const MODEL_LABEL = { "billard_merkmale.json": "Farben + Streifen", "billard_edgetpu.tflite": "Kugel-Modell",
+                        "billard_klassen_edgetpu.tflite": "Klassen-Modell" };
+  function seit(t) {
+    if (!t) return "noch nie";
+    const sec = Date.now() / 1000 - t;
+    if (sec < 120) return "gerade eben";
+    if (sec < 3600) return "vor " + Math.round(sec / 60) + " Min.";
+    if (sec < 86400) return "vor " + Math.round(sec / 3600) + " Std.";
+    return new Date(t * 1000).toLocaleDateString("de-DE");
+  }
   function renderTraining(s) {
-    const t = s.training || {};
-    const badge = $("reviewBadge");
-    badge.hidden = !t.pending;
-    badge.textContent = t.pending || "";
-    $("trainInfo").textContent = (t.pending || 0) + " Bilder offen  ·  " + (t.verified || 0) + " festgelegt (für das Training)  ·  " +
-      (t.discarded || 0) + " verworfen (aufgehoben)" + (t.disk_ok === false ? "  ·  SPEICHER FAST VOLL – es wird nichts mehr aufgenommen" : "");
-    const up = t.upload;
-    if (up) $("trainInfo").textContent += "  ·  Trainingsseite: " + (up.error ? up.error + ", " + up.waiting + " warten" :
-      up.waiting ? up.waiting + " werden hochgeladen" : "alles hochgeladen (" + up.sent + ")");
-    const q = t.quality;
-    $("qualityInfo").textContent = q ? "Der KI-Chip (" + q.model + ") lag bei " + q.percent + " % der Kugeln richtig (letzte " +
-      q.images + " Bilder)." + (q.percent >= 95 ? " Das ist gut – Sammeln kann pausieren." : "") :
-      "Noch keine Bewertung: Sobald ihr Vorschläge des KI-Chips prüft, steht hier, wie oft er richtig liegt.";
-    $("datasetLink").classList.toggle("off", !t.verified);
+    const t = s.training || {}, up = t.upload;
+    const n = t.pending || 0;
+    const badge = $("uploadBadge");
+    badge.hidden = !n || !up;                 // Zaehler nur, wenn etwas auf den Upload wartet
+    badge.textContent = n || "";
+    $("trainInfo").textContent = (!up ? (n + " " + (n === 1 ? "Bild liegt" : "Bilder liegen") + " auf dem Pi – Trainingsseite nicht eingerichtet")
+      : up.error ? up.error + (n ? ", " + n + " warten auf den Upload" : "")
+      : n ? n + " " + (n === 1 ? "Bild wird" : "Bilder werden") + " hochgeladen …"
+      : "Alles auf der Trainingsseite (" + up.sent + " Bilder hochgeladen, auf dem Pi gelöscht)") +
+      (t.disk_ok === false ? "  ·  SPEICHER FAST VOLL – es wird nichts mehr aufgenommen" : "");
+    $("vpsLink").hidden = !(up && up.url);
+    if (up && up.url) $("vpsLink").href = up.url;
+    const vm = $("vpsModels");
+    vm.innerHTML = "";
+    if (!up) {
+      vm.textContent = "Ohne Trainingsseite holt der Pi keine Modelle – nur „von Hand hochladen“.";
+    } else {
+      const names = Object.keys(up.models || {});
+      vm.appendChild(document.createTextNode("Vom VPS – zuletzt nachgesehen " + seit(up.model_check) +
+        (names.length ? "" : ", noch nichts geholt")));
+      for (const name of names) {
+        const m = up.models[name];
+        vm.appendChild(document.createElement("br"));
+        const b = document.createElement("b");
+        b.textContent = (MODEL_LABEL[name] || name) + ": ";
+        b.className = m.ok ? "good" : "bad";
+        vm.append(b, document.createTextNode((m.ok ? "übernommen " : "nicht übernommen ") + seit(m.zeit) + (m.ok ? "" : " – " + m.text)));
+      }
+      if (up.model_error) {
+        vm.appendChild(document.createElement("br"));
+        const b = document.createElement("b"); b.className = "bad"; b.textContent = up.model_error;
+        vm.appendChild(b);
+      }
+    }
     $("autoSw").setAttribute("aria-checked", t.auto_capture ? "true" : "false");
     const d = s.detector || {}, c = d.coral || {};
     const ms = $("modelStatus");
@@ -1330,16 +1015,11 @@ input[type=text], input[type=password], input[type=number], select {
       if (f.ready) line("Rückfall ohne Modell: ", f.model);
     } else if (f.ready) {
       line("2. + 3. gestreift / Farbe: ", f.model + (f.model_time && f.own ? " vom " + f.model_time : "") + (f.balls && f.own ? " (" + f.balls + " Kugeln)" : ""), f.own ? "good" : "");
-      if (!f.own) line("", "Tipp: Farben lernen, sobald es festgelegte Bilder gibt – die Startwerte stammen aus dem Simulator.");
+      if (!f.own) line("", "Startwerte aus dem Simulator – eigene Farben lernt die Trainingsseite aus euren Bildern.");
       if (f.inherited && f.inherited.length) line("Zu wenig Beispiele für: ", f.inherited.join(", "));
     } else {
       line("2. + 3. gestreift / Farbe: ", f.error || "nicht bereit", "bad");
     }
-    $("learnFeaturesBtn").disabled = !!f.learning || !t.verified;
-    $("learnFeaturesBtn").textContent = f.learning ? "Lerne Farben ..." : "Farben aus festgelegten Bildern lernen";
-    $("learnResult").hidden = !f.result;
-    $("learnResult").textContent = f.result || "";
-
   }
   $("autoSw").addEventListener("click", () => post("auto_capture", { enabled: !(state && state.training && state.training.auto_capture) }));
   $("modelUploadBtn").addEventListener("click", () => $("modelFile").click());
@@ -1361,33 +1041,11 @@ input[type=text], input[type=password], input[type=number], select {
     }
     toast(msgs.join(" "));
   });
-  $("learnFeaturesBtn").addEventListener("click", () => post("learn_features", {}));
   $("resetKlassenBtn").addEventListener("click", () => {
     if (confirm("Klassen-Modell löschen? Danach bestimmt wieder die Statistik Art und Farbe.")) post("reset_klassen", {});
   });
   $("resetFeaturesBtn").addEventListener("click", () => {
-    if (confirm("Gelernte Farben löschen? Danach gelten wieder die Startwerte aus dem Simulator.")) post("reset_features", {});
-  });
-
-  fixCanvas.addEventListener("click", (e) => {
-    if (!snap) return;
-    const rc = fixCanvas.getBoundingClientRect();
-    const x = (e.clientX - rc.left) * fixCanvas.width / rc.width;
-    const y = (e.clientY - rc.top) * fixCanvas.height / rc.height;
-    let best = -1, bd = Infinity;
-    snap.balls.forEach((b, i) => { const d = Math.hypot(b.x - x, b.y - y); if (d < bd) { bd = d; best = i; } });
-    if (best >= 0 && bd <= snap.radius * 1.8) {
-      selected = best;
-    } else {
-      snap.balls.push({ x: Math.round(x), y: Math.round(y), kind: "solid", color: "", changed: true });
-      selected = snap.balls.length - 1;
-    }
-    afterEdit();
-  });
-  $("fixReload").addEventListener("click", loadSnapshot);
-  $("fixSave").addEventListener("click", async () => {
-    const res = await post("train_correction", { id: snap.id, apply: $("applyFix").checked, balls: snap.balls });
-    if (res) loadSnapshot();
+    if (confirm("Farben auf die Startwerte zurücksetzen? Die Trainingsseite liefert neue, sobald sie dort neu gelernt werden.")) post("reset_features", {});
   });
 
   let polling = false, pollTimer = null;
@@ -1484,7 +1142,7 @@ input[type=text], input[type=password], input[type=number], select {
   });
 
   // ---------------- Reiter ----------------
-  const TABS = ["overview", "setup", "queue", "training", "review"];
+  const TABS = ["overview", "setup", "queue", "training"];
   let tab = null;
   function showTab(name) {
     if (!TABS.includes(name)) name = "overview";
@@ -1501,7 +1159,6 @@ input[type=text], input[type=password], input[type=number], select {
     if (prev !== null) window.scrollTo({ top: 0 });            // neuer Reiter beginnt oben
     if (prev === "setup") clearInterval(viewTimer);              // Live-Kamerabild nur, solange sichtbar
     if (name === "setup" && $("viewDetails").open) $("viewDetails").dispatchEvent(new Event("toggle"));
-    if (name === "training") loadEditor();
   }
   document.querySelectorAll(".tab").forEach((b) => {
     b.addEventListener("click", () => showTab(b.dataset.tab));

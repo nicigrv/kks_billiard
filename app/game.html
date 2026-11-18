@@ -245,7 +245,7 @@ details > div { margin-top: 12px; }
 
   <section>
     <h2>Bilder fürs KI-Training</h2>
-    <p class="hint">Bilder werden nur gespeichert – festgelegt werden die Kugeln später in Ruhe (Prüfer unter <b>/pruefen</b> oder der Admin). So kostet es am Tisch keine Zeit.</p>
+    <p class="hint">Bilder werden nur gespeichert und zur Trainingsseite im Netz geschickt – dort werden die Kugeln später in Ruhe festgelegt. So kostet es am Tisch keine Zeit.</p>
     <button class="primary" type="button" id="captureBtn" style="width:100%">Bild speichern</button>
     <div class="switchrow" style="margin-top:10px">
       <span class="lbl" id="autoLbl">Nach jedem Stoß automatisch<span class="sub">speichert ein Bild, sobald der Tisch wieder ruhig ist</span></span>
@@ -313,7 +313,6 @@ details > div { margin-top: 12px; }
         body: JSON.stringify({ secret: $("loginInput").value.trim() }) });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) { showLogin(data.error || "Anmeldung fehlgeschlagen"); return; }
-      if (data.role === "pruefer") { location.href = "/pruefen"; return; }
       $("login").hidden = true;
       poll();
     } catch (err) { showLogin("Tisch nicht erreichbar"); }
@@ -394,8 +393,9 @@ details > div { margin-top: 12px; }
     renderVideos(s.videos || []);
     const t = s.training || {};
     $("autoSw").setAttribute("aria-checked", t.auto_capture ? "true" : "false");
-    $("trainStatus").textContent = (t.pending || 0) === 1 ? "1 Bild wartet aufs Festlegen." :
-      (t.pending || 0) + " Bilder warten aufs Festlegen.";
+    const n = t.pending || 0;
+    $("trainStatus").textContent = !t.upload ? (n ? n + (n === 1 ? " Bild liegt" : " Bilder liegen") + " auf dem Pi (Trainingsseite nicht eingerichtet)." : "")
+      : n ? n + (n === 1 ? " Bild wird" : " Bilder werden") + " zur Trainingsseite geschickt." : "Alle Bilder sind auf der Trainingsseite.";
     Notify.sync(s.notices);
     refreshGraphic(s);
   }

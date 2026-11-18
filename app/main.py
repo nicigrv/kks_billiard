@@ -11,13 +11,17 @@ Threads:
   Queue      fragt die Lage des Queues ab, falls einer gekoppelt ist (cue_sensor.py)
   Web        Spiel-Panel (/) und Admin-Panel (/admin) auf Port 8080 (web.py)
   Video      baut am Ende einer aufgezeichneten Runde das Video (replay.py)
+  Upload     schickt Trainingsbilder zum VPS und holt neue Modelle von dort (uploader.py)
   Haupt      Anzeige mit pygame (display.py)
+
+KI-Training (Kugeln festlegen, Farben lernen, Modelle trainieren) laeuft NICHT auf dem Pi, sondern auf
+der Trainingsseite im Netz (training_server/) bzw. in Google Colab. Der Pi nimmt nur Bilder auf und
+erkennt die Kugeln mit den Modellen, die er vom VPS bekommt (oder die im Admin-Panel hochgeladen werden).
 """
 
 import argparse
 import json
 import os
-import secrets
 import socket
 import sys
 import threading
@@ -44,8 +48,6 @@ from planner import plan_shot
 from qr import MAX_LEN as QR_MAX_LEN, qr_matrix, qr_png
 from recorder import Recorder
 from replay import RoundRecorder
-from review_rounds import RoundManager
-from sound import Sound
 from scene import SceneRenderer, bar_balls, surface_to_bgr
 from cameras import SOURCE_NAMES, SOURCES, make_reader
 from single_ball import SingleBall
@@ -54,11 +56,9 @@ from single_ball import SingleBall
 DISPLAY_FPS = 10          # HDMI-Bild (Beamer); reicht fuer Scoreboard und Kamerabild
 IDLE_PROCESS_FPS = 10     # Erkennung, solange sich auf dem Tisch nichts bewegt (sonst jedes Bild)
 
-KINDS = ("cue", "eight", "solid", "stripe")
 # Farbe der Teams auf der LED am Queue (wer dran ist). Rot/Gruen sind fuer die Verbindung reserviert.
 TEAM_COLORS = ([0, 90, 255], [255, 110, 0])        # Team A blau, Team B orange
 TEAM_COLOR_NAMES = ("blau", "orange")
-COLORS = ("gelb", "blau", "rot", "violett", "orange", "gruen", "weinrot", "schwarz", "")
 
 KIND_BGR = {"cue": (255, 255, 255), "eight": (130, 130, 130), "solid": (0, 190, 255), "stripe": (255, 200, 0)}
 
@@ -84,9 +84,6 @@ class App:
         self.uploader = self._start_uploader()
         self.coral = coral_engine or CoralEngine()          # Stufe 1: Kugeln finden (KI-Chip)
         self.klassen = klassen or klassen_engine()          # Stufe 2 + 3 auf dem KI-Chip (optional)
-        self._learn_lock = threading.Lock()                 # Stufe 2 + 3 lernen (Farben, Streifen)
-        self._learning = False
-        self.learn_result = None
         table = self._table_for(self.reader)
         self.pipe = Pipeline(table, lambda r: CoralDetector(r, self.coral, klassen=self.klassen), recorder=self.recorder)
         self.pipe.auto_capture = bool(self.cfg.get("auto_capture"))
@@ -101,12 +98,10 @@ class App:
         self.align = AlignChecker(self.cfg.get("cue_tolerance", 2.0))
         self.cue_fw = CueUpdater(self.cue)                    # Firmware des Queues ueber das WLAN
         self.rounds = RoundRecorder(os.path.join(config.DATA_DIR, "recordings"))
-        self.sound = Sound()                                  # Ding ueber HDMI
-        self.reviews = RoundManager(self.recorder, config.DATA_DIR, self.sound)   # Pruefrunden
         self.auth = None                                      # setzt web.start()
         self.panel_url = ""                                   # Adresse des Spiel-Panels (QR-Code)
         self.notes = Notices()                                # Meldungen oben rechts
-        self.single = SingleBall(self.pipe, self.recorder, self.notes,      # Einzelkugel (KI-Training)
+        self.single = SingleBall(self.pipe, self.recorder, self.notes,      # Einzelkugel per Knopf
                                  has_upload=lambda: self.uploader is not None)
         self._edges = {}
         self._disk = (0.0, True)
@@ -123,9 +118,6 @@ class App:
         # verkleinerte Kopie davon. Ein zweites pygame-Zeichnen im Web-Thread parallel zur
         # HDMI-Ausgabe (kmsdrm) liess das Pi-Kameramodul haengen (Standbild).
         self.display_active = False
-        self._snapshots = {}
-        self._snap_id = 0
-        self._snap_lock = threading.Lock()
         self._stop = threading.Event()
         threading.Thread(target=self._process_loop, name="erkennung", daemon=True).start()
 
@@ -266,7 +258,6 @@ class App:
         return {"balls": sb, "radius": radius, "cloth": self.cfg.get("cloth", "blau"),
                 "game": game, "bar": bar_balls(game, visible, seen),
                 "suggestion": sug, "cue": cue, "status": status, "info": info, "version": self.scene_version,
-                "review": self.reviews.status() if live else None,
                 "qr": self.qr_info() if live else None,
                 "notices": self.notices() if live else []}
 
@@ -351,92 +342,16 @@ class App:
         if sc["game"]["phase"] != "playing":
             self.rounds.stop()             # Rack vorbei -> Video bauen
 
-    # ------------------------------------------------- Korrekturen fuers KI-Training
-    def snapshot(self):
-        """Aktuelles Draufsicht-Bild + erkannte Kugeln einfrieren, damit man sie im
-        Portal in Ruhe korrigieren kann."""
-        with self.pipe.lock:
-            warped = self.pipe.last_warped
-            balls = self.pipe.current_balls()
-            r = self.pipe.table.ball_radius_px
-        if warped is None:
-            return None
-        with self._snap_lock:
-            self._snap_id += 1
-            sid = self._snap_id
-            self._snapshots[sid] = (warped.copy(), r)
-            for k in sorted(self._snapshots)[:-3]:      # nur die letzten 3 aufheben
-                del self._snapshots[k]
-        h, w = warped.shape[:2]
-        return {"id": sid, "width": w, "height": h, "radius": r,
-                "balls": [{"x": round(float(b.x), 1), "y": round(float(b.y), 1), "kind": b.kind,
-                           "color": b.color or "", "number": ball_number(b.kind, b.color)} for b in balls]}
-
-    def snapshot_jpeg(self, sid):
-        with self._snap_lock:
-            snap = self._snapshots.get(sid)
-        if snap is None:
-            return None
-        ok, jpg = cv2.imencode(".jpg", snap[0], [cv2.IMWRITE_JPEG_QUALITY, 85])
-        return jpg.tobytes() if ok else None
-
-    def _train_correction(self, p):
-        from ballnum import Ball
-        with self._snap_lock:
-            snap = self._snapshots.get(int(p["id"]))
-        if snap is None:
-            raise config.UserError("Bild ist veraltet, bitte neu laden")
-        warped, r = snap
-        balls, numbers, corrections = [], [], []
-        for d in p["balls"]:
-            kind = d["kind"]
-            color = d.get("color", "") or ""
-            if kind not in KINDS + ("none",) or color not in COLORS:
-                raise ValueError("Kugeltyp/Farbe")
-            x, y = float(d["x"]), float(d["y"])
-            if d.get("changed"):
-                corrections.append({"x": x, "y": y, "kind": kind, "color": color})
-            if kind == "none":
-                continue
-            balls.append(Ball(x, y, r, kind, color))
-            numbers.append(ball_number(kind, color))
-        if None in numbers:
-            raise config.UserError(f"{numbers.count(None)} Kugel(n) ohne Nummer - "
-                                   "Kugel antippen und Nummer wählen")
-        self.recorder.save_verified(warped, balls, r, numbers)
-        applied = 0
-        if p.get("apply") and corrections:
-            with self.pipe.lock:
-                applied = self.pipe.correct_balls(corrections)
-        return (f"Gespeichert ({self.recorder.verified} geprüfte Bilder)"
-                + (f", {applied} Kugel(n) im Spiel übernommen" if applied else ""))
+    # ------------------------------------------------- Trainingsbilder (festgelegt wird auf dem VPS)
+    def _capture_text(self):
+        if self.uploader is None:
+            return "Trainingsseite nicht eingerichtet - das Bild bleibt auf dem Pi"
+        return "geht zur Trainingsseite, festgelegt wird dort"
 
     def _captured(self, name, source):
         """Trainingsbild gespeichert: kurz oben rechts melden (auch auf dem Beamer)."""
-        n = self.recorder.pending
         self.notes.push("Bild automatisch gespeichert" if source == "auto" else "Bild gespeichert",
-                        f"{n} " + ("Bild wartet" if n == 1 else "Bilder warten") + " aufs Festlegen",
-                        "success", ttl=3.0, key="capture")
-
-    def review_as(self, p, by):
-        """Gespeichertes Bild festgelegt - von einem Pruefer (/pruefen) oder dem Admin."""
-        with self.pipe.lock:
-            return self._review_save(p, by)
-
-    def _review_save(self, p, by="Admin"):
-        """Ein gesammeltes Trainingsbild wurde auf dem iPad geprueft."""
-        balls = []
-        for d in p.get("balls", []):
-            kind, color = d["kind"], d.get("color", "") or ""
-            if kind not in KINDS + ("none",) or color not in COLORS:
-                raise ValueError("Kugeltyp/Farbe")
-            balls.append({"x": float(d["x"]), "y": float(d["y"]), "kind": kind, "color": color,
-                          "number": ball_number(kind, color), "changed": bool(d.get("changed"))})
-        try:
-            res = self.recorder.review(str(p["name"]), balls, bool(p.get("discard")), by=by)
-        except (FileNotFoundError, ValueError) as e:
-            raise config.UserError(str(e))
-        return f"Bild {res}. Noch {self.recorder.pending} zu prüfen, {self.recorder.verified} geprüft."
+                        self._capture_text(), "success", ttl=3.0, key="capture")
 
     def save_model(self, data: bytes, name=""):
         """Hochgeladene Datei speichern: Coral-Modell (.tflite, Stufe 1), Klassen-Modell (Stufe 2 + 3 auf
@@ -495,36 +410,6 @@ class App:
         n = clf.info.get("kugeln")
         return "Farben und Streifen gespeichert" + (f" (gelernt aus {n} Kugeln)" if n else "") + "."
 
-    def learn_features(self):
-        """Stufe 2 + 3 aus den festgelegten Bildern auf dem Pi lernen (im Hintergrund, dauert etwas)."""
-        with self._learn_lock:
-            if self._learning:
-                raise config.UserError("Lernen läuft schon")
-            if not self.recorder.verified:
-                raise config.UserError("Noch keine festgelegten Bilder")
-            self._learning = True
-
-        def run():
-            try:
-                start = kugel_merkmale.BallClassifier.load(START_FEATURES)
-                clf, res = kugel_merkmale.learn(self.recorder.verified_samples(), fallback=start,
-                                                source=f"Pi: {self.recorder.verified} festgelegte Bilder")
-                clf.save(DATA_FEATURES)
-                text = kugel_merkmale.report(res) if res else f"{clf.info['kugeln']} Kugeln gelernt"
-                if clf.info.get("geerbt"):
-                    text += "\nZu wenig Beispiele (Startwerte behalten): " + ", ".join(clf.info["geerbt"])
-                self.learn_result = text
-                print(f"[merkmale] {text}", flush=True)
-                self.notes.push("Farben gelernt", text.split("\n")[0], "success", ttl=10.0, key="merkmale")
-            except Exception as e:                  # darf das Programm nie stoppen
-                self.learn_result = f"Fehler: {e}"
-                self.notes.push("Farben lernen fehlgeschlagen", str(e), "error", ttl=10.0, key="merkmale")
-            finally:
-                self._learning = False
-
-        threading.Thread(target=run, name="merkmale", daemon=True).start()
-        return "Lerne Farben und Streifen aus den festgelegten Bildern ... (Meldung kommt, wenn fertig)"
-
     def reset_features(self):
         try:
             os.remove(DATA_FEATURES)
@@ -575,73 +460,24 @@ class App:
                         "die LED am Queue zeigt, wer dran ist", "success", ttl=8.0, key="queue-knopf")
         print("[queue] Knopf: Spiel Team A gegen Team B gestartet", flush=True)
 
-    # ------------------------------------------------------------- Pruefer
-    def reviewer_list(self):
-        return list(self.cfg.get("reviewers") or [])
-
-    def _new_code(self):
-        used = {str(r["code"]) for r in self.reviewer_list()} | {os.environ.get("ADMIN_PIN", ""),
-                                                                 os.environ.get("GAME_PIN", "")}
-        while True:
-            code = f"{secrets.randbelow(9000) + 1000}"
-            if code not in used:
-                return code
-
-    def _reviewer_cmd(self, name, p):
-        revs = self.reviewer_list()
-        who = str(p.get("name", "")).strip()[:20]
-        if name == "reviewer_add":
-            if not who:
-                raise config.UserError("Name fehlt")
-            if who.lower() == "admin":
-                raise config.UserError("„Admin“ ist schon vergeben - bitte einen anderen Namen")
-            if any(r["name"].lower() == who.lower() for r in revs):
-                raise config.UserError(f"{who} gibt es schon")
-            code = self._new_code()
-            revs.append({"name": who, "code": code})
-            msg = f"{who} angelegt - Code {code}"
-        elif name in ("reviewer_remove", "reviewer_newcode"):
-            r = next((r for r in revs if r["name"] == who), None)
-            if r is None:
-                raise config.UserError("Prüfer nicht gefunden")
-            if self.auth is not None:
-                self.auth.revoke(who)                         # alte Anmeldung gilt nicht mehr
-            if name == "reviewer_remove":
-                revs.remove(r)
-                msg = f"{who} entfernt"
-            else:
-                r["code"] = self._new_code()
-                msg = f"Neuer Code für {who}: {r['code']}"
-        self.cfg["reviewers"] = revs
-        config.save(self.cfg)
-        return msg
-
-    def _start_review(self):
-        names = [r["name"] for r in self.reviewer_list()]
-        participants = self.reviews.online(names)
-        with self.pipe.lock:
-            warped = self.pipe.last_warped
-            balls = list(self.pipe.balls)
-            radius = self.pipe.table.ball_radius_px
-        if warped is None:
-            raise config.UserError("Kein Kamerabild (Kamera und Tisch eingerichtet?)")
-        st = self.coral.status() if balls else {}
-        model = f"{st['model']} vom {st['model_time']}" if st.get("model") else None
-        r = self.reviews.start(warped, balls, radius, model, participants,
-                               show_ai=bool(self.cfg.get("review_show_ai", False)))
-        ki = (" - KI-Vorschlag liegt vor" + ("" if r["show_ai"] else " (Prüfer sehen ihn nicht)")) if model else ""
-        return f"Bild {r['no']} an {len(participants)} Prüfer geschickt: {', '.join(participants)}{ki}"
-
     def _start_uploader(self):
-        """Gespeicherte Bilder zur Trainingsseite im Netz schicken (nur wenn eingerichtet)."""
+        """Trainingsseite im Netz (nur wenn eingerichtet): gespeicherte Bilder hinschicken (und danach
+        auf dem Pi loeschen), neue Modelle von dort holen."""
         url, key = os.environ.get("TRAINING_UPLOAD_URL", ""), os.environ.get("TRAINING_UPLOAD_KEY", "")
         if not (url and key):
             return None
         from uploader import Uploader
-        return Uploader(self.recorder, url, key).start()
+        return Uploader(self.recorder, url, key, install=self.install_model,
+                        state_path=os.path.join(config.DATA_DIR, "models", "vom-vps.json")).start()
+
+    def install_model(self, name, data):
+        """Modell vom VPS uebernehmen - mit denselben Pruefungen wie beim Hochladen im Admin-Panel."""
+        msg = self.save_model(data, name)
+        self.notes.push("Neues Modell vom VPS", msg, "success", ttl=8.0, key="modell-vps")
+        print(f"[modell] vom VPS: {name}: {msg}", flush=True)
+        return msg
 
     def state_dict(self):
-        online = set(self.reviews.online([r["name"] for r in self.reviewer_list()]))
         with self.pipe.lock:
             g = self.pipe.game.to_dict()
             status = self.pipe.status_text()
@@ -658,14 +494,12 @@ class App:
             "camera": self.camera_state(),
             "table_size": self.cfg.get("table_size"),
             "cloth": self.cfg.get("cloth", "blau"),
-            "training": {"pending": self.recorder.pending, "auto_capture": self.pipe.auto_capture,
-                         "verified": self.recorder.verified, "discarded": self.recorder.discarded,
-                         "disk_ok": self.recorder.disk_ok(), "quality": self.recorder.model_quality(),
+            "training": {"pending": self.recorder.waiting, "auto_capture": self.pipe.auto_capture,
+                         "disk_ok": self.recorder.disk_ok(),
                          "upload": self.uploader.status() if self.uploader else None},
             "detector": {"coral": self.coral.status(), "not_ready": self.pipe.not_ready,
                          "klassen": self.klassen.status(),
-                         "features": dict(default_features().status(START_FEATURES),
-                                          learning=self._learning, result=self.learn_result)},
+                         "features": default_features().status(START_FEATURES)},
             "assist": bool(self.cfg.get("assist")),
             "suggestion": (self.suggestion or {}).get("text"),
             "scene_version": self.scene_version,
@@ -676,15 +510,11 @@ class App:
             "notices": self.notices(),
             "round": self.rounds.status(),
             "videos": self.rounds.videos(),
-            "reviewers": [dict(r, online=r["name"] in online) for r in self.reviewer_list()],
-            "review": self.reviews.status(),
-            "review_show_ai": bool(self.cfg.get("review_show_ai", False)),
-            "sound": {"device": self.sound.device, "error": self.sound.error},
             "single": self.single.status(),
         }
 
     def game_state(self):
-        """Was das Spiel-Panel braucht - ohne Pruefer-Codes und Admin-Einstellungen."""
+        """Was das Spiel-Panel braucht - ohne Admin-Einstellungen."""
         with self.pipe.lock:
             g = self.pipe.game.to_dict()
             status = self.pipe.status_text()
@@ -704,7 +534,8 @@ class App:
                     "ok": self.align.ok, "err": None if self.align.err is None else round(self.align.err, 1)},
             "round": self.rounds.status(),
             "videos": self.rounds.videos(),
-            "training": {"pending": self.recorder.pending, "auto_capture": self.pipe.auto_capture},
+            "training": {"pending": self.recorder.waiting, "auto_capture": self.pipe.auto_capture,
+                         "upload": self.uploader is not None},
             "notices": self.notices(),
         }
 
@@ -750,32 +581,6 @@ class App:
         g = self.pipe.game
         if name == "camera":
             return self._set_camera(p)
-        if name in ("reviewer_add", "reviewer_remove", "reviewer_newcode"):
-            return self._reviewer_cmd(name, p)
-        try:
-            if name == "round_start":
-                return self._start_review()
-            if name == "round_finish":
-                return self.reviews.finish()["text"]
-            if name == "round_cancel":
-                self.reviews.cancel()
-                return "Prüfrunde abgebrochen"
-        except ValueError as e:
-            raise config.UserError(str(e))
-        if name == "review_show_ai":
-            self.cfg["review_show_ai"] = bool(p.get("enabled"))
-            config.save(self.cfg)
-            return ("Prüfer sehen den KI-Vorschlag" if self.cfg["review_show_ai"]
-                    else "Prüfer legen fest, ohne den KI-Vorschlag zu sehen")
-        if name == "sound_test":
-            err = self.sound.ding(wait=True)
-            if err:
-                raise config.UserError(err)
-            return f"Ding gespielt über {self.sound.device}"
-        if name == "train_correction":
-            return self._train_correction(p)
-        if name == "learn_features":
-            return self.learn_features()
         if name == "reset_features":
             return self.reset_features()
         if name == "reset_klassen":
@@ -788,10 +593,6 @@ class App:
                     return self.single.set_number(p["number"])
                 if name == "single_empty":
                     return self.single.remember_empty()
-                if name == "single_start":
-                    return self.single.start(p.get("count", 50), p.get("interval", 1.0), p.get("only_new", True))
-                if name == "single_stop":
-                    return self.single.stop()
                 if name == "single_shot":
                     return self.single.shot()
             except ValueError as e:
@@ -917,22 +718,19 @@ class App:
             elif name == "capture":
                 if self.pipe.capture_now() is None:
                     raise config.UserError("Kein Kamerabild (Tisch eingerichtet?) oder Speicher voll")
-                return f"Bild gespeichert. {self.recorder.pending} warten aufs Festlegen."
+                return f"Bild gespeichert - {self._capture_text()}."
             elif name == "auto_capture":
                 on = bool(p.get("enabled"))
                 self.cfg["auto_capture"] = self.pipe.auto_capture = on
                 config.save(self.cfg)
                 return ("Ab jetzt wird nach jedem Stoß ein Bild gespeichert" if on
                         else "Bilder werden nur noch per Knopf gespeichert")
-            elif name == "review_save":
-                return self._review_save(p)
             else:
                 return None
             return g.message
 
     def stop(self):
         self._stop.set()
-        self.single.stop()
         self.reader.stop()
         self.cue.stop()
 

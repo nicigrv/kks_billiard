@@ -67,9 +67,10 @@ Das erste Mal (oder ältere Firmware) per USB: `billard-queue.zip`, Anleitung in
 ```
 Pi-Kameramodul / USB-Kamera ──▶ Raspberry Pi (Docker: "billard") ──HDMI──▶ Beamer
  (oder Demo ohne Kamera)          │  ├── Spiel-Panel   http://<pi-ip>:8089         PIN 1212 (Spieler)
-                                  │  ├── Admin-Panel   http://<pi-ip>:8089/admin   PIN 1902
-Queue-Gyroskop (optional) ◀─WLAN─▶│  └── Prüfer        http://<pi-ip>:8089/pruefen  eigener Code
-  Castcode, UDP 5005 + HTTP-API
+                                  │  └── Admin-Panel   http://<pi-ip>:8089/admin   PIN 1902
+Queue-Gyroskop (optional) ◀─WLAN─▶│
+  Castcode, UDP 5005 + HTTP-API   └──Internet──▶ Trainingsseite (VPS, training_server/)
+                                     Bilder hin, Modelle zurück   Kugeln festlegen, Farben lernen
 ```
 
 **Kugelerkennung in drei Stufen:** 1. der **KI-Chip (Coral USB Accelerator)** findet die Kugeln,
@@ -182,7 +183,6 @@ nano docker-compose.yml
 | `x-web-port: &web_port "8089"` (ganz oben) | Port der Panels. Ist 8089 schon belegt, z. B. `"8090"` |
 | `x-admin-pin: &admin_pin "1902"` (ganz oben) | PIN fürs Admin-Panel (`/admin`). Leer (`""`) = ohne Anmeldung |
 | `x-game-pin: &game_pin "1212"` (ganz oben) | PIN fürs Spiel-Panel (Startseite). Leer (`""`) = Spiel-Panel offen |
-| `AUDIO_DEVICE` | Lautsprecher für den Ding-Ton, Standard HDMI 0 am Pi 4/5 (`hdmi:CARD=vc4hdmi0,DEV=0`) |
 | `PI_CAMERA: "1"` | Software fürs Pi-Kameramodul mitbauen. Nur mit USB-Kamera `"0"` = schnellerer Bau |
 
 Speichern: `Strg+O`, `Enter`, `Strg+X`.
@@ -313,11 +313,11 @@ Geht etwas schief: **„Rückgängig“** macht die letzte Änderung rückgängi
 | | **Spiel-Panel** `/` (PIN 1212) | **Admin-Panel** `/admin` (PIN 1902) |
 |---|---|---|
 | Für | Spieler am Tisch | Einrichtung, Training |
-| Inhalt | Grafik + Spielstand, Spiel starten / Neues Rack / Abbrechen, Foul, Zug wechseln, Rückgängig, Stoß verwerfen, weitere Korrekturen, **Schlagverbesserung an/aus**, **Queue an/aus** + kalibrieren, Spielaufzeichnung + Videos | Kamera, Tisch einrichten, Queue koppeln (Castcode), **QR-Code**, Prüfer + Prüfrunden, KI-Training (Bilder aufnehmen/festlegen/löschen/laden), Modell hochladen, Verlauf |
+| Inhalt | Grafik + Spielstand, Spiel starten / Neues Rack / Abbrechen, Foul, Zug wechseln, Rückgängig, Stoß verwerfen, weitere Korrekturen, **Schlagverbesserung an/aus**, **Queue an/aus** + kalibrieren, Spielaufzeichnung + Videos | Kamera, Tisch einrichten, Queue koppeln (Castcode), **QR-Code**, Bilder & Modelle (aufnehmen, Upload-Stand, Modelle vom VPS, Einzelkugel per Knopf), Systemstatus, Verlauf |
 
 Beide im Querformat: links die **aktuelle Grafik vom Pi** (wie auf dem Beamer), rechts die Bedienung.
 Der Admin darf alles, was das Spiel-Panel darf (Admin-PIN funktioniert auch auf der Startseite).
-Großer **Trainingsmodus** unter `/training` (Admin).
+Kugeln festlegen und das KI-Training laufen nicht auf dem Pi, sondern auf der **Trainingsseite im Netz** (Abschnitt 5).
 
 ## 3b. KI-Schlagverbesserung + Queue mit Gyroskop (optional)
 
@@ -370,58 +370,53 @@ der Tisch ist schon eingerichtet.
 Simulierter Queue: `docker compose --profile sim up -d fake-cue`, im Admin-Panel Castcode **SMQ234**
 eintragen, im Spiel-Panel die Schlagverbesserung einschalten.
 
-## 5. KI-Chip: Kugeln festlegen, trainieren, Modell aufspielen
+## 5. KI-Chip: Bilder sammeln, auf dem VPS festlegen und trainieren
 
 Die Erkennung läuft in **drei Stufen** (`app/coral_detector.py`, `app/kugel_merkmale.py`):
 
 | Stufe | Was | Wo | gelernt mit |
 |---|---|---|---|
 | 1. Kugeln finden | „hier liegt eine Kugel“ | KI-Chip (YOLOv8n, 1 Klasse) | `train_coral.py` (Colab) → `billard_edgetpu.tflite` |
-| 2. gestreift? | Weiße / schwarze 8 / voll / halb | **KI-Chip**, wenn ein Klassen-Modell da ist – sonst Pi (Weiß-, Schwarz-, Farbanteil der Kugel) | `train_klassen.py` (Colab) → `billard_klassen_edgetpu.tflite`; Rückfall: „Farben lernen“ → `billard_merkmale.json` |
+| 2. gestreift? | Weiße / schwarze 8 / voll / halb | **KI-Chip**, wenn ein Klassen-Modell da ist – sonst Pi (Weiß-, Schwarz-, Farbanteil der Kugel) | `train_klassen.py` (Colab) → `billard_klassen_edgetpu.tflite`; Rückfall: „Farben lernen“ auf dem VPS → `billard_merkmale.json` |
 | 3. Farbe | gelb, blau, rot, violett, orange, grün, weinrot | wie Stufe 2 (Pi: mittlere Farbe der Kugel) | wie Stufe 2 |
 
 Aus Art und Farbe ergibt sich die Nummer (z. B. halb + rot = 11); jede Nummer gibt es nur einmal.
 Stufe 1 muss nur Kugeln finden – das lernt das Modell mit viel weniger Bildern als 16 Nummern.
 Stufe 2 + 3 sehen die Kugel in voller Auflösung. Auf dem KI-Chip bekommt ein kleines Netz einen
 Ausschnitt um jede Kugel und liefert direkt die Nummer – das entlastet den Prozessor des Pi. Ohne
-dieses Modell (oder wenn es nicht lädt) rechnet der Pi mit Statistik, die er in Sekunden selbst lernt.
+dieses Modell (oder wenn es nicht lädt) rechnet der Pi mit Statistik, die der VPS aus euren Bildern lernt.
 Ältere Modelle mit 16 Kugelnummern gehen weiter (davon wird nur „Kugel ja/nein“ benutzt).
 Ohne Stick oder ohne Modell wird nichts gezählt – Bilder werden trotzdem aufgenommen.
+
+**Der Pi trainiert nichts.** Er nimmt nur Bilder auf und erkennt die Kugeln. Festlegen, Farben lernen und
+Trainieren laufen auf der **Trainingsseite im Netz** (VPS, `training_server/`, Abschnitt 5a) bzw. in Google
+Colab – so bleibt der Pi frei für Erkennung und Beamer.
 
 **So lernt das System euren Tisch:**
 
 1. **Bilder speichern (am Tisch, kostet keine Zeit):** im Spiel-Panel „Bild speichern“ – oder dort
    den Schalter **„Nach jedem Stoß automatisch“** einschalten: Sobald der Tisch nach einem Stoß
    2 Sekunden ruhig ist, wird ein Bild gespeichert (höchstens eins alle 8 Sekunden, geht auch ohne
-   KI-Chip). Auf dem Beamer kommt kurz „Bild gespeichert“. Außerdem: Admin-Panel „Jetzt ein Bild
-   aufnehmen“ oder Trainingsmodus „Bild aufnehmen“.
-2. **Kugeln festlegen – später, in Ruhe:** Prüfer öffnen `http://<pi-ip>:8089/pruefen` (eigener Code,
-   Abschnitt 5a). Läuft gerade keine Prüfrunde, bekommen sie die gespeicherten Bilder – arbeiten
-   mehrere gleichzeitig, bekommt jeder ein anderes Bild. „Später“ überspringt, „Unbrauchbar“ legt
-   das Bild beiseite. Startet der Admin eine Prüfrunde, geht es nach dem aktuellen Bild dort weiter.
-   Der Admin kann dasselbe im Trainingsmodus (`/training`) oder im Admin-Panel →
-   „KI-Training: Kugeln festlegen“. Auf eine Kugel tippen,
-   dann ihre Nummer (W, 1–15). Fehlt eine Kugel: auf die freie Stelle tippen. Unbrauchbare Bilder
-   (Arm im Bild): „Verwerfen“. Sobald es ein Modell gibt, sind die Kugeln schon vorgeschlagen –
-   dann nur noch prüfen und „Passt alles“.
-3. **Trainieren:** „Trainingsdaten laden“ (ZIP) → `training/train_coral.py`, am einfachsten in
-   Google Colab. Anleitung: `training/README.md`.
-   Nur Stufe 2 + 3 (Farben): Admin-Panel → „Farben aus festgelegten Bildern lernen“ (nimmt die
-   festgelegten Bilder auf dem Pi, z. B. aus der Einzelkugel-Serie) oder am PC
-   `python train_coral.py --nur-farben <zip>` (Sekunden, ohne Grafikkarte).
-   Stufe 2 + 3 auf dem KI-Chip: in Colab `train_klassen.py` mit derselben ZIP (`training/README.md`, Variante D).
-4. **Hochladen:** `billard_edgetpu.tflite`, `billard_merkmale.json` und ggf. `billard_klassen_edgetpu.tflite`
-   unter „Modell / Farben hochladen“ (alle auf einmal auswählen). Der Pi nimmt sie sofort.
-5. **Wiederholen, bis es passt:** Im Admin-Panel steht, wie oft der KI-Chip bei euren geprüften Bildern
-   richtig lag („… % der Kugeln richtig“). Mit jedem Training mit mehr Bildern wird es besser.
+   KI-Chip). Auf dem Beamer kommt kurz „Bild gespeichert“. Außerdem: Admin-Panel → „Bilder & Modelle“
+   → „Jetzt ein Bild aufnehmen“, oder **Einzelkugel per Knopf** (eine Kugel, Nummer am Pi gewählt –
+   den Kreis zieht die Trainingsseite).
+2. **Hochladen (von selbst):** Der Pi schickt jedes Bild zur Trainingsseite und **löscht es danach auf
+   dem Pi**. Ohne Internet versucht er es später wieder.
+3. **Kugeln festlegen – auf der Trainingsseite:** Jeder Trainer meldet sich dort mit seinem Code an;
+   jedes Bild legen mehrere Personen unabhängig voneinander fest, die Mehrheit zählt (Abschnitt 5a).
+4. **Farben lernen (Stufe 2 + 3):** auf der Admin-Seite der Trainingsseite „Farben aus fertigen Bildern
+   lernen“ (Sekunden). Unter 50 festgelegten Kugeln wird nichts veröffentlicht.
+5. **Kugel-/Klassen-Modell für den KI-Chip:** Trainings-ZIP der Trainingsseite → `training/train_coral.py`
+   bzw. `train_klassen.py` in Google Colab (`training/README.md`) → die fertigen `.tflite` auf der
+   Admin-Seite der Trainingsseite hochladen.
+6. **Der Pi holt alles von selbst:** Alle paar Minuten fragt er die Trainingsseite nach neuen Modellen,
+   prüft sie und nimmt sie sofort. Im Admin-Panel → „Bilder & Modelle“ steht, was er wann übernommen hat.
+   „Von Hand hochladen“ geht dort weiterhin (z. B. ohne Trainingsseite).
 
-**Die Bilder bleiben auf dem Pi** (`data/dataset/`): `pruefen/` (offen), `geprueft/` (festgelegt,
-fürs Training), `verworfen/` (aufgehoben, nicht gelöscht). Aufgenommen wird, solange mehr als 1 GB
-frei ist. „Alle Bilder laden“ lädt alles als ZIP herunter.
-
-**Alle Bilder löschen:** Knopf im Admin-Panel bzw. „Alle löschen“ im Trainingsmodus, mit Rückfrage. Löscht
-offene, festgelegte und verworfene Bilder und setzt die Trefferquote zurück. Das hochgeladene
-KI-Modell bleibt. Vorher ggf. „Trainingsdaten laden“ bzw. „Alle Bilder laden“ zum Sichern.
+**Ohne Trainingsseite** (`TRAINING_UPLOAD_URL`/`TRAINING_UPLOAD_KEY` leer) bleiben die Bilder auf dem Pi
+(`data/dataset/`, aufgenommen wird, solange mehr als 1 GB frei ist); Modelle dann von Hand hochladen.
+**Alle Bilder löschen:** Admin-Panel → „Bilder & Modelle“, mit Rückfrage – auch Bilder, die noch nicht
+hochgeladen sind. Was schon auf der Trainingsseite ist, bleibt dort; die Modelle bleiben.
 
 Test des Sticks:
 ```bash
@@ -433,54 +428,19 @@ Technik: Googles Coral-Paketquelle gibt es nicht mehr. Der Treiber (`libedgetpu`
 `tflite_runtime` für Python 3.11 kommen von den gepflegten Builds unter github.com/feranick
 (beide gegen TensorFlow 2.17.1, im Dockerfile mit Prüfsummen festgelegt).
 
-## 5a. Prüfrunde: mehrere Prüfer legen dasselbe Bild fest
+## 5a. Trainingsseite im Netz (VPS): festlegen und lernen
 
-Damit die Trainingsdaten stimmen, legt jedes Bild mehrere Leute unabhängig voneinander fest.
-
-1. **Prüfer anlegen (Admin):** Admin-Panel → „Prüfrunde“ → Name eingeben → „Hinzufügen“. Jeder bekommt
-   einen 4-stelligen **Code** („Neuer Code“ erzeugt einen anderen, „Entfernen“ meldet ab).
-2. **Prüfer anmelden:** Am eigenen iPad `http://<pi-ip>:8089/pruefen` öffnen, Code eingeben.
-   Im Admin-Panel leuchtet der Punkt neben dem Namen grün (online).
-3. **Bild an alle Prüfer (Admin):** Der Pi nimmt das aktuelle Kamerabild auf und schickt es an alle
-   angemeldeten Prüfer – mit dem Vorschlag des KI-Chips, falls es schon ein Modell gibt.
-4. **Jeder legt die Kugeln fest** (Kugel antippen → Nummer) und drückt **Speichern**. Auf dem Beamer
-   steht, wer fertig ist (✓) und wer noch arbeitet.
-5. **Alle fertig:** Der Beamer zeigt „Alle fertig – weiter!“ und über HDMI klingt ein **Ding**.
-
-**Zusammenführen:** Eine Kugel zählt, wenn die Mehrheit sie markiert hat; Position = Mittelwert,
-Nummer = Mehrheit. Sind sich alle einig oder entscheidet die Mehrheit, kommt das Bild direkt in die
-Trainingsdaten. Gibt es keine Mehrheit (z. B. bei 2 Prüfern: einer sagt 3, einer 11), landet das Bild
-beim Admin unter den offenen Bildern, die strittigen Kugeln sind mit „?“ markiert.
-Geht jemand weg: „Mit den bisherigen abschließen“ oder „Runde abbrechen“.
-
-**KI-Abgleich (sobald ein Modell hochgeladen ist):** Der KI-Chip macht zu jedem Bild der Prüfrunde
-einen Vorschlag. Die Prüfer legen die Kugeln trotzdem selbst fest – standardmäßig **ohne** den
-Vorschlag zu sehen (ehrlicher Vergleich; im Admin-Panel umschaltbar: „Prüfer sehen den KI-Vorschlag“).
-Danach wird das Ergebnis der Prüfer mit der KI verglichen:
-- KI überall richtig und Prüfer einig → Bild direkt in die Trainingsdaten.
-- Wo die KI falsch lag (andere Nummer, Kugel übersehen, Kugel gesehen, wo keine ist), kommt ein
-  **„?“** mit Notiz, z. B. „KI: 3 · Prüfer: 11“. Das Bild liegt dann beim Admin unter den offenen
-  Bildern. **„Prüfer-Ergebnis übernehmen“** setzt alle „?“, bei denen die Prüfer eine klare Antwort
-  hatten, mit einem Klick – kurz ansehen, speichern.
-- Der Beamer zeigt nach der Runde z. B. „KI lag bei 12 von 14 Kugeln richtig – 2 × ?“; im Admin-Panel
-  steht die Trefferquote über die letzten Bilder.
-
-**Ding-Ton:** „Ding testen (HDMI)“ im Admin-Panel. Kommt nichts: am Beamer Lautstärke prüfen; anderer
-Ausgang über `AUDIO_DEVICE` in `docker-compose.yml` (Liste: `docker compose exec billard aplay -L`,
-für HDMI 1 z. B. `hdmi:CARD=vc4hdmi1,DEV=0`).
-
-## 5b. Trainingsseite im Netz: zuhause festlegen
-
-Wenig Zeit am Tisch? Dann nur Bilder sammeln und zuhause festlegen: Der Pi schickt jedes gespeicherte
-Bild automatisch auf den Server (`training_server/`). Jeder Trainer meldet sich dort mit seinem Code an.
+Der Pi schickt jedes gespeicherte Bild automatisch auf den Server (`training_server/`) und löscht es danach.
+Jeder Trainer meldet sich dort mit seinem Code an.
 Jedes Bild legen mehrere Personen (Standard 3, `FESTLEGUNGEN`) unabhängig voneinander fest, ohne
 Vorschläge zu sehen; je Kugel zählt die Mehrheit. Einzelkugel-Bilder findet dort eine Bilderkennung
-von selbst. Die fertige Trainings-ZIP gibt es auf der Admin-Seite. Einrichtung: `training_server/README.md`.
+von selbst. Auf der Admin-Seite: Trainings-ZIP für Colab, **„Farben aus fertigen Bildern lernen“** und
+**„Modell hochladen“** (`.tflite` aus Colab) – der Pi holt beides von selbst. Einrichtung: `training_server/README.md`.
 
 ## 6. Tests
 
-Wie gut die Erkennung ist, hängt jetzt vom trainierten Modell ab. Das Admin-Panel zeigt die Trefferquote
-auf euren geprüften Bildern (Abschnitt 5).
+Wie gut die Erkennung ist, hängt vom trainierten Modell ab (Abschnitt 5). Beim Farben-Lernen zeigt die
+Trainingsseite, wie viele zurückgehaltene Kugeln richtig erkannt wurden.
 
 **Automatisch auf GitHub** (blockiert das Mergen nicht):
 
@@ -496,9 +456,9 @@ Tests selbst laufen lassen (im Ordner `app/`):
 ```bash
 python3 -m sim.test_game          # Regeln + simuliertes Spiel (Kugeln aus dem Simulator)
 python3 -m sim.test_features      # Stoßvorschlag, Gyroskop, Game-Bar, Aufzeichnung
-python3 -m sim.test_coral         # KI-Chip (Stufe 1-3), Bilder aufnehmen/festlegen, Trefferquote
+python3 -m sim.test_coral         # KI-Chip (Stufe 1-3), Bilder aufnehmen, nach dem Upload löschen
 python3 -m sim.test_merkmale      # Stufe 2 + 3: gestreift? Farbe? lernen und prüfen
-python3 -m sim.test_review        # Prüfrunden (Mehrheit), Anmeldung, Ding-Ton
+python3 -m sim.test_auth          # Anmeldung (Admin-/Spiel-PIN, Sitzungen, Sperre)
 python3 -m sim.test_cue_link      # Queue: Castcode, Suche im WLAN, Abfrage der Lage, an/aus
 python3 -m sim.test_cue_update    # Queue: Firmware-Update über WLAN (simulierter Queue + GitHub)
 python3 -m sim.test_panels        # Spiel-/Admin-Panel (PINs), QR-Code und Meldungen auf dem Beamer

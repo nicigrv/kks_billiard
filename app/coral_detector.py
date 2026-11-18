@@ -96,7 +96,7 @@ class CoralEngine:
         self.model_paths = model_paths
         self.check = check or _check_yolo           # Ausgabeform pruefen -> Klassenzahl
         self.name = name
-        self.missing = missing or "Kein Modell vorhanden (im Admin-Panel hochladen)"
+        self.missing = missing or "Kein Modell vorhanden (auf der Trainingsseite hochladen, der Pi holt es)"
         self.make_interpreter = make_interpreter
         self.retry_s = retry_s
         self.clock = clock

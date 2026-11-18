@@ -123,7 +123,7 @@ def run_panels(d):
     check(code == 200 and data["role"] == "spiel", "Spiel-PIN 1212 -> Spiel-Panel")
     code, body, _ = req("/api/game", cookie=game)
     st = json.loads(body)
-    check(code == 200 and "reviewers" not in st and "qr" not in st, "Spiel-Panel sieht keine Prüfer-Codes / Admin-Einstellungen")
+    check(code == 200 and "qr" not in st and "camera" not in st, "Spiel-Panel sieht keine Admin-Einstellungen")
     check(req("/api/state", cookie=game)[0] == 403, "Spiel-PIN: kein Admin-Zustand")
     code, body, _ = req("/api/assist", {"enabled": True}, cookie=game)
     check(code == 200 and json.loads(body)["state"]["assist"] is True, "Spiel-Panel: Schlagverbesserung an")
@@ -132,7 +132,7 @@ def run_panels(d):
     code, body, _ = req("/api/cue_use", {"enabled": False}, cookie=game)
     check(code == 200 and json.loads(body)["state"]["cue"]["enabled"] is False, "Spiel-Panel: Queue aus")
     for cmd, payload in (("camera", {"source": "demo"}), ("qr_settings", {"enabled": False}),
-                         ("reviewer_add", {"name": "X"}), ("cue_pair", {"castcode": "SMQ234"})):
+                         ("delete_images", {"confirm": True}), ("cue_pair", {"castcode": "SMQ234"})):
         check(req("/api/" + cmd, payload, cookie=game)[0] == 403, f"Spiel-PIN darf nicht: {cmd}")
 
     code, data, admin = login("1902")
@@ -180,8 +180,7 @@ def run_panels(d):
     time.sleep(2.2)
     st = json.loads(req("/api/state", cookie=admin)[1])
     check(st["detector"]["features"]["own"], "hochgeladene Farben werden benutzt")
-    code, body, _ = req("/api/learn_features", {}, cookie=admin)
-    check(code == 400 and "festgelegten" in json.loads(body)["error"], "Farben lernen ohne festgelegte Bilder: Hinweis")
+    check(req("/api/learn_features", {}, cookie=admin)[0] == 404, "Farben lernen gibt es am Pi nicht mehr (nur auf dem VPS)")
     code, body, _ = req("/api/reset_features", {}, cookie=admin)
     check(code == 200 and not os.path.exists(os.path.join(d, "models", "billard_merkmale.json")),
           "gelernte Farben loeschen -> Startwerte")
@@ -209,45 +208,35 @@ def run_panels(d):
     check(req("/beamer", cookie=admin)[0] == 404 and req("/api/beamer.jpg", cookie=admin)[0] == 404,
           "keine Live-Uebertragung des Beamerbilds mehr (/beamer, /api/beamer.jpg)")
 
-    print("Bilder am Tisch speichern, spaeter festlegen")
+    print("Bilder am Tisch speichern - festgelegt und gelernt wird nur auf der Trainingsseite")
     code, body, _ = req("/api/capture", {}, cookie=game)
     st = json.loads(body).get("state", {}) if code == 200 else {}
-    check(code == 200 and st["training"]["pending"] == 1, "Spiel-Panel: Bild speichern")
+    check(code == 200 and st["training"]["pending"] == 1 and "Trainingsseite nicht eingerichtet" in json.loads(body)["message"],
+          "Spiel-Panel: Bild speichern (ohne Trainingsseite bleibt es auf dem Pi)")
     code, body, _ = req("/api/auto_capture", {"enabled": True}, cookie=game)
     check(code == 200 and json.loads(body)["state"]["training"]["auto_capture"] is True, "Spiel-Panel: automatisch nach jedem Stoß")
     req("/api/auto_capture", {"enabled": False}, cookie=game)
-    req("/api/capture", {}, cookie=admin)
-    code, body, _ = req("/api/reviewer_add", {"name": "Anna"}, cookie=admin)
-    anna_code = [r for r in json.loads(body)["state"]["reviewers"] if r["name"] == "Anna"][0]["code"]
-    code, data, anna = login(anna_code)
-    check(data.get("role") == "pruefer", "Prüferin Anna angemeldet")
-    code, body, _ = req("/api/round", cookie=anna)
-    check(code == 200 and json.loads(body).get("stored") == 2, "Prüfer sieht: 2 gespeicherte Bilder offen")
-    code, body, _ = req("/api/review/next", cookie=anna)
-    item = json.loads(body) if code == 200 else {}
-    check(code == 200 and item.get("name"), "Prüfer bekommt ein gespeichertes Bild")
-    check(req("/api/review/image?name=" + item.get("name", ""), cookie=anna)[0] == 200, "... und das Bild dazu")
-    code, body, _ = req("/api/review/next", cookie=admin)
-    check(code == 200 and json.loads(body)["name"] != item.get("name"), "Admin bekommt gleichzeitig ein anderes Bild")
-    code, body, _ = req("/api/review_save", {"name": item["name"], "balls": [
-        {"x": 100, "y": 100, "kind": "cue", "color": ""}]}, cookie=anna)
-    check(code == 200 and json.loads(body)["stored"] == 1, f"Prüfer speichert ({code} {body[:80]!r})")
-    lbl = os.path.join(d, "dataset", "geprueft", "labels", item["name"] + ".json")
-    with open(lbl) as f:
-        check(json.load(f).get("labeled_by") == "Anna", "festgelegt von Anna")
-    check(req("/api/state", cookie=anna)[0] == 403 and req("/api/capture", {}, cookie=anna)[0] == 403,
-          "Prüfer darf sonst nichts")
-    check(req("/api/review/next", cookie=game)[0] == 403, "Spiel-PIN darf nicht festlegen")
-    check(req("/api/review_release", {}, cookie=anna)[0] == 200, "Prüfer gibt sein Bild frei")
-    check(req("/api/review_release", {}, cookie=admin)[0] == 200, "Admin gibt sein Bild frei")
-    check(req("/api/review_release", {}, cookie=game)[0] == 403, "Spiel-PIN: keine Bilder freigeben")
+    st = json.loads(req("/api/state", cookie=admin)[1])
+    check(st["training"]["pending"] == 1 and st["training"]["upload"] is None and "reviewers" not in st,
+          "Admin: 1 Bild auf dem Pi, keine Trainingsseite, keine Prüfer")
+    for pfad in ("/training", "/pruefen", "/api/review/next", "/api/round", "/api/snapshot", "/api/dataset.zip",
+                 "/api/all-images.zip"):
+        check(req(pfad, cookie=admin)[0] == 404, f"am Pi nicht mehr da: {pfad}")
+    for cmd, payload in (("reviewer_add", {"name": "Anna"}), ("round_start", {}), ("review_save", {"name": "x"}),
+                         ("train_correction", {"id": 1}), ("single_start", {"count": 5})):
+        check(req("/api/" + cmd, payload, cookie=admin)[0] == 404, f"Befehl gibt es nicht mehr: {cmd}")
+    req("/api/single_mode", {"enabled": True}, cookie=admin)
+    req("/api/single_ball", {"number": 3}, cookie=admin)
+    code, body, _ = req("/api/single_shot", {}, cookie=admin)
+    check(code == 400 and "Trainingsseite" in json.loads(body)["error"], "Einzelkugel per Knopf nur mit Trainingsseite")
+    code, body, _ = req("/api/delete_images", {"confirm": True}, cookie=admin)
+    check(code == 200 and json.loads(body)["state"]["training"]["pending"] == 0, "Admin löscht die Bilder auf dem Pi")
 
     code, body, _ = req("/api/new_rack", {"breaker": "1"}, cookie=game)
     g = json.loads(body).get("state", {}).get("game", {}) if code == 200 else {}
     check(g.get("turn") == 1 and g.get("phase") == "playing", f"Neues Rack mit Anstoß als Text ({code})")
     code, body, _ = req("/api/new_rack", {"breaker": "x"}, cookie=game)
     check(code == 400 and req("/api/game", cookie=game)[0] == 200, "ungültiger Anstoß abgelehnt, Spielstand heil")
-    check(req("/api/reviewer_add", {"name": "admin"}, cookie=admin)[0] == 400, "Prüfer-Name „Admin“ ist vergeben")
     r = urllib.request.Request(BASE + "/api/assist", data=b"[1]", method="POST",
                                headers={"Content-Type": "application/json", "Cookie": game})
     try:

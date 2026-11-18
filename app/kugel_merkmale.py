@@ -13,11 +13,13 @@ Entschieden wird mit je einem kleinen statistischen Modell (pro Klasse eine Norm
 "QDA"). Das Modell wird aus festgelegten Bildern gelernt - eure Lampe, eure Kamera:
   * training/train_coral.py (macht es nach dem YOLO-Training automatisch, oder nur das:
     --nur-farben, dauert Sekunden, keine Grafikkarte noetig) -> billard_merkmale.json
-  * Admin-Panel -> "Farben aus festgelegten Bildern lernen" (direkt auf dem Pi)
+  * Trainingsseite im Netz (VPS) -> Admin -> "Farben lernen" aus den fertig festgelegten Bildern;
+    der Pi holt die neue Datei von selbst (auf dem Pi selbst wird nicht gelernt)
 Ohne gelerntes Modell gelten Startwerte aus dem Simulator (models/start_merkmale.json).
 
 Die Datei braucht nur numpy + OpenCV und wird auch von training/train_coral.py benutzt
-(in Google Colab mit hochladen).
+(in Google Colab mit hochladen). training_server/kugel_merkmale.py ist eine Kopie davon
+(die Formpruefung in CI meldet, wenn beide nicht gleich sind).
 """
 
 import json
