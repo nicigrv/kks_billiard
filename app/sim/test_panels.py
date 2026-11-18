@@ -166,6 +166,17 @@ def run_panels(d):
           f"billard_merkmale.json hochgeladen ({res.get('message')})")
     code, res = upload(b'{"format": "etwas anderes"}')
     check(code == 400 and "billard_merkmale" in res["error"], "falsche JSON-Datei abgelehnt")
+    kl = b"xxxxTFL3" + b"edgetpu-custom-op" + b"0" * 200_000
+    code, res = upload(kl)
+    check(code == 200 and "Klassen-Modell" in res["message"]
+          and os.path.isfile(os.path.join(d, "models", "billard_klassen_edgetpu.tflite"))
+          and not os.path.exists(os.path.join(d, "models", "billard_edgetpu.tflite")),
+          "kleines Modell (Stufe 2 + 3) ersetzt nie das Kugel-Modell (Stufe 1)")
+    big = b"xxxxTFL3" + b"edgetpu-custom-op" + b"1" * 2_000_000
+    upload(big)
+    upload(big + b"2")
+    check(os.path.isfile(os.path.join(d, "models", "billard_edgetpu.tflite.vorher")),
+          "neues Kugel-Modell: das vorherige bleibt als .vorher erhalten")
     time.sleep(2.2)
     st = json.loads(req("/api/state", cookie=admin)[1])
     check(st["detector"]["features"]["own"], "hochgeladene Farben werden benutzt")
