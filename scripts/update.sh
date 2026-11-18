@@ -83,6 +83,15 @@ if [ "$ZIEL" = "server" ] && [ ! -f .env ]; then
   echo "==> Neue .env mit UPLOAD_KEY angelegt. Diesen Schlüssel auf dem Pi als TRAINING_UPLOAD_KEY eintragen:"
   echo "    $KEY"
 fi
+if [ "$ZIEL" = "server" ] && ! grep -q '^EXPORT_KEY=' .env; then
+  KEY="$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  echo "EXPORT_KEY=$KEY" >> .env
+  echo "==> EXPORT_KEY angelegt (Trainings-ZIP direkt in Colab laden, Kopfzeile X-Export-Key):"
+  echo "    $KEY"
+fi
+if [ "$ZIEL" = "server" ]; then
+  echo "==> Schlüssel für die Trainings-ZIP (Colab): $(grep '^EXPORT_KEY=' .env | cut -d= -f2)"
+fi
 
 # Docker vorhanden?
 if ! command -v docker >/dev/null; then

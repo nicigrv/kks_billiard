@@ -3,9 +3,11 @@
 #   Trainer:  https://billard.server.greylo.de          Anmeldung mit 6-stelligem Code
 #   Admin:    https://billard.server.greylo.de/admin    greylo-Login (Authelia), Gruppe "admins"
 #   Pi:       POST /api/upload mit X-Upload-Key
+#   Colab:    GET  /api/export.zip mit X-Export-Key (Trainings-ZIP ohne greylo-Login)
 #
 # Starten:  docker compose up -d --build
-# UPLOAD_KEY in .env neben dieser Datei (nicht ins Git):  UPLOAD_KEY=<langer Zufallswert>
+# UPLOAD_KEY und EXPORT_KEY in .env neben dieser Datei (nicht ins Git), je ein langer Zufallswert.
+# scripts/update.sh legt fehlende Schluessel selbst an und zeigt sie an.
 services:
   billard-training:
     build: .
@@ -14,6 +16,7 @@ services:
     restart: unless-stopped
     environment:
       UPLOAD_KEY: ${UPLOAD_KEY:?UPLOAD_KEY fehlt in .env}
+      EXPORT_KEY: ${EXPORT_KEY:-}
       ADMIN_GRUPPEN: admins
       FESTLEGUNGEN: ${FESTLEGUNGEN:-3}
       TZ: Europe/Berlin

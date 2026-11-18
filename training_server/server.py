@@ -39,6 +39,9 @@ except ImportError:
 HIER = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 UPLOAD_KEY = os.environ.get("UPLOAD_KEY", "")
+# Trainings-ZIP ohne greylo-Login laden (z. B. direkt in Google Colab): GET /api/export.zip
+# mit Kopfzeile X-Export-Key. Leer = aus. scripts/update.sh legt den Schluessel beim Update an.
+EXPORT_KEY = os.environ.get("EXPORT_KEY", "")
 ADMIN_GRUPPEN = {g.strip() for g in os.environ.get("ADMIN_GRUPPEN", "admins").split(",") if g.strip()}
 
 NAME_RE = re.compile(r"[0-9]{8}-[0-9]{6}-[0-9]{3}")
@@ -673,6 +676,11 @@ def make_handler(daten: Daten):
                     return self._datei(os.path.join(HIER, SEITEN[pfad]), "text/html; charset=utf-8")
                 if pfad.startswith("/api/admin/"):
                     return self._admin_get(pfad, q)
+                if pfad == "/api/export.zip":
+                    key = self.headers.get("X-Export-Key", "")
+                    if not EXPORT_KEY or not hmac.compare_digest(key, EXPORT_KEY):
+                        return self._send(403, {"error": "Kein Zugriff (EXPORT_KEY in .env, Kopfzeile X-Export-Key)"})
+                    return self._zip(q)
                 p = self._person()
                 if pfad == "/api/me":
                     return self._send(200, {"name": p["name"]} if p else {"name": None})
@@ -695,6 +703,34 @@ def make_handler(daten: Daten):
             except Fehler as e:
                 self._send(e.code, {"error": str(e)})
 
+        def _zip(self, q):
+            """Trainings-ZIP bauen und schicken (Admin-Seite oder /api/export.zip mit Schluessel)."""
+            modus = (q.get("modus") or ["alle" if (q.get("runde1") or ["0"])[0] == "1" else "fertig"])[0]
+            if modus not in ("fertig", "einig", "alle"):
+                modus = "fertig"
+            fd, tmp = tempfile.mkstemp(suffix=".zip", dir=daten.dir)
+            os.close(fd)
+            try:
+                n = daten.zip_bauen(tmp, modus)
+                if not n:
+                    return self._send(404, {"error": "Noch keine fertigen Bilder"})
+                name = time.strftime("billard-training-%Y%m%d-%H%M") + ("" if modus == "fertig" else "-" + modus) + ".zip"
+                size = os.path.getsize(tmp)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/zip")
+                self.send_header("Content-Length", str(size))
+                self.send_header("Content-Disposition", f'attachment; filename="{name}"')
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Bilder", str(n))
+                self.end_headers()
+                if self.command != "HEAD":
+                    with open(tmp, "rb") as f:
+                        while chunk := f.read(1 << 20):
+                            self.wfile.write(chunk)
+            finally:
+                os.remove(tmp)
+            return None
+
         def _admin_get(self, pfad, q):
             if not self._admin():
                 return self._send(403, {"error": "Nur für Admins"})
@@ -714,30 +750,7 @@ def make_handler(daten: Daten):
                             return self._send(200, einzelkugel.mit_kreisen(f.read(), kugeln, radius), "image/jpeg")
                 return self._datei(jpg, "image/jpeg")
             if pfad == "/api/admin/zip":
-                modus = (q.get("modus") or ["alle" if (q.get("runde1") or ["0"])[0] == "1" else "fertig"])[0]
-                if modus not in ("fertig", "einig", "alle"):
-                    modus = "fertig"
-                fd, tmp = tempfile.mkstemp(suffix=".zip", dir=daten.dir)
-                os.close(fd)
-                try:
-                    n = daten.zip_bauen(tmp, modus)
-                    if not n:
-                        return self._send(404, {"error": "Noch keine fertigen Bilder"})
-                    name = time.strftime("billard-training-%Y%m%d-%H%M") + ("" if modus == "fertig" else "-" + modus) + ".zip"
-                    size = os.path.getsize(tmp)
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/zip")
-                    self.send_header("Content-Length", str(size))
-                    self.send_header("Content-Disposition", f'attachment; filename="{name}"')
-                    self.send_header("Cache-Control", "no-store")
-                    self.end_headers()
-                    if self.command != "HEAD":
-                        with open(tmp, "rb") as f:
-                            while chunk := f.read(1 << 20):
-                                self.wfile.write(chunk)
-                finally:
-                    os.remove(tmp)
-                return None
+                return self._zip(q)
             return self._send(404, {"error": "Nicht gefunden"})
 
         def do_POST(self):

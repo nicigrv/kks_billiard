@@ -80,7 +80,19 @@ Der Pi schneidet um jede gefundene Kugel einen kleinen Ausschnitt aus (40×40 Pi
 liefert direkt die Wahrscheinlichkeit für jede Nummer 0–15. Gelernt wird aus derselben ZIP –
 die **Einzelkugel-Bilder** sind dafür besonders gut (viele Beispiele je Nummer).
 
-In Colab (TensorFlow ist dort schon installiert, eine GPU hilft, ist aber nicht nötig):
+**Am schnellsten – eine Zelle in Colab** (holt Code und ZIP selbst; den `EXPORT_KEY` zeigt
+`update.sh server` auf dem VPS an):
+
+```
+EXPORT_KEY = "hier-den-schluessel-einfuegen"
+!rm -rf kks && git clone -q --depth 1 https://github.com/nicigrv/kks_billiard kks
+%cd kks/training
+!curl -fL -H "X-Export-Key: {EXPORT_KEY}" -o daten.zip https://billard.server.greylo.de/api/export.zip
+!python train_klassen.py daten.zip
+import glob; from google.colab import files; [files.download(f) for f in glob.glob("ausgabe/billard_klassen*.tflite")]
+```
+
+Oder von Hand – in Colab (TensorFlow ist dort schon installiert, eine GPU hilft, ist aber nicht nötig):
 
 1. `train_klassen.py`, `train_coral.py`, **`kugel_merkmale.py`** (aus `app/`) und die ZIP(s) hochladen.
 2. ```

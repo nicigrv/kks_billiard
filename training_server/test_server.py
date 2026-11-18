@@ -187,6 +187,15 @@ def main():
         s, raw = admin.call("GET", "/api/admin/zip?modus=alle")
         check(sum(n.startswith("images/") for n in zipfile.ZipFile(io.BytesIO(raw)).namelist()) == 1, "inkl. unfertige: nur Bilder mit Festlegung")
         check(Client(base).call("GET", "/api/admin/zip")[0] == 403, "ZIP nur für Admins")
+        server.EXPORT_KEY = ""
+        check(Client(base).call("GET", "/api/export.zip", headers={"X-Export-Key": ""})[0] == 403,
+              "Export ohne EXPORT_KEY auf dem Server: aus")
+        server.EXPORT_KEY = "export-schluessel-456"
+        check(Client(base).call("GET", "/api/export.zip", headers={"X-Export-Key": "falsch"})[0] == 403,
+              "Export mit falschem Schlüssel: abgelehnt")
+        s, raw = Client(base).call("GET", "/api/export.zip", headers={"X-Export-Key": "export-schluessel-456"})
+        check(s == 200 and sum(n.startswith("images/") for n in zipfile.ZipFile(io.BytesIO(raw)).namelist()) == 1,
+              "Export mit Schlüssel (für Colab): dieselbe ZIP ohne greylo-Login")
 
         print("Einzelkugel: Bild per Knopf am Pi, Kreis zieht der Server")
         import numpy as np
