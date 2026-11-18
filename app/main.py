@@ -33,7 +33,8 @@ import config
 import web
 from ballnum import ball_number
 import kugel_merkmale
-from coral_detector import DATA_FEATURES, START_FEATURES, CoralDetector, CoralEngine, default_features
+from coral_detector import (DATA_FEATURES, DATA_KLASSEN, START_FEATURES, CoralDetector, CoralEngine,
+                            default_features, klassen_engine)
 from cue_sensor import AlignChecker, CueSensor, clean_castcode
 from cue_update import CueUpdater
 from geometry import Table, TABLE_SIZES
@@ -75,18 +76,19 @@ def host_ip():
 
 
 class App:
-    def __init__(self, cue_port=5005, coral_engine=None):
+    def __init__(self, cue_port=5005, coral_engine=None, klassen=None):
         self.cfg = config.load()
         self._migrate_config()
         self.reader = make_reader(self.cfg["camera"], config.DATA_DIR).start()
         self.recorder = Recorder(os.path.join(config.DATA_DIR, "dataset"))
         self.uploader = self._start_uploader()
         self.coral = coral_engine or CoralEngine()          # Stufe 1: Kugeln finden (KI-Chip)
+        self.klassen = klassen or klassen_engine()          # Stufe 2 + 3 auf dem KI-Chip (optional)
         self._learn_lock = threading.Lock()                 # Stufe 2 + 3 lernen (Farben, Streifen)
         self._learning = False
         self.learn_result = None
         table = self._table_for(self.reader)
-        self.pipe = Pipeline(table, lambda r: CoralDetector(r, self.coral), recorder=self.recorder)
+        self.pipe = Pipeline(table, lambda r: CoralDetector(r, self.coral, klassen=self.klassen), recorder=self.recorder)
         self.pipe.auto_capture = bool(self.cfg.get("auto_capture"))
         self.pipe.on_capture = self._captured
         last = self.cfg.get("cue_address")
@@ -503,13 +505,16 @@ class App:
             raise config.UserError(str(e))
         return f"Bild {res}. Noch {self.recorder.pending} zu prüfen, {self.recorder.verified} geprüft."
 
-    def save_model(self, data: bytes):
-        """Hochgeladene Datei speichern: Coral-Modell (.tflite, Stufe 1) oder Farb-/Streifen-Werte
-        (billard_merkmale.json, Stufe 2 + 3). Der Detektor laedt beides von selbst (Aenderungszeit)."""
+    def save_model(self, data: bytes, name=""):
+        """Hochgeladene Datei speichern: Coral-Modell (.tflite, Stufe 1), Klassen-Modell (Stufe 2 + 3 auf
+        dem KI-Chip, billard_klassen*.tflite) oder Farb-/Streifen-Werte (billard_merkmale.json, Statistik).
+        Der Detektor laedt alles von selbst (Aenderungszeit)."""
         if data[:1] == b"{":
             return self.save_features(data)
         if len(data) < 1000 or data[4:8] != b"TFL3":
             raise config.UserError("Das ist keine TFLite-Modelldatei (.tflite)")
+        if "klassen" in name.lower() or (not name and len(data) < 1_500_000):
+            return self.save_klassen(data)
         if b"edgetpu-custom-op" not in data:
             raise config.UserError("Modell ist nicht für den Coral kompiliert "
                                    "(die Datei *_edgetpu.tflite aus dem Training nehmen)")
@@ -521,6 +526,23 @@ class App:
             f.write(data)
         os.replace(tmp, path)
         return f"Modell gespeichert ({len(data) / 1e6:.1f} MB). Der Coral lädt es in wenigen Sekunden."
+
+    def save_klassen(self, data: bytes):
+        os.makedirs(os.path.dirname(DATA_KLASSEN), exist_ok=True)
+        tmp = DATA_KLASSEN + ".tmp"
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, DATA_KLASSEN)
+        where = "auf dem KI-Chip" if b"edgetpu-custom-op" in data else \
+            "auf dem Prozessor (nicht für den Coral umgewandelt - in Colab mit edgetpu_compiler umwandeln)"
+        return f"Klassen-Modell für Art und Farbe gespeichert ({len(data) / 1e3:.0f} KB), läuft {where}."
+
+    def reset_klassen(self):
+        try:
+            os.remove(DATA_KLASSEN)
+        except FileNotFoundError:
+            return "Es gibt kein Klassen-Modell"
+        return "Klassen-Modell gelöscht - Art und Farbe bestimmt wieder die Statistik"
 
     def cue_firmware(self, data: bytes):
         """Hochgeladene Queue-Firmware (.bin) ueber das WLAN aufspielen."""
@@ -684,6 +706,7 @@ class App:
                          "disk_ok": self.recorder.disk_ok(), "quality": self.recorder.model_quality(),
                          "upload": self.uploader.status() if self.uploader else None},
             "detector": {"coral": self.coral.status(), "not_ready": self.pipe.not_ready,
+                         "klassen": self.klassen.status(),
                          "features": dict(default_features().status(START_FEATURES),
                                           learning=self._learning, result=self.learn_result)},
             "assist": bool(self.cfg.get("assist")),
@@ -798,6 +821,8 @@ class App:
             return self.learn_features()
         if name == "reset_features":
             return self.reset_features()
+        if name == "reset_klassen":
+            return self.reset_klassen()
         if name.startswith("single_"):
             try:
                 if name == "single_mode":

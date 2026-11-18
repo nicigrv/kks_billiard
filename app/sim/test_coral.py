@@ -19,7 +19,10 @@ import zipfile
 import numpy as np
 
 from ballnum import Ball
-from coral_detector import CoralDetector, CoralEngine, CoralNotReady, letterbox
+import cv2
+
+import kugel_merkmale as km
+from coral_detector import CoralDetector, CoralEngine, CoralNotReady, default_features, klassen_engine, letterbox
 from geometry import TABLE_SIZES, WARP_H, WARP_W, Table
 from pipeline import Pipeline
 from recorder import SINGLE_MODEL, Recorder
@@ -223,6 +226,91 @@ def test_engine():
     check((s, dx, dy) == (0.8, 0, 160), "Letterbox 800x400 -> 640x640")
 
 
+class FakeKlassen:
+    """Wie ein Klassen-Modell aus train_klassen.py (uint8 rein, Skala 1/255; 16 Wahrscheinlichkeiten
+    uint8 raus). "Erkennt" mit der Statistik am uebergebenen Ausschnitt - so faellt jeder Fehler beim
+    Ausschneiden (Mitte, Groesse, Farbreihenfolge RGB/BGR, Quantisierung) auf."""
+    calls = 0
+    size = 40
+    out_n = 16
+
+    def __init__(self, path):
+        self.inp = {"index": 0, "shape": np.array([1, self.size, self.size, 3]), "dtype": np.uint8,
+                    "quantization": (1 / 255, 0)}
+        self.out = {"index": 1, "shape": np.array([1, self.out_n]), "dtype": np.uint8, "quantization": (1 / 256, 0)}
+        self.x = None
+
+    def allocate_tensors(self):
+        pass
+
+    def get_input_details(self):
+        return [self.inp]
+
+    def get_output_details(self):
+        return [self.out]
+
+    def set_tensor(self, idx, data):
+        self.x = np.array(data)
+
+    def invoke(self):
+        FakeKlassen.calls += 1
+
+    def get_tensor(self, idx):
+        rgb = self.x[0]
+        bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        patch = cv2.resize(bgr, (km.CROP, km.CROP), interpolation=cv2.INTER_AREA)
+        clf = default_features().get()
+        fk, fc = km.features(patch)
+        pk, pc = clf.kind.proba(fk), clf.color.proba(fc)
+        s = np.zeros(16)
+        s[0], s[8] = pk[0], pk[1]
+        s[1:8], s[9:16] = pk[2] * pc, pk[3] * pc
+        n = int(np.argmax(s))
+        o = np.zeros((1, self.out_n), np.uint8)
+        o[0, n % self.out_n] = 250
+        return o
+
+
+def test_klassen():
+    print("Stufe 2 + 3 auf dem KI-Chip (Klassen-Modell, Ersatz-Interpreter)")
+    spec = [(0, 200, 200), (3, 480, 120), (11, 640, 280), (8, 400, 320), (5, 120, 330), (13, 300, 90), (2, 700, 80)]
+    with tempfile.TemporaryDirectory() as d:
+        model = os.path.join(d, "billard_edgetpu.tflite")
+        kpath = os.path.join(d, "billard_klassen_edgetpu.tflite")
+        open(model, "wb").write(b"x")
+        os.utime(model, (1, 1))
+        now = [100.0]
+        eng = CoralEngine(model_paths=(model,), make_interpreter=FakeInterpreter, clock=lambda: now[0])
+        kl = klassen_engine(kpath, make_interpreter=FakeKlassen, clock=lambda: now[0])
+        warped, r = sim_table(spec)
+        det = CoralDetector(r, eng, klassen=kl)
+        FakeInterpreter.boxes = [box(x, y) for n, x, y in spec]
+
+        balls = det.detect(warped)
+        check(sorted(b.number for b in balls) == sorted(n for n, _, _ in spec) and FakeKlassen.calls == 0,
+              "ohne Klassen-Modell: Statistik auf dem Prozessor (wie bisher)")
+        check(not kl.status()["ready"] and "optional" in kl.status()["error"], "Status: kein Klassen-Modell (optional)")
+
+        open(kpath, "wb").write(b"TFL3 ... edgetpu-custom-op ...")
+        os.utime(kpath, (2, 2))
+        now[0] += 10
+        balls = det.detect(warped)
+        got = {b.number: (round(b.x), round(b.y)) for b in balls}
+        check(kl.status()["ready"] and kl.status()["on_tpu"], "Klassen-Modell geladen, laeuft auf dem KI-Chip")
+        check(FakeKlassen.calls == len(spec) + 1, f"ein Durchlauf je Kugel (+1 Probelauf beim Laden: {FakeKlassen.calls})")
+        check(all(n in got and abs(got[n][0] - x) <= 3 and abs(got[n][1] - y) <= 3 for n, x, y in spec),
+              f"Nummern vom KI-Chip richtig (Ausschnitt, RGB, Quantisierung) ({sorted(got)})")
+
+        FakeKlassen.out_n = 4                           # falsches Format -> Rueckfall auf die Statistik
+        os.utime(kpath, (3, 3))
+        now[0] += 10
+        FakeKlassen.calls = 0
+        balls = det.detect(warped)
+        check(sorted(b.number for b in balls) == sorted(n for n, _, _ in spec) and not kl.status()["ready"]
+              and "Format" in kl.status()["error"], "falsches Klassen-Modell: Hinweis + Statistik als Rueckfall")
+        FakeKlassen.out_n = 16
+
+
 # ----------------------------------------------------------------- Pipeline
 def test_pipeline_without_chip():
     print("Pipeline ohne KI-Chip")
@@ -316,6 +404,7 @@ def test_claims():
 if __name__ == "__main__":
     test_training_data()
     test_engine()
+    test_klassen()
     test_pipeline_without_chip()
     test_claims()
     print()

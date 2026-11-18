@@ -75,7 +75,7 @@ Queue-Gyroskop (optional) ◀─WLAN─▶│  ├── Prüfer        http://<
 **Kugelerkennung in drei Stufen:** 1. der **KI-Chip (Coral USB Accelerator)** findet die Kugeln,
 2. der Pi schaut, ob eine Kugel **gestreift** ist (Weiße / 8 / voll / halb), 3. welche **Farbe** sie hat.
 Daraus ergibt sich die Nummer. Stufe 2 + 3 lernen aus euren festgelegten Bildern (Sekunden, direkt
-im Admin-Panel). Ohne KI-Chip und Modell zählt der Pi nichts: Ihr nehmt per Knopf Bilder auf und
+im Admin-Panel) – oder laufen als kleines Netz ebenfalls auf dem KI-Chip (`training/train_klassen.py`). Ohne KI-Chip und Modell zählt der Pi nichts: Ihr nehmt per Knopf Bilder auf und
 legt die Kugeln auf dem iPad fest (Abschnitt 5).
 
 **Beamer:** links das Live-Kamerabild mit Kreisen um die Kugeln, rechts eine gezeichnete
@@ -375,12 +375,14 @@ Die Erkennung läuft in **drei Stufen** (`app/coral_detector.py`, `app/kugel_mer
 | Stufe | Was | Wo | gelernt mit |
 |---|---|---|---|
 | 1. Kugeln finden | „hier liegt eine Kugel“ | KI-Chip (YOLOv8n, 1 Klasse) | `train_coral.py` (Colab) → `billard_edgetpu.tflite` |
-| 2. gestreift? | Weiße / schwarze 8 / voll / halb | Pi (Weiß-, Schwarz-, Farbanteil der Kugel) | „Farben lernen“ im Admin-Panel oder `train_coral.py` → `billard_merkmale.json` |
-| 3. Farbe | gelb, blau, rot, violett, orange, grün, weinrot | Pi (mittlere Farbe der Kugel) | wie Stufe 2 |
+| 2. gestreift? | Weiße / schwarze 8 / voll / halb | **KI-Chip**, wenn ein Klassen-Modell da ist – sonst Pi (Weiß-, Schwarz-, Farbanteil der Kugel) | `train_klassen.py` (Colab) → `billard_klassen_edgetpu.tflite`; Rückfall: „Farben lernen“ → `billard_merkmale.json` |
+| 3. Farbe | gelb, blau, rot, violett, orange, grün, weinrot | wie Stufe 2 (Pi: mittlere Farbe der Kugel) | wie Stufe 2 |
 
 Aus Art und Farbe ergibt sich die Nummer (z. B. halb + rot = 11); jede Nummer gibt es nur einmal.
 Stufe 1 muss nur Kugeln finden – das lernt das Modell mit viel weniger Bildern als 16 Nummern.
-Stufe 2 + 3 sehen die Kugel in voller Auflösung und lernen in Sekunden, auch nach jedem Lichtwechsel.
+Stufe 2 + 3 sehen die Kugel in voller Auflösung. Auf dem KI-Chip bekommt ein kleines Netz einen
+Ausschnitt um jede Kugel und liefert direkt die Nummer – das entlastet den Prozessor des Pi. Ohne
+dieses Modell (oder wenn es nicht lädt) rechnet der Pi mit Statistik, die er in Sekunden selbst lernt.
 Ältere Modelle mit 16 Kugelnummern gehen weiter (davon wird nur „Kugel ja/nein“ benutzt).
 Ohne Stick oder ohne Modell wird nichts gezählt – Bilder werden trotzdem aufgenommen.
 
@@ -405,8 +407,9 @@ Ohne Stick oder ohne Modell wird nichts gezählt – Bilder werden trotzdem aufg
    Nur Stufe 2 + 3 (Farben): Admin-Panel → „Farben aus festgelegten Bildern lernen“ (nimmt die
    festgelegten Bilder auf dem Pi, z. B. aus der Einzelkugel-Serie) oder am PC
    `python train_coral.py --nur-farben <zip>` (Sekunden, ohne Grafikkarte).
-4. **Hochladen:** `billard_edgetpu.tflite` und `billard_merkmale.json` unter „Modell / Farben hochladen“
-   (beide auf einmal auswählen). Der Pi nimmt sie sofort.
+   Stufe 2 + 3 auf dem KI-Chip: in Colab `train_klassen.py` mit derselben ZIP (`training/README.md`, Variante D).
+4. **Hochladen:** `billard_edgetpu.tflite`, `billard_merkmale.json` und ggf. `billard_klassen_edgetpu.tflite`
+   unter „Modell / Farben hochladen“ (alle auf einmal auswählen). Der Pi nimmt sie sofort.
 5. **Wiederholen, bis es passt:** Im Admin-Panel steht, wie oft der KI-Chip bei euren geprüften Bildern
    richtig lag („… % der Kugeln richtig“). Mit jedem Training mit mehr Bildern wird es besser.
 

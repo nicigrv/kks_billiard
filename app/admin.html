@@ -510,10 +510,12 @@ input[type=text], input[type=password], input[type=number], select {
           <div class="grid two" style="margin:10px 0">
             <a class="btnlink" id="datasetLink" href="/api/dataset.zip" download>Trainingsdaten laden</a>
             <a class="btnlink quiet" id="allImagesLink" href="/api/all-images.zip" download>Alle Bilder laden</a>
-            <button type="button" class="quiet span2" id="resetFeaturesBtn">Gelernte Farben löschen</button>
+            <button type="button" class="quiet" id="resetFeaturesBtn">Gelernte Farben löschen</button>
+            <button type="button" class="quiet" id="resetKlassenBtn">Klassen-Modell löschen</button>
           </div>
           <p>Die Erkennung läuft in drei Stufen: <b>1. Kugeln finden</b> (KI-Chip), <b>2. gestreift oder nicht</b> und <b>3. Farbe</b> (beides auf dem Pi, mit gelernten Werten). Aus Art und Farbe ergibt sich die Nummer. Ohne KI-Chip und Modell zählt der Pi nichts – er nimmt nur Bilder auf.</p>
           <p>Stufe 1: Trainingsdaten laden, am PC oder in Google Colab trainieren (training/README.md), dann <b>billard_edgetpu.tflite</b> und <b>billard_merkmale.json</b> zusammen hochladen. Stufe 2 + 3 lernt der Pi in Sekunden selbst („Farben lernen“) – nach Änderungen am Licht neu lernen.</p>
+          <p><b>Stufe 2 + 3 auf dem KI-Chip</b> (entlastet den Pi): in Colab <code>train_klassen.py</code> mit derselben ZIP laufen lassen und <b>billard_klassen_edgetpu.tflite</b> hochladen. Dann bestimmt der KI-Chip Art und Farbe; die gelernten Farben bleiben als Rückfall, falls das Modell fehlt.</p>
         </details>
       </div>
 
@@ -774,7 +776,9 @@ input[type=text], input[type=password], input[type=number], select {
     rows.push(c.ready
       ? ["ok", "KI-Chip", (c.model || "Modell geladen") + (c.ms ? " · " + Math.round(c.ms) + " ms pro Bild" : ""), "training"]
       : ["bad", "KI-Chip", c.error || d.not_ready || "nicht bereit", "training"]);
-    rows.push(f.learning ? ["warn", "Farben & Streifen", "werden gerade gelernt …", "training"]
+    const kl = d.klassen || {};
+    if (kl.ready) rows.push(["ok", "Farben & Streifen", (kl.on_tpu ? "KI-Chip" : "Netz auf dem Prozessor") + (kl.model_time ? " · Modell vom " + kl.model_time : ""), "training"]);
+    else rows.push(f.learning ? ["warn", "Farben & Streifen", "werden gerade gelernt …", "training"]
       : !f.ready ? ["bad", "Farben & Streifen", f.error || "nicht bereit", "training"]
       : f.own ? ["ok", "Farben & Streifen", "gelernt" + (f.model_time ? " am " + f.model_time : ""), "training"]
       : ["warn", "Farben & Streifen", "Startwerte aus dem Simulator – mit eigenen Bildern lernen", "training"]);
@@ -1320,8 +1324,12 @@ input[type=text], input[type=password], input[type=number], select {
     } else {
       line("1. Kugeln finden (KI-Chip): ", c.error || "nicht bereit", "bad");
     }
-    const f = d.features || {};
-    if (f.ready) {
+    const f = d.features || {}, k = d.klassen || {};
+    if (k.ready) {
+      line("2. + 3. gestreift / Farbe: ", (k.on_tpu ? "KI-Chip" : "Netz auf dem Prozessor (nicht umgewandelt)") +
+        (k.model_time ? ", Modell vom " + k.model_time : "") + (k.ms ? ", " + k.ms.toFixed(1) + " ms pro Kugel" : ""), k.on_tpu ? "good" : "");
+      if (f.ready) line("Rückfall ohne Modell: ", f.model);
+    } else if (f.ready) {
       line("2. + 3. gestreift / Farbe: ", f.model + (f.model_time && f.own ? " vom " + f.model_time : "") + (f.balls && f.own ? " (" + f.balls + " Kugeln)" : ""), f.own ? "good" : "");
       if (!f.own) line("", "Tipp: Farben lernen, sobald es festgelegte Bilder gibt – die Startwerte stammen aus dem Simulator.");
       if (f.inherited && f.inherited.length) line("Zu wenig Beispiele für: ", f.inherited.join(", "));
@@ -1344,7 +1352,7 @@ input[type=text], input[type=password], input[type=number], select {
     for (const f of files) {
       toast(f.name + " wird hochgeladen ...");
       try {
-        const r = await fetch("/api/model", { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: f });
+        const r = await fetch("/api/model", { method: "POST", headers: { "Content-Type": "application/octet-stream", "X-Filename": encodeURIComponent(f.name) }, body: f });
         const data = await r.json().catch(() => ({}));
         if (r.status === 401 || r.status === 403) { showLogin(); return; }
         if (!r.ok) { toast(f.name + ": " + (data.error || "Hochladen fehlgeschlagen"), true); return; }
@@ -1355,6 +1363,9 @@ input[type=text], input[type=password], input[type=number], select {
     toast(msgs.join(" "));
   });
   $("learnFeaturesBtn").addEventListener("click", () => post("learn_features", {}));
+  $("resetKlassenBtn").addEventListener("click", () => {
+    if (confirm("Klassen-Modell löschen? Danach bestimmt wieder die Statistik Art und Farbe.")) post("reset_klassen", {});
+  });
   $("resetFeaturesBtn").addEventListener("click", () => {
     if (confirm("Gelernte Farben löschen? Danach gelten wieder die Startwerte aus dem Simulator.")) post("reset_features", {});
   });
