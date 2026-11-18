@@ -68,8 +68,8 @@ Das erste Mal (oder ältere Firmware) per USB: `billard-queue.zip`, Anleitung in
 Pi-Kameramodul / USB-Kamera ──▶ Raspberry Pi (Docker: "billard") ──HDMI──▶ Beamer
  (oder Demo ohne Kamera)          │  ├── Spiel-Panel   http://<pi-ip>:8089         PIN 1212 (Spieler)
                                   │  ├── Admin-Panel   http://<pi-ip>:8089/admin   PIN 1902
-Queue-Gyroskop (optional) ◀─WLAN─▶│  ├── Prüfer        http://<pi-ip>:8089/pruefen  eigener Code
-  Castcode, UDP 5005 + HTTP-API   │  └── Beamerbild    http://<pi-ip>:8089/beamer
+Queue-Gyroskop (optional) ◀─WLAN─▶│  └── Prüfer        http://<pi-ip>:8089/pruefen  eigener Code
+  Castcode, UDP 5005 + HTTP-API
 ```
 
 **Kugelerkennung in drei Stufen:** 1. der **KI-Chip (Coral USB Accelerator)** findet die Kugeln,
@@ -214,7 +214,7 @@ Home-Bildschirm“ wie eine App).
 1. **Kamera** wählen (Abschnitt 1a).
 2. **Tisch einrichten**: vier Ecken antippen, Tischgröße und Tuchfarbe wählen (Abschnitt 2).
 3. Unter „Was die Kamera sieht“ prüfen, ob jede Kugel einen Ring hat.
-4. *Optional:* **Queue mit Gyroskop** koppeln (Abschnitt 3b), **QR-Code** anpassen (Abschnitt 1c).
+4. *Optional:* **Queue mit Gyroskop** koppeln (Abschnitt 3b), **QR-Code** anpassen (Abschnitt 1b).
 5. Fertig – gespielt wird im **Spiel-Panel** (Startseite, PIN **1212**, Abschnitt 3).
 
 ### 1.8 Aktualisieren
@@ -256,14 +256,7 @@ Admin-Panel → **„Kamera“**. Die Tisch-Ecken werden je Kamera gespeichert, 
 
 Der Container läuft dafür mit `privileged: true` (Zugriff auf HDMI, USB- und Pi-Kamera).
 
-## 1b. Beamerbild im Browser
-
-`http://<pi-ip>:8089/beamer` zeigt das komplette Beamerbild live (Kamera, Grafik, Game-Bar) –
-z. B. auf einem Fernseher, Laptop oder zweiten Tablet. Antippen = Vollbild.
-Qualität: `/beamer?q=fhd&fps=8` (`q` = `sd`, `hd`, `fhd`; `fps` 1–10). Jede offene Ansicht kostet
-den Pi etwas Rechenzeit; mehrere Zuschauer teilen sich aber dasselbe Bild.
-
-## 1c. QR-Code und Meldungen auf dem Beamer
+## 1b. QR-Code und Meldungen auf dem Beamer
 
 **QR-Code unten rechts:** führt standardmäßig zum Spiel-Panel (`http://<pi-ip>:8089/`), wer ihn
 scannt, braucht dann noch die Spiel-PIN. Admin-Panel → **„Beamer: QR-Code“**: ein-/ausblenden,
