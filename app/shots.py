@@ -47,6 +47,34 @@ class ShotEvent:
         return diff_states(self.before, self.after, radius)
 
 
+def _square_lut(weight, threshold):
+    """Tabelle |d| -> (weight * d)^2, so skaliert, dass threshold^2 auf 128 faellt (uint8)."""
+    d = np.arange(256, dtype=np.float64)
+    return np.clip(np.round((weight * d) ** 2 * 128.0 / (threshold * threshold)), 0, 255).astype(np.uint8)
+
+
+_LUTS = {}
+
+
+def lab_far_mask(lab, ref, threshold, l_weight=1.0):
+    """Maske (uint8, 255 = anders): Farbabstand zwischen lab und ref groesser als threshold.
+    Abstand^2 = (l_weight * dL)^2 + da^2 + db^2 - wie vorher, aber ohne Gleitkomma pro Pixel:
+    |Differenz| per absdiff (uint8), Quadrat per Tabelle, Summe saturiert bei 255. Die Schwelle
+    liegt bei 128, die Saturierung aendert das Ergebnis also nicht.
+    lab: uint8-Lab-Bild. ref: gleich grosses uint8-Bild oder 3 Werte (L, a, b)."""
+    key = (float(threshold), float(l_weight))
+    lut = _LUTS.get(key)
+    if lut is None:
+        q = _square_lut(1.0, threshold)
+        lut = _LUTS[key] = np.dstack([_square_lut(l_weight, threshold), q, q]).reshape(1, 256, 3)
+    if not isinstance(ref, np.ndarray) or ref.shape != lab.shape:
+        ref = tuple(int(round(float(v))) for v in np.ravel(ref)[:3]) + (0,)
+    sq = cv2.LUT(cv2.absdiff(lab, ref), lut)
+    c0, c1, c2 = cv2.split(sq)
+    s = cv2.add(cv2.add(c0, c1), c2)
+    return cv2.compare(s, 128, cv2.CMP_GT)
+
+
 class MotionMeter:
     """Bewegung zwischen zwei Bildern (auf verkleinerter Draufsicht)."""
 
@@ -62,7 +90,8 @@ class MotionMeter:
         moving = False
         if self.prev is not None:
             diff = cv2.absdiff(small, self.prev)
-            self.value = float((diff > self.threshold).mean())
+            _, over = cv2.threshold(diff, self.threshold, 1, cv2.THRESH_BINARY)
+            self.value = cv2.countNonZero(over) / over.size
             moving = self.value > self.min_fraction
         self.prev = small
         return moving
@@ -85,17 +114,15 @@ class OcclusionMeter:
     def update(self, warped, balls) -> float:
         h, w = warped.shape[:2]
         small = cv2.resize(warped, (int(w * self.scale), int(h * self.scale)), interpolation=cv2.INTER_AREA)
-        lab = cv2.cvtColor(cv2.GaussianBlur(small, (3, 3), 0), cv2.COLOR_BGR2LAB).astype(np.float32)
+        lab = cv2.cvtColor(cv2.GaussianBlur(small, (3, 3), 0), cv2.COLOR_BGR2LAB)   # uint8
         self._n += 1
         if self._cloth is None or self._n % 15 == 1:
             self._cloth = np.median(lab[::3, ::3].reshape(-1, 3), axis=0)    # Tuch = groesste Flaeche
-        d = lab - self._cloth
-        dist = (0.55 * d[..., 0]) ** 2 + d[..., 1] ** 2 + d[..., 2] ** 2     # Helligkeit schwach gewichtet
-        mask = (dist > self.threshold ** 2).astype(np.uint8)
+        mask = lab_far_mask(lab, self._cloth, self.threshold, 0.55)         # Helligkeit schwach gewichtet
         mask = cv2.medianBlur(mask, 3)                                       # Bildrauschen weg, Linien bleiben
         for b in balls:
             cv2.circle(mask, (int(b.x * self.scale), int(b.y * self.scale)), int(self.r * 1.35) + 1, 0, -1)
-        self.value = float(mask.mean())
+        self.value = cv2.countNonZero(mask) / mask.size
         return self.value
 
 

@@ -125,7 +125,7 @@ def _draw_camera(surf, renderer, cache, rect, frame, frame_id, pipeline, reader)
     oy += rect.y
     key = (frame_id, w, h, id(reader))
     if key != cache.get("key"):
-        img = cv2.cvtColor(cv2.resize(frame, (w, h), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2RGB)
+        img = cv2.cvtColor(cv2.resize(frame, (w, h), interpolation=cv2.INTER_LINEAR), cv2.COLOR_BGR2RGB)
         cache["surface"] = pygame.image.frombuffer(img.tobytes(), (w, h), "RGB")
         cache["key"] = key
     surf.blit(cache["surface"], (ox, oy))
