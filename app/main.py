@@ -445,7 +445,9 @@ class App:
             return self.save_features(data)
         if len(data) < 1000 or data[4:8] != b"TFL3":
             raise config.UserError("Das ist keine TFLite-Modelldatei (.tflite)")
-        if "klassen" in name.lower() or (not name and len(data) < 1_500_000):
+        # Das Klassen-Modell (Stufe 2 + 3) ist klein (~0,2 MB), das Kugel-Modell (Stufe 1) mehrere MB:
+        # ein kleines Modell ersetzt nie Stufe 1, auch wenn der Dateiname nicht passt
+        if "klassen" in name.lower() or len(data) < 1_500_000:
             return self.save_klassen(data)
         if b"edgetpu-custom-op" not in data:
             raise config.UserError("Modell ist nicht für den Coral kompiliert "
@@ -456,6 +458,8 @@ class App:
         tmp = path + ".tmp"
         with open(tmp, "wb") as f:
             f.write(data)
+        if os.path.exists(path):                     # vorheriges Modell aufheben (zurueck: Datei umbenennen)
+            os.replace(path, path + ".vorher")
         os.replace(tmp, path)
         return f"Modell gespeichert ({len(data) / 1e6:.1f} MB). Der Coral lädt es in wenigen Sekunden."
 
