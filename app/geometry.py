@@ -32,6 +32,7 @@ class Table:
         self.length_m = length_m
         self.H = self.Hinv = None
         self.corners = None
+        self._maps = None
         if corners:
             self.set_corners(corners)
 
@@ -41,6 +42,7 @@ class Table:
         dst = np.float32([[0, 0], [WARP_W, 0], [WARP_W, WARP_H], [0, WARP_H]])
         self.H = cv2.getPerspectiveTransform(src, dst)
         self.Hinv = np.linalg.inv(self.H)
+        self._maps = None
 
     @property
     def calibrated(self) -> bool:
@@ -55,8 +57,27 @@ class Table:
         return [(0, 0), (WARP_W / 2, 0), (WARP_W, 0),
                 (0, WARP_H), (WARP_W / 2, WARP_H), (WARP_W, WARP_H)]
 
+    def _remap_maps(self):
+        """Einmal pro Kalibrierung: fuer jedes Pixel der Draufsicht die Stelle im Kamerabild,
+        als Festkomma-Tabelle (cv2.convertMaps). warpPerspective rechnet diese Projektion
+        bei jedem Bild neu in Gleitkomma - so bleibt pro Bild nur Nachschlagen und
+        Ganzzahl-Interpolation."""
+        maps = self._maps
+        if maps is None:
+            xs, ys = np.meshgrid(np.arange(WARP_W, dtype=np.float64), np.arange(WARP_H, dtype=np.float64))
+            Hi = self.Hinv
+            w = Hi[2, 0] * xs + Hi[2, 1] * ys + Hi[2, 2]
+            w = np.where(np.abs(w) < 1e-12, 1e-12, w)
+            mx = ((Hi[0, 0] * xs + Hi[0, 1] * ys + Hi[0, 2]) / w).astype(np.float32)
+            my = ((Hi[1, 0] * xs + Hi[1, 1] * ys + Hi[1, 2]) / w).astype(np.float32)
+            np.clip(mx, -30000, 30000, out=mx)          # Festkomma ist int16
+            np.clip(my, -30000, 30000, out=my)
+            maps = self._maps = cv2.convertMaps(mx, my, cv2.CV_16SC2)
+        return maps
+
     def warp(self, frame):
-        return cv2.warpPerspective(frame, self.H, (WARP_W, WARP_H), flags=cv2.INTER_LINEAR)
+        m1, m2 = self._remap_maps()
+        return cv2.remap(frame, m1, m2, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
 
     def to_camera(self, points):
         """Punkte aus der Draufsicht zurueck ins Kamerabild."""

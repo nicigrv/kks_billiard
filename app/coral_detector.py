@@ -167,6 +167,38 @@ class CoralEngine:
 
 
 # -------------------------------------------------------------- YOLO-Auswertung
+_INPUT_LUTS = {}
+
+
+def input_lut(dt, scale_q, zp):
+    """Tabelle Pixelwert 0..255 -> Modelleingabe (gleiche Rechnung wie vorher pro Pixel,
+    aber nur 256-mal statt fuer jedes der 640 x 640 x 3 Pixel)."""
+    key = (np.dtype(dt).str, float(scale_q), int(zp))
+    lut = _INPUT_LUTS.get(key)
+    if lut is None:
+        v = np.arange(256, dtype=np.float32)
+        q = v / 255.0 / (scale_q or 1 / 255.0) + zp
+        info = np.iinfo(dt)
+        lut = np.clip(np.round(q), info.min, info.max).astype(dt)
+        _INPUT_LUTS[key] = lut
+    return lut
+
+
+def quantize_input(img, dt, scale_q, zp):
+    """uint8-Bild -> Modelleingabe. Uebliche Coral-Modelle (Skala 1/255) brauchen gar keine
+    Rechnung: uint8 bleibt wie es ist, int8 ist nur das oberste Bit gekippt."""
+    if np.dtype(dt) == np.float32:
+        return img.astype(np.float32) / 255.0
+    lut = input_lut(dt, scale_q, zp)
+    if lut.dtype == np.uint8 and np.array_equal(lut, np.arange(256)):
+        return img
+    if lut.dtype == np.int8 and np.array_equal(lut, np.arange(-128, 128)):
+        return (img ^ np.uint8(128)).view(np.int8)
+    if lut.dtype in (np.uint8, np.int8):
+        return cv2.LUT(img, lut)
+    return lut[img]
+
+
 def letterbox(img, out_h, out_w, fill=114):
     """Bild ohne Verzerrung auf die Modellgroesse bringen (Rand grau) - genau wie im Training."""
     ih, iw = img.shape[:2]
@@ -229,13 +261,9 @@ class CoralDetector:
             raise CoralNotReady(self.engine.error)
         shape, dt, scale_q, zp = self.engine.input_info()
         _, h, w, _ = shape
-        img, scale, dx, dy = letterbox(cv2.cvtColor(warped, cv2.COLOR_BGR2RGB), h, w)
-        if dt == np.float32:
-            data = (img.astype(np.float32) / 255.0)[None]
-        else:
-            q = img.astype(np.float32) / 255.0 / (scale_q or 1 / 255.0) + zp
-            info = np.iinfo(dt)
-            data = np.clip(np.round(q), info.min, info.max).astype(dt)[None]
+        img, scale, dx, dy = letterbox(warped, h, w)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)          # erst nach dem Verkleinern: weniger Pixel
+        data = quantize_input(img, dt, scale_q, zp)[None]
         out = self.engine.run(data)
         dets = decode_yolo(out, w, h, self.conf, nc=self.engine.nc or 1)
 

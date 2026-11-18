@@ -27,6 +27,7 @@ import numpy as np
 
 from ballnum import kind_of_number, color_of_number
 from recorder import SINGLE_MODEL
+from shots import lab_far_mask
 
 NAMES = {0: "Weiße", 8: "schwarze 8"}
 
@@ -50,7 +51,7 @@ class SingleBall:
         self.enabled = False
         self.number = None
         self.has_upload = has_upload or (lambda: False)   # Trainingsseite eingerichtet?
-        self.ref = None                 # leerer Tisch (Lab, float32, geglaettet)
+        self.ref = None                 # leerer Tisch (Lab, uint8, geglaettet)
         self.ref_jpg = None             # leerer Tisch als JPEG (geht mit den Knopf-Bildern zum VPS)
         self.shots = 0                  # Bilder per Knopf in dieser Sitzung
         self.ref_time = None
@@ -76,7 +77,7 @@ class SingleBall:
 
     @staticmethod
     def _lab(img):
-        return cv2.GaussianBlur(cv2.cvtColor(img, cv2.COLOR_BGR2LAB).astype(np.float32), (5, 5), 0)
+        return cv2.GaussianBlur(cv2.cvtColor(img, cv2.COLOR_BGR2LAB), (5, 5), 0)     # uint8
 
     # ------------------------------------------------------------- Einstellungen
     def set_enabled(self, on):
@@ -124,9 +125,8 @@ class SingleBall:
             ref = self.ref
         if ref is None:
             # Ohne leeren Tisch: Abweichung von der mittleren Tuchfarbe
-            ref = np.median(lab.reshape(-1, 3), axis=0)[None, None, :]
-        diff = np.sqrt(((lab - ref) ** 2).sum(axis=2))
-        mask = (diff > 22).astype(np.uint8)
+            ref = np.median(lab[::3, ::3].reshape(-1, 3), axis=0)
+        mask = lab_far_mask(lab, ref, 22)
         k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k, iterations=2)
