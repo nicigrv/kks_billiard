@@ -34,7 +34,11 @@ Pi den Queue neu (z. B. neue IP nach Neustart). Zum Nachschauen gibt es weiterhi
 | **rotes X** blinkt (Atom Matrix) / violett blinkend (andere) | Sensor liefert keine gültigen Werte – Verkabelung bzw. Gerät neu starten |
 
 **Knopf** (auf dem Atom gedrückt), wenn die LED **grün** ist: Der Pi startet ein Spiel **Team A gegen
-Team B**, Team A bricht an. Während eines Spiels oder ohne Verbindung macht der Knopf nichts.
+Team B**, Team A bricht an. **Während eines Spiels** (LED in Teamfarbe) heißt der Knopf **„Stoß fertig“**:
+Der Pi wertet sofort aus, sobald der Tisch frei ist, und zählt den Stoß (ab Firmware 3.4). Die LED blinkt
+zur Bestätigung kurz weiß. Ohne Verbindung macht der Knopf nichts.
+Außerdem meldet der Queue jeden gemessenen Stoß (Beschleunigungsspitze) – damit erkennt der Pi Stöße auch
+bei kleiner Bewegung der Weißen.
 Atom Lite/Matrix: LED G27, Knopf G39. AtomS3 Lite: LED G35, Knopf G41. Andere Boards:
 `LED_PIN`/`BTN_PIN` in `platformio.ini` setzen (WS2812-LED, Knopf gegen GND).
 

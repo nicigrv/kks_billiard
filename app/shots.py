@@ -9,6 +9,10 @@ Grundsaetze (damit Erkennungsfehler nicht zu falschen Punkten fuehren):
     in den meisten Bildern an derselben Stelle gefunden wurde; ihr Typ per Mehrheit.
   * Ein "Stoss" liegt nur vor, wenn sich wirklich etwas bewegt hat (Weisse verschoben
     oder Kugeln weg). Nur Hinbeugen oder Weisse-Hinlegen loest nichts aus.
+  * Hilfe vom Queue (optional): Meldet das Gyroskop einen Stoss (Beschleunigungsspitze), reicht
+    schon eine kleine Bewegung der Weissen - und der Stoss wird auch erkannt, wenn die Kamera die
+    Bewegung verpasst hat. "Stoss fertig" (Knopf am Queue bzw. im Spiel-Panel) wertet sofort aus,
+    sobald der Tisch ruhig und frei ist, und zaehlt den Stoss auf jeden Fall (auch ohne Treffer).
 """
 
 import itertools
@@ -326,7 +330,9 @@ def diff_states(before: TableState, after: TableState, radius: float) -> ShotDif
     return ShotDiff(pocketed, before.cue is not None, after.cue is not None, moved, uncertain, be, bu)
 
 
-def shot_happened(before: TableState, after: TableState, radius: float, allow_growth=False) -> bool:
+def shot_happened(before: TableState, after: TableState, radius: float, allow_growth=False,
+                  cue_stroke=False) -> bool:
+    """cue_stroke: der Queue hat einen Stoss gemeldet -> schon eine kleine Bewegung der Weissen zaehlt."""
     nb = sum(1 for b in before.balls if b.kind in OBJECT_KINDS)
     na = sum(1 for b in after.balls if b.kind in OBJECT_KINDS)
     if na > nb + 2 and not allow_growth:
@@ -334,7 +340,8 @@ def shot_happened(before: TableState, after: TableState, radius: float, allow_gr
     cb, ca = before.cue, after.cue
     if cb is not None and ca is None:
         return True                       # Weisse verschwunden = gestossen und versenkt
-    if cb is not None and ca is not None and np.hypot(cb.x - ca.x, cb.y - ca.y) > 2 * radius:
+    move = (0.6 if cue_stroke else 2.0) * radius
+    if cb is not None and ca is not None and np.hypot(cb.x - ca.x, cb.y - ca.y) > move:
         return True                       # Weisse hat sich bewegt
     return na < nb                        # Kugeln weg (z. B. Stoss ohne sichtbare Weisse)
 
@@ -360,6 +367,24 @@ class ShotMonitor:
         self._dirty = False         # seit dem Ausgangszustand gab es Bewegung
         self._fresh = True          # erster Stoss nach Reset (Break): Kugelzahl darf steigen
         self._since_refresh = 0
+        self._stroke = False        # Queue hat seit dem Ausgangszustand einen Stoss gemeldet
+        self._finish = False        # "Stoss fertig" gedrueckt: sofort auswerten, Stoss zaehlt
+
+    def cue_stroke(self):
+        """Gyroskop im Queue meldet einen Stoss: es ist etwas passiert, auch wenn die Kamera nichts sah."""
+        if self.reference is not None:
+            self._stroke = True
+            self._dirty = True
+            self.frames.clear()            # erst Bilder NACH dem Stoss zaehlen
+            self.still_since = None
+            self.state = "bewegung"
+
+    def finish(self):
+        """'Stoss fertig' (Knopf am Queue / Spiel-Panel). False = noch kein Ausgangszustand."""
+        if self.reference is None:
+            return False
+        self._finish = True
+        return True
 
     def update(self, balls, moving: bool, occluded: bool):
         """Pro Bild aufrufen. Liefert ShotEvent, 'reference' oder None."""
@@ -379,7 +404,9 @@ class ShotMonitor:
         if len(self.frames) > self.window:
             self.frames.pop(0)
 
-        if now - self.still_since < self.settle_s or len(self.frames) < self.min_frames:
+        # "Stoss fertig": nicht 1,2 s warten - kurz ruhig und frei reicht
+        settle, need = (0.3, 2) if self._finish else (self.settle_s, self.min_frames)
+        if now - self.still_since < settle or len(self.frames) < need:
             return None
 
         if self.reference is None:
@@ -388,8 +415,9 @@ class ShotMonitor:
             self._since_refresh = 0
             self.ref_id += 1
             return "reference"
-        if self._dirty:
-            self._dirty = False
+        if self._dirty or self._finish:
+            forced, stroke = self._finish, self._stroke
+            self._dirty = self._finish = self._stroke = False
             self.state = "ruhig"
             self._since_refresh = 0
             before = self.reference
@@ -397,7 +425,7 @@ class ShotMonitor:
             inherit_votes(before, stable, self.radius)
             self.reference = stable
             self.ref_id += 1
-            if shot_happened(before, stable, self.radius, allow_growth=self._fresh):
+            if forced or shot_happened(before, stable, self.radius, allow_growth=self._fresh, cue_stroke=stroke):
                 self._fresh = False
                 return ShotEvent(before, stable)
             return None

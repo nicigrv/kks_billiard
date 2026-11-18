@@ -297,6 +297,15 @@ scannen), PIN **1212**. Danach bleibt das Gerät 30 Tage angemeldet.
 **Ganz wichtig: Während die Kugeln rollen und solange sich jemand über den Tisch beugt, wertet das System nichts aus.**
 Erst wenn der Tisch frei und ruhig ist. Ein Queue, das quer auf dem Tuch liegt, blockiert deshalb die Auswertung („Tisch wird verdeckt“).
 
+**Wie ein Stoß erkannt wird:** Das System merkt sich den ruhigen Tisch (Ausgangszustand). Nach Bewegung und
+1,2 Sekunden Ruhe vergleicht es vorher/nachher: Stoß = Weiße um mehr als 2 Kugelradien bewegt, Weiße
+versenkt oder weniger Kugeln auf dem Tisch. Mit dem **Queue mit Gyroskop** kommt Hilfe dazu:
+- Misst der Queue einen Stoß, reicht schon eine kleine Bewegung der Weißen (0,6 Radien), und der Stoß wird
+  auch erkannt, wenn die Kamera die Bewegung verpasst hat.
+- **„Stoß fertig“** – Knopf am Queue während des Spiels (LED in Teamfarbe, blinkt kurz weiß) oder Knopf im
+  Spiel-Panel: wertet sofort aus, sobald der Tisch frei ist (ohne 1,2 s Wartezeit), und zählt den Stoß auf
+  jeden Fall – auch wenn keine Kugel getroffen wurde.
+
 Geht etwas schief: **„Rückgängig“** macht die letzte Änderung rückgängig, unter „Weitere Korrekturen“ lassen sich Gruppen, Restkugeln und Sieger von Hand setzen.
 
 ## 3a. Spiel-Panel und Admin-Panel

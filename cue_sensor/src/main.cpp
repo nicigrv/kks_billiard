@@ -47,6 +47,8 @@
  *                        Atom Matrix: nach jedem Stoss 2 s ein Balken (1 Zeile je 3 g, gruen -> rot).
  *                        Sensor liefert keine (gueltigen) Werte: rotes X blinkt (andere Boards: violett).
  *   Knopf                bei gruener LED: Spiel Team A gegen Team B starten ("knopf" zaehlt hoch)
+ *                        im Spiel (LED in Teamfarbe): "Stoss fertig" - der Pi wertet sofort aus
+ *                        (LED blinkt kurz weiss als Bestaetigung)
  *   mDNS             queue-k7p2qm.local
  *
  * yaw: Grad, gegen den Uhrzeigersinn positiv (von oben gesehen). Der absolute Wert ist beliebig -
@@ -846,6 +848,7 @@ static void ledCross(bool on) {
 #endif
 
 enum LedState { LED_ROT, LED_GRUEN, LED_TEAM };
+static uint32_t btnFlashUntil = 0;              // Knopf gedrueckt: LED kurz weiss
 
 static LedState ledState() {
   if (!piConnected()) return LED_ROT;
@@ -866,6 +869,10 @@ static void updateLed() {
 #else
     ledColor(on ? 255 : 0, 0, on ? 255 : 0);       // violett blinkend
 #endif
+    return;
+  }
+  if ((int32_t)(btnFlashUntil - ms) > 0) {         // Knopf bestaetigen
+    ledColor(255, 255, 255);
     return;
   }
   if (portal) {                                    // Einrichtungs-Hotspot: rot blinken
@@ -896,12 +903,14 @@ static void handleButton() {
   changed = ms;
   lastDown = down;
   if (!down) return;                                   // nur beim Druecken
-  if (ledState() == LED_GRUEN) {
+  LedState st = ledState();
+  if (st == LED_GRUEN || st == LED_TEAM) {             // gruen: Spiel starten, Teamfarbe: Stoss fertig
     knopf++;
-    Serial.printf("Knopf: Spiel starten (%lu)\n", (unsigned long)knopf);
+    btnFlashUntil = ms + 250;                          // kurz weiss: Druck angekommen
+    Serial.printf("Knopf: %s (%lu)\n", st == LED_GRUEN ? "Spiel starten" : "Stoss fertig", (unsigned long)knopf);
     for (int i = 0; i < 3; i++) sendLage();            // sofort melden (UDP: lieber mehrfach)
   } else {
-    Serial.println("Knopf: nur bei gruener LED (verbunden, kein Spiel)");
+    Serial.println("Knopf: ohne Verbindung zum Pi ohne Wirkung");
   }
 #endif
 }

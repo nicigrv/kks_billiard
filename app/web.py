@@ -40,7 +40,7 @@ PRUEFER_POST = {"/api/round/submit", "/api/review_save", "/api/review_release"}
 STREAM_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError)
 # Diese Befehle darf auch das Spiel-Panel (PIN 1212); alle anderen nur der Admin
 GAME_COMMANDS = {"start", "new_rack", "abort", "foul", "switch_turn", "undo", "undo_shot", "set_group",
-                 "adjust", "winner", "assist", "record_round", "cue_use", "cue_calibrate",
+                 "adjust", "winner", "assist", "record_round", "cue_use", "cue_calibrate", "shot_done",
                  "capture", "auto_capture"}
 
 
