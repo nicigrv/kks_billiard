@@ -12,7 +12,6 @@ Anzeige auf dem HDMI-Ausgang (Beamer/Bildschirm). Laeuft im Hauptthread (pygame 
 Oben rechts erscheinen Meldungen (Fehler, Hinweise) wie bei iPhone/Mac, unten rechts der
 QR-Code (im Admin-Panel einstellbar). Liegt der Queue richtig (Gyroskop), erscheint ein
 grosser gruener Haken.
-Dasselbe Bild gibt es im Browser unter http://<pi>:<port>/beamer (draw_beamer).
 """
 
 import os
@@ -88,8 +87,7 @@ class Display:
 
 # ------------------------------------------------------------------ Beamerbild
 def draw_beamer(surf, renderer, cam_cache, frame, frame_id, pipeline, reader, scene):
-    """Das komplette Beamerbild auf eine Surface zeichnen - den Bildschirm (HDMI) oder
-    ein Bild im Speicher (Beamer-Ansicht im Browser, /beamer). Aufruf unter RENDER_LOCK."""
+    """Das komplette Beamerbild auf eine Surface zeichnen (Bildschirm/HDMI). Aufruf unter RENDER_LOCK."""
     sw, sh = surf.get_size()
     bar_h = max(90, int(sh * 0.17))
     top_h = sh - bar_h

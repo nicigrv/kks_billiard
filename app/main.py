@@ -116,10 +116,6 @@ class App:
         self._ref_id = -1
         self._web_renderer = SceneRenderer()
         self._graphic = (None, None)        # (Schluessel, JPEG)
-        self._beamer = {"t": 0.0, "jpg": None, "size": None, "cam": {}, "renderer": None}
-        self._beamer_lock = threading.Lock()
-        self._beamer_cond = threading.Condition(self._beamer_lock)
-        self._beamer_want = (0.0, None)     # (Zeitpunkt, Groesse) der letzten Anfrage aus dem Browser
         # True, solange der Hauptthread das HDMI-Bild zeichnet: dann bekommt der Browser eine
         # verkleinerte Kopie davon. Ein zweites pygame-Zeichnen im Web-Thread parallel zur
         # HDMI-Ausgabe (kmsdrm) liess das Pi-Kameramodul haengen (Standbild).
@@ -343,70 +339,6 @@ class App:
         if ok:
             self._graphic = (key, jpg.tobytes())
         return self._graphic[1]
-
-    def _beamer_from_display(self, size, max_age):
-        """Beamerbild mit HDMI-Ausgabe: auf die naechste Kopie aus dem Hauptthread warten."""
-        size = tuple(size)
-        with self._beamer_cond:
-            b = self._beamer
-            now = time.monotonic()
-            self._beamer_want = (now, size)
-            if b["jpg"] is None or b["size"] != size or now - b["t"] >= max_age:
-                self._beamer_cond.wait_for(
-                    lambda: b["jpg"] is not None and b["size"] == size and b["t"] >= now, timeout=2.0)
-            if b["jpg"] is None or b["size"] != size:
-                raise web.BeamerNotReady("Beamerbild noch nicht bereit")
-            return b["jpg"]
-
-    def offer_beamer(self, screen, max_age=0.15):
-        """Vom Hauptthread nach jedem HDMI-Bild aufgerufen: fertiges Bild fuer den Browser
-        verkleinern - nur wenn gerade jemand die Beamer-Ansicht offen hat."""
-        t, size = self._beamer_want
-        now = time.monotonic()
-        if size is None or now - t > 3.0 or now - self._beamer["t"] < max_age:
-            return
-        import pygame
-        from scene import RENDER_LOCK
-        with RENDER_LOCK:
-            if screen.get_size() == size:
-                small = screen.copy()
-            else:
-                try:
-                    small = pygame.transform.smoothscale(screen, size)
-                except ValueError:                       # nur 24/32-Bit-Flaechen
-                    small = pygame.transform.scale(screen, size)
-            img = surface_to_bgr(small)
-        ok, jpg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
-        if ok:
-            with self._beamer_cond:
-                self._beamer.update(t=time.monotonic(), jpg=jpg.tobytes(), size=size)
-                self._beamer_cond.notify_all()
-
-    def beamer_jpeg(self, size=(1280, 720), max_age=0.15):
-        """Das komplette Beamerbild (Kamera + Grafik + Game-Bar) fuer den Browser.
-        Mehrere Zuschauer teilen sich ein Bild; neu gezeichnet hoechstens alle max_age s."""
-        if self.display_active:
-            return self._beamer_from_display(size, max_age)
-        import pygame
-        from display import draw_beamer
-        from scene import RENDER_LOCK
-        with self._beamer_lock:
-            b = self._beamer
-            now = time.monotonic()
-            if b["jpg"] is not None and b["size"] == size and now - b["t"] < max_age:
-                return b["jpg"]
-            if b["renderer"] is None:
-                b["renderer"] = SceneRenderer()
-            frame, fid, _ = self.reader.latest()
-            sc = self.scene()
-            with RENDER_LOCK:
-                surf = pygame.Surface(size)
-                draw_beamer(surf, b["renderer"], b["cam"], frame, fid, self.pipe, self.reader, sc)
-                img = surface_to_bgr(surf)
-            ok, jpg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
-            if ok:
-                b.update(t=now, jpg=jpg.tobytes(), size=size)
-            return b["jpg"]
 
     def _record_step(self):
         if not self.rounds.active:
@@ -990,7 +922,6 @@ def main():
         while disp.handle_events():
             frame, fid, _ = app.reader.latest()
             disp.draw(frame, fid, app.pipe, app.reader, app.scene())
-            app.offer_beamer(disp.screen)
             clock.tick(DISPLAY_FPS)
     finally:
         app.display_active = False

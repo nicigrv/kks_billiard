@@ -182,7 +182,7 @@ def run_panels(d):
     txt = cv2.QRCodeDetector().detectAndDecode(img)[0] if img is not None else ""
     check(txt == "https://example.org/billard", f"QR-Vorschau lesbar ({txt!r})")
 
-    # Beamerbild: QR-Code unten rechts lesbar, Meldung (kein KI-Chip) oben rechts
+    # Meldung (kein KI-Chip) fuer Beamer und Panels, QR-Code-Einstellung
     deadline = time.monotonic() + 15
     notices = []
     while time.monotonic() < deadline:
@@ -191,24 +191,12 @@ def run_panels(d):
             break
         time.sleep(0.5)
     check(any(n["key"] == "ki" and n["level"] == "error" for n in notices), "Meldung: KI-Chip nicht bereit")
-    code, jpg, _ = req("/api/beamer.jpg?q=fhd")
-    img = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
-    h, w = img.shape[:2]
-    corner = img[int(h * 0.8):, int(w * 0.88):]
-    corner = cv2.resize(corner, None, fx=3, fy=3, interpolation=cv2.INTER_NEAREST)
-    txt = cv2.QRCodeDetector().detectAndDecode(corner)[0]
-    check(txt == "https://example.org/billard", f"Beamer: QR-Code unten rechts lesbar ({txt!r})")
-    top_right = img[:int(h * 0.12), int(w * 0.7):].astype(int)
-    red = ((top_right[:, :, 2] > 220) & (top_right[:, :, 1] < 100) & (top_right[:, :, 0] < 100)).sum()
-    check(red > 50, "Beamer: rotes Meldungs-Symbol oben rechts")
+    st = json.loads(req("/api/state", cookie=admin)[1])
+    check(st["qr"]["url"] == "https://example.org/billard", "QR-Code fuer den Beamer eingestellt")
     code, body, _ = req("/api/qr_settings", {"enabled": False}, cookie=admin)
-    code, jpg, _ = req("/api/beamer.jpg?q=fhd&x=1")
-    time.sleep(0.3)
-    code, jpg, _ = req("/api/beamer.jpg?q=fhd&x=2")
-    img = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
-    corner = cv2.resize(img[int(h * 0.8):, int(w * 0.88):], None, fx=3, fy=3, interpolation=cv2.INTER_NEAREST)
-    check(cv2.QRCodeDetector().detectAndDecode(corner)[0] == "", "QR-Code ausgeschaltet -> weg")
-    check(b"Admin" not in req("/beamer")[1], "Beamer-Ansicht ohne Link zum Admin")
+    check(code == 200 and not json.loads(body)["state"]["qr"].get("enabled"), "QR-Code ausgeschaltet")
+    check(req("/beamer", cookie=admin)[0] == 404 and req("/api/beamer.jpg", cookie=admin)[0] == 404,
+          "keine Live-Uebertragung des Beamerbilds mehr (/beamer, /api/beamer.jpg)")
 
     print("Bilder am Tisch speichern, spaeter festlegen")
     code, body, _ = req("/api/capture", {}, cookie=game)

@@ -5,9 +5,8 @@ Webserver (Port 8080). Nur Python-Standardbibliothek, keine Zusatzpakete.
   /admin     Admin-Panel (PIN 1902): Kamera, Tisch, Queue koppeln, QR-Code, Pruefer, KI-Training
   /pruefen   Pruefer (eigener Code): Bilder der Pruefrunde festlegen
   /training  Trainingsmodus (Admin)
-  /beamer    Beamerbild im Browser (ohne Anmeldung)
 
-Schutz (auth.py): Die Seiten selbst, die Beamer-Ansicht und die Anmeldung sind offen, alles
+Schutz (auth.py): Die Seiten selbst und die Anmeldung sind offen, alles
 andere braucht die passende Rolle. Der Admin darf alles, was das Spiel-Panel darf.
 """
 
@@ -23,21 +22,16 @@ from auth import Auth, LoginError
 from config import UserError
 
 
-class BeamerNotReady(OSError):
-    """Das Beamerbild ist gerade nicht verfuegbar (HDMI-Bild kommt kurz nicht)."""
-
-
 HERE = os.path.dirname(os.path.abspath(__file__))
 MAX_MODEL_BYTES = 64 * 1024 * 1024
 MAX_FIRMWARE_BYTES = 4 * 1024 * 1024
 MAX_JSON_BYTES = 2 * 1024 * 1024                         # Befehle und Festlegungen sind klein
-BEAMER_SIZES = {"sd": (960, 540), "hd": (1280, 720), "fhd": (1920, 1080)}
 
 
-PAGES = {"/": "game", "/index.html": "game", "/admin": "admin", "/beamer": "beamer", "/training": "training",
+PAGES = {"/": "game", "/index.html": "game", "/admin": "admin", "/training": "training",
          "/pruefen": "training"}                       # Pruefer: gleiche Seite wie der Trainingsmodus, eigene Rolle
 STATIC = {"/notify.js": ("notify.js", "application/javascript; charset=utf-8")}
-PUBLIC_GET = set(PAGES) | set(STATIC) | {"/api/beamer.jpg", "/api/beamer.mjpg", "/api/me"}
+PUBLIC_GET = set(PAGES) | set(STATIC) | {"/api/me"}
 SPIEL_GET = {"/api/game", "/api/graphic.jpg"}            # + /videos/...
 PRUEFER_GET = {"/api/round", "/api/round/image"}
 STORED_GET = {"/api/review/next", "/api/review/image"}   # gespeicherte Bilder: Admin und Pruefer
@@ -122,30 +116,6 @@ def make_handler(app, auth: Auth):
                     self.wfile.write(chunk)
                     left -= len(chunk)
 
-        def _stream_beamer(self, size, fps):
-            """Beamerbild als laufender MJPEG-Strom (Browser zeigt ihn wie ein Video)."""
-            boundary = "beamerbild"
-            self.send_response(200)
-            self.send_header("Content-Type", f"multipart/x-mixed-replace; boundary={boundary}")
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            try:
-                while True:
-                    t0 = time.monotonic()
-                    try:
-                        jpg = app.beamer_jpeg(size)
-                    except BeamerNotReady:
-                        # HDMI-Bild kurz nicht da (z. B. Kamera wird umgestellt): Strom offen lassen,
-                        # sonst bleibt im Browser das letzte Bild stehen
-                        time.sleep(0.5)
-                        continue
-                    self.wfile.write(f"--{boundary}\r\nContent-Type: image/jpeg\r\n"
-                                     f"Content-Length: {len(jpg)}\r\n\r\n".encode() + jpg + b"\r\n")
-                    self.wfile.flush()
-                    time.sleep(max(0.0, 1 / fps - (time.monotonic() - t0)))
-            except OSError:                              # Browser zu, Netz weg
-                return None
-
         def _who(self):
             return auth.who(self.headers.get("Cookie", ""), self.headers.get("X-Admin-Pin", ""),
                             self.client_address[0])
@@ -215,18 +185,6 @@ def make_handler(app, auth: Auth):
                 if not re.fullmatch(r"[0-9]{8}-[0-9]{6}-[0-9]{3}", rid) or not os.path.isfile(fpath):
                     return self._send(404, {"error": "Bild nicht gefunden"})
                 return self._send_file(fpath, "image/jpeg")
-            if path in ("/api/beamer.jpg", "/api/beamer.mjpg"):
-                size = BEAMER_SIZES.get(query.get("q", ["hd"])[0], BEAMER_SIZES["hd"])
-                if path.endswith(".jpg"):
-                    try:
-                        return self._send(200, app.beamer_jpeg(size), "image/jpeg")
-                    except BeamerNotReady as e:
-                        return self._send(503, {"error": str(e)})
-                try:
-                    fps = min(10.0, max(1.0, float(query.get("fps", ["5"])[0])))
-                except ValueError:
-                    fps = 5.0
-                return self._stream_beamer(size, fps)
             if path == "/api/graphic.jpg":
                 jpg = app.graphic_jpeg()
                 if jpg is None:
@@ -386,7 +344,7 @@ def make_handler(app, auth: Auth):
 
 
 class PortalServer(ThreadingHTTPServer):
-    # Viele iPads gleichzeitig (z. B. 10 Pruefer + Admin + Beamer-Ansicht): Standard waeren nur
+    # Viele iPads gleichzeitig (z. B. 10 Pruefer + Admin): Standard waeren nur
     # 5 wartende Verbindungen, dann werden Anfragen abgewiesen.
     request_queue_size = 128
     daemon_threads = True
