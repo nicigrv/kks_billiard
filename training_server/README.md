@@ -61,6 +61,21 @@ Admin-Seite → **„Modelle für den Pi“**:
 - Braucht OpenCV – das Dockerfile installiert es (nach dem Update einmal neu bauen: `docker compose up -d --build`).
   `kugel_merkmale.py` und `start_merkmale.json` sind Kopien aus `app/` (die Formprüfung in CI achtet darauf).
 
+## Spielaufzeichnung: Videos baut der Server
+
+Der Pi zeichnet **jedes Rack** auf – nur die Kugeln und den Spielstand je Zug – und schickt es nach dem Rack
+hierher (`POST /api/aufzeichnung`, mit `X-Upload-Key`). Der Server baut daraus das Video im Hintergrund
+(nacheinander, niedrigste Priorität) mit derselben Grafik wie der Beamer (`replay.py`/`scene.py`, Kopien aus
+`app/`). Das Spiel-Panel am Pi zeigt die Liste (`GET /api/aufzeichnungen`) und spielt die Videos direkt von hier
+ab: `https://…/video/<schlüssel>.mp4` – ohne Anmeldung, aber die Adresse ist nicht zu erraten.
+Es bleiben die neuesten 200 Videos (`MAX_VIDEOS` in `aufzeichnung.py`); die Admin-Seite listet sie unter
+„Spielaufzeichnungen“. Braucht pygame und ffmpeg – das Dockerfile installiert beides (nach dem Update einmal neu
+bauen: `docker compose up -d --build`). Ablage: `data/videos/`.
+
+**Gemeinsamer Code:** `ballnum.py`, `geometry.py`, `notices.py`, `planner.py`, `scene.py`, `replay.py`,
+`kugel_merkmale.py` und `start_merkmale.json` sind Kopien aus `app/`. Nach Änderungen dort
+`scripts/kopien.sh` ausführen; die Formprüfung meldet, wenn eine Kopie abweicht.
+
 ## Trainings-ZIP direkt in Google Colab laden
 
 Ohne greylo-Login, mit eigenem Schlüssel (`EXPORT_KEY` in `.env`, legt `update.sh server` an und zeigt ihn an):

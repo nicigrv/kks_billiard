@@ -5,6 +5,7 @@ Tests fuer die Trainingsseite (ohne Netz, ohne Docker):
   * jedes Bild 3x von verschiedenen Personen, ohne Vorschlaege; Mehrheit in der ZIP
   * Admin nur mit Authelia-Kopfzeilen, Trainings-ZIP im Format des Pi
   * Modelle fuer den Pi: Farben lernen auf dem Server, hochladen, Pi holt sie (echter Uploader)
+  * Spielaufzeichnung: Pi schickt jedes Rack als Daten, der Server baut das Video (echter Uploader)
 
     python3 test_server.py
 """
@@ -72,7 +73,8 @@ def main():
         server.UPLOAD_KEY = "test-schluessel-123"
         daten = server.Daten(os.path.join(d, "srv"))
         mod = server.modelle.Modelle(os.path.join(d, "srv"))
-        srv = server.http.server.ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(daten, mod))
+        auf = server.aufzeichnung.Aufzeichnungen(os.path.join(d, "srv"))
+        srv = server.http.server.ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(daten, mod, auf))
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         base = f"http://127.0.0.1:{srv.server_address[1]}"
         admin = Client(base, {"Remote-User": "nicolas", "Remote-Groups": "admins,m365-admins"})
@@ -327,6 +329,64 @@ def main():
             clf = BallClassifier.from_dict(json.load(f))
         check(clf.info.get("quelle", "").startswith("VPS"), "gelernte Datei ist gültig, Quelle VPS")
         check(sync.sync_models() == ["billard_merkmale.json"], "Pi holt die neu gelernten Farben")
+
+        print("Spielaufzeichnung: Video baut der Server")
+        from replay import RoundRecorder
+        g = {"phase": "playing", "teams": ["Rot", "Blau"], "frames_won": [0, 0], "turn": 0, "groups": [None, None],
+             "group_names": ["offen", "offen"], "remaining": {"solid": 7, "stripe": 7}, "eight_on_table": True,
+             "breaking": False, "ball_in_hand": False, "winner": None, "message": "Rot ist dran", "log": [],
+             "can_undo": False, "can_undo_shot": False}
+        kugeln = [{"x": 100.0, "y": 100.0, "kind": "cue", "color": "", "number": 0},
+                  {"x": 300.0, "y": 200.0, "kind": "solid", "color": "rot", "number": 3}]
+        def szene(balls):
+            return {"balls": balls, "radius": 10.0, "game": g, "bar": {}, "suggestion": None, "cue": None,
+                    "status": "", "info": "", "qr": None, "notices": []}
+        rounds = RoundRecorder(os.path.join(d, "pi", "recordings"), local_build=lambda: False)
+        rounds.start(szene(kugeln))
+        rounds.add(szene([dict(kugeln[0], x=250.0), kugeln[1]]))
+        rounds.stop(szene([dict(kugeln[0], x=250.0)]))
+        check(len(rounds.finished()) == 1, "Pi: Rack fertig aufgezeichnet (nur Daten)")
+        check(Client(base).call("POST", "/api/aufzeichnung", {"name": "runde-20261119-100000"})[0] == 403,
+              "Aufzeichnung nur mit Schlüssel des Pi")
+        check(Client(base).call("GET", "/api/aufzeichnungen")[0] == 403, "Videoliste nur mit Schlüssel des Pi")
+        check(pi.call("POST", "/api/aufzeichnung", {"name": "runde-20261119-100000", "schritte": [{}]})[0] == 400,
+              "kaputte Aufzeichnung abgelehnt")
+        vu = Uploader(rec, base, "test-schluessel-123", rounds=rounds)
+        check(vu.upload_recordings() == 1 and rounds.finished() == [], "Pi schickt das Rack und löscht es danach")
+        for _ in range(300):
+            liste = pi.call("GET", "/api/aufzeichnungen")[1]["videos"]
+            if liste and liste[0]["status"] in ("fertig", "fehler"):
+                break
+            time.sleep(0.1)
+        v = liste[0] if liste else {}
+        check(v.get("status") == "fertig" and v.get("teams") == ["Rot", "Blau"] and v.get("url", "").startswith("/video/"),
+              f"Server hat das Video gebaut ({v.get('status')} {v.get('fehler') or ''})")
+        st, roh_video = Client(base).call("GET", v.get("url") or "/video/x.mp4")
+        check(st == 200 and isinstance(roh_video, bytes) and len(roh_video) > 1000, "Video unter der geheimen Adresse")
+        req = urllib.request.Request(base + (v.get("url") or ""), headers={"Range": "bytes=0-99"})
+        with urllib.request.urlopen(req) as r:
+            check(r.status == 206 and len(r.read()) == 100 and r.headers["Content-Range"].endswith(f"/{len(roh_video)}"),
+                  "Teil-Abruf (Range) wie ihn Safari braucht")
+        check(Client(base).call("GET", "/video/" + "a" * 24 + ".mp4")[0] == 404, "erfundene Adresse: nichts")
+        vu.fetch_videos()
+        check(vu.videos() and vu.videos()[0]["url"] == base + v.get("url", "") and vu.videos()[0]["status"] == "fertig",
+              "Pi kennt das Video mit Link direkt zum Server")
+        check(pi.call("POST", "/api/aufzeichnung", json.load(open(os.path.join(auf.dir, v["name"] + ".json"))))[1].get("neu")
+              is False, "dasselbe Rack zweimal: nur einmal")
+        stand = admin.call("GET", "/api/admin/stand")[1]["videos"]
+        check(stand["anzahl"].get("fertig") == 1 and stand["liste"][0]["url"], "Admin sieht die Aufzeichnung")
+        aufraeumen = server.aufzeichnung.Aufzeichnungen(os.path.join(d, "auf2"), bauen=lambda s_, p_: open(p_, "wb").write(b"x"))
+        server.aufzeichnung.MAX_VIDEOS, alt_max = 2, server.aufzeichnung.MAX_VIDEOS
+        for i in range(4):
+            aufraeumen.eingang({"name": f"runde-20261119-10000{i}", "start": 1000 + i,
+                                "schritte": [szene(kugeln), szene(kugeln)]})
+        for _ in range(100):
+            if all(e["status"] == "fertig" for e in aufraeumen.index.values()) and len(aufraeumen.index) == 2:
+                break
+            time.sleep(0.05)
+        server.aufzeichnung.MAX_VIDEOS = alt_max
+        check(sorted(aufraeumen.index) == ["runde-20261119-100002", "runde-20261119-100003"],
+              "nur die neuesten Videos bleiben")
 
         print("Umstellung alter Daten")
         alt = server.Daten(os.path.join(d, "alt"))

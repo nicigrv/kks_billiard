@@ -5,6 +5,8 @@
 #   Pi:       POST /api/upload mit X-Upload-Key
 #   Colab:    GET  /api/export.zip mit X-Export-Key (Trainings-ZIP ohne greylo-Login)
 #   Pi:       GET  /api/modelle, /api/modell?name=... mit X-Upload-Key (holt neue Modelle von selbst)
+#   Pi:       POST /api/aufzeichnung mit X-Upload-Key (jedes Rack), der Server baut das Video
+#   iPad:     GET  /video/<schluessel>.mp4 (Link im Spiel-Panel)
 #
 # Starten:  docker compose up -d --build
 # UPLOAD_KEY und EXPORT_KEY in .env neben dieser Datei (nicht ins Git), je ein langer Zufallswert.
@@ -27,7 +29,7 @@ services:
     tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    mem_limit: 512m                                # Farben lernen (OpenCV) braucht etwas mehr
+    mem_limit: 768m                                # Farben lernen (OpenCV) und Videos bauen (ffmpeg)
     networks: [proxy]
     labels:
       - traefik.enable=true

@@ -313,7 +313,7 @@ Geht etwas schief: **„Rückgängig“** macht die letzte Änderung rückgängi
 | | **Spiel-Panel** `/` (PIN 1212) | **Admin-Panel** `/admin` (PIN 1902) |
 |---|---|---|
 | Für | Spieler am Tisch | Einrichtung, Training |
-| Inhalt | Grafik + Spielstand, Spiel starten / Neues Rack / Abbrechen, Foul, Zug wechseln, Rückgängig, Stoß verwerfen, weitere Korrekturen, **Schlagverbesserung an/aus**, **Queue an/aus** + kalibrieren, Spielaufzeichnung + Videos | Kamera, Tisch einrichten, Queue koppeln (Castcode), **QR-Code**, Bilder & Modelle (aufnehmen, Upload-Stand, Modelle vom VPS, Einzelkugel per Knopf), Systemstatus, Verlauf |
+| Inhalt | Grafik + Spielstand, Spiel starten / Neues Rack / Abbrechen, Foul, Zug wechseln, Rückgängig, Stoß verwerfen, weitere Korrekturen, **Schlagverbesserung an/aus**, **Queue an/aus** + kalibrieren, Videos der automatischen Spielaufzeichnung | Kamera, Tisch einrichten, Queue koppeln (Castcode), **QR-Code**, Bilder & Modelle (aufnehmen, Upload-Stand, Modelle vom VPS, Einzelkugel per Knopf), Systemstatus, Verlauf |
 
 Beide im Querformat: links die **aktuelle Grafik vom Pi** (wie auf dem Beamer), rechts die Bedienung.
 Der Admin darf alles, was das Spiel-Panel darf (Admin-PIN funktioniert auch auf der Startseite).
@@ -357,10 +357,19 @@ Geht etwas schief, läuft die alte Firmware weiter.
 
 ## 3c. Spielaufzeichnung
 
-Spiel-Panel → „Runde aufzeichnen“. Bei jedem Zug wird die **grafische Ansicht** gespeichert
-(keine Kamerabilder). Ist das Rack vorbei (oder „Aufzeichnung beenden“), baut der Pi daraus ein
-kurzes Video, in dem die Kugeln von Zug zu Zug rollen. Videos: im Spiel-Panel ansehen/laden, Dateien in
-`data/recordings/`.
+**Jedes Rack wird automatisch aufgezeichnet** – vom Spielstart bzw. „Neues Rack“ bis zum Sieg oder Abbruch.
+Gespeichert werden nur die Kugeln und der Spielstand je Zug (keine Kamerabilder, keine Grafik), das kostet
+den Pi praktisch nichts. Ist das Rack vorbei, schickt der Pi die Züge zur **Trainingsseite (VPS)** und löscht
+sie danach; der VPS baut daraus ein kurzes Video, in dem die Kugeln von Zug zu Zug rollen (gleiche Grafik wie
+auf dem Beamer).
+
+Videos: Spiel-Panel → „Spielaufzeichnung“ → „Ansehen“. Das Video kommt direkt vom VPS (unter einer nicht
+erratbaren Adresse), der Pi streamt nichts. Auf dem VPS bleiben die neuesten 200 Videos; die Liste steht
+auch auf seiner Admin-Seite.
+
+**Ohne Trainingsseite** baut der Pi das Video selbst – nach dem Rack, mit niedrigster Priorität, damit die
+Erkennung nicht leidet. Dateien dann in `data/recordings/`. Stürzt der Pi mitten im Rack ab, wird die
+angefangene Aufzeichnung beim nächsten Start abgeschlossen.
 
 ## 4. Ohne Tisch testen (Simulator)
 

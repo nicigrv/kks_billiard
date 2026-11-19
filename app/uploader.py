@@ -10,6 +10,10 @@ Laeuft im Hintergrund, nur wenn TRAINING_UPLOAD_URL und TRAINING_UPLOAD_KEY gese
   * Modelle holen: alle paar Minuten fragt der Pi, welche Modelle der VPS hat (GET /api/modelle).
     Neue oder geaenderte Dateien (Pruefsumme) laedt er (GET /api/modell?name=...) und uebernimmt sie
     mit denselben Pruefungen wie beim Hochladen im Admin-Panel (install, App.save_model).
+  * Spielaufzeichnungen hinschicken: jedes fertige Rack (replay.RoundRecorder, nur Daten) geht als JSON
+    an POST /api/aufzeichnung und wird danach auf dem Pi geloescht. Der VPS baut daraus das Video.
+    Die Liste der Videos (GET /api/aufzeichnungen) zeigt das Spiel-Panel; die Videos selbst laden die
+    iPads direkt vom VPS - der Pi rechnet und streamt dafuer nichts.
 
 Ohne Internet wird es spaeter nochmal versucht; am Tisch merkt man davon nichts.
 """
@@ -31,8 +35,13 @@ MODEL_NAMES = ("billard_merkmale.json", "billard_edgetpu.tflite", "billard_klass
 
 
 class Uploader:
-    def __init__(self, recorder, url, key, interval=15, install=None, state_path=None, model_every=300):
+    def __init__(self, recorder, url, key, interval=15, install=None, state_path=None, model_every=300,
+                 rounds=None, video_every=60):
         self.rec = recorder
+        self.rounds = rounds                     # replay.RoundRecorder (fertige Spielaufzeichnungen)
+        self.video_every = video_every
+        self._videos = []                        # Videos auf dem VPS (fuer das Spiel-Panel)
+        self.video_error = None
         self.base = url.rstrip("/")
         self.url = self.base + "/api/upload"
         self.key = key
@@ -222,21 +231,88 @@ class Uploader:
             self._save_state()
         return got
 
+    # ------------------------------------------------------------ Spielaufzeichnungen
+    def upload_recordings(self):
+        """Fertige Racks zum VPS schicken, danach auf dem Pi loeschen. Liefert die Anzahl."""
+        if self.rounds is None:
+            return 0
+        n = 0
+        for name, path in self.rounds.finished():
+            try:
+                with open(path, "rb") as f:
+                    body = f.read()
+                req = urllib.request.Request(self.base + "/api/aufzeichnung", data=body, method="POST",
+                                             headers={"Content-Type": "application/json", "X-Upload-Key": self.key})
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    ok = r.status == 200
+            except FileNotFoundError:
+                continue
+            except urllib.error.HTTPError as e:
+                self.video_error = f"Aufzeichnung: Server antwortet {e.code}"
+                if e.code in (400, 413):         # kaputt: nicht ewig wiederholen
+                    print(f"[Aufzeichnung] {name}: Server lehnt ab ({e.code}) - gelöscht", flush=True)
+                    ok = True
+                else:
+                    break
+            except OSError as e:
+                self.video_error = "Server nicht erreichbar"
+                print(f"[Aufzeichnung] {name}: {e}", flush=True)
+                break
+            if ok:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+                n += 1
+        return n
+
+    def fetch_videos(self):
+        """Liste der Videos vom VPS (Links gehen direkt dorthin)."""
+        try:
+            d = json.loads(self._get("/api/aufzeichnungen", timeout=20))
+            out = []
+            for v in d.get("videos", [])[:30]:
+                url = str(v.get("url", ""))
+                out.append({"name": str(v.get("name", "")), "teams": v.get("teams"), "status": v.get("status"),
+                            "time": time.strftime("%d.%m.%Y %H:%M", time.localtime(float(v.get("zeit") or 0))),
+                            "size_mb": round(float(v.get("groesse") or 0) / 1e6, 3),
+                            "url": (self.base + url) if url.startswith("/") else None})
+            self._videos = out
+            self.video_error = None
+        except urllib.error.HTTPError as e:
+            self.video_error = None if e.code == 404 else f"Videos: Server antwortet {e.code}"   # 404: alter Server
+        except (OSError, ValueError, TypeError, AttributeError) as e:
+            self.video_error = "Server nicht erreichbar"
+            print(f"[Aufzeichnung] Videoliste: {e}", flush=True)
+
+    def videos(self):
+        return list(self._videos)
+
     # ------------------------------------------------------------ Anzeige, Ablauf
     def status(self):
         return {"url": self.base, "waiting": self.waiting, "last_ok": self.last_ok, "error": self.error,
                 "sent": len(self.sent),
-                "models": self.models, "model_error": self.model_error, "model_check": self.model_check}
+                "models": self.models, "model_error": self.model_error, "model_check": self.model_check,
+                "video_error": self.video_error}
 
     def start(self):
         def loop():
-            next_models = 0.0
+            next_models = next_videos = 0.0
             while True:
                 try:
                     n = self.run_once()
                     if n:
                         print(f"[Upload] {n} Bild(er) zum Trainingsserver geschickt und auf dem Pi gelöscht",
                               flush=True)
+                    k = self.upload_recordings()
+                    if k:
+                        print(f"[Aufzeichnung] {k} Rack(s) zum Trainingsserver geschickt", flush=True)
+                        next_videos = 0.0                # gleich nachsehen: Video wird gebaut
+                    if time.monotonic() >= next_videos:
+                        # solange ein Video gebaut wird, oefter nachsehen
+                        busy = any(v["status"] in ("wartet", "baut") for v in self._videos)
+                        next_videos = time.monotonic() + (self.interval if busy or k else self.video_every)
+                        self.fetch_videos()
                     if time.monotonic() >= next_models:
                         next_models = time.monotonic() + self.model_every
                         self.sync_models()

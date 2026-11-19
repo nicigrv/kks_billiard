@@ -11,6 +11,8 @@ Billard-Training im Netz (VPS): Bilder vom Tisch zuhause festlegen.
   Modelle fuer den Pi (modelle.py): der VPS lernt die Farben (Stufe 2 + 3) aus den fertigen Bildern,
     Coral-Modelle aus Colab werden hier hochgeladen; der Pi holt alles von selbst
     (GET /api/modelle, GET /api/modell?name=..., beides mit X-Upload-Key). Auf dem Pi wird nichts gelernt.
+  Spielaufzeichnung (aufzeichnung.py): der Pi schickt jedes Rack als Daten, der Server baut das Video
+    (gleiche Grafik wie der Beamer) und liefert es unter einer nicht erratbaren Adresse aus.
   Einzelkugel-Bilder (am Pi per Knopf, Nummer am Pi festgelegt): die Kugel findet eine einfache
     Bilderkennung hier auf dem Server (einzelkugel.py, Vergleich mit dem leeren Tisch). Genau eine
     Kugel gefunden -> Bild ist sofort fertig ("Bilderkennung"); sonst legen es Trainer wie gewohnt fest.
@@ -43,6 +45,7 @@ try:
     import modelle                     # OpenCV + numpy; ohne: keine Modelle fuer den Pi
 except ImportError:
     modelle = None
+import aufzeichnung                    # Videos bauen braucht pygame + ffmpeg erst beim Bauen
 
 HIER = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
@@ -606,8 +609,9 @@ def ist_admin_pfad(pfad):
     return pfad in ("/admin", "/admin/") or pfad.startswith("/api/admin/")
 
 
-def make_handler(daten: Daten, mod=None):
-    """mod: modelle.Modelle (Farben lernen, Modelle fuer den Pi) oder None (ohne OpenCV)."""
+def make_handler(daten: Daten, mod=None, auf=None):
+    """mod: modelle.Modelle (Farben lernen, Modelle fuer den Pi) oder None (ohne OpenCV).
+    auf: aufzeichnung.Aufzeichnungen (Videos der Spielaufzeichnung) oder None."""
     class Handler(http.server.BaseHTTPRequestHandler):
         server_version = "BillardTraining"
         sys_version = ""
@@ -700,6 +704,15 @@ def make_handler(daten: Daten, mod=None):
                     return self._admin_get(pfad, q)
                 if pfad in ("/api/modelle", "/api/modell"):
                     return self._modell_get(pfad, q)
+                if pfad == "/api/aufzeichnungen":
+                    if not self._pi():
+                        return self._send(403, {"error": "Kein Zugriff"})
+                    return self._send(200, {"videos": auf.liste() if auf else []})
+                if pfad.startswith("/video/") and pfad.endswith(".mp4"):
+                    p = auf.pfad(pfad[len("/video/"):-4]) if auf else None
+                    if p is None:
+                        return self._send(404, {"error": "Video nicht gefunden"})
+                    return self._datei_teil(p, "video/mp4")
                 if pfad == "/api/export.zip":
                     key = self.headers.get("X-Export-Key", "")
                     if not EXPORT_KEY or not hmac.compare_digest(key, EXPORT_KEY):
@@ -726,6 +739,50 @@ def make_handler(daten: Daten, mod=None):
                 return self._send(404, {"error": "Nicht gefunden"})
             except Fehler as e:
                 self._send(e.code, {"error": str(e)})
+
+        def _datei_teil(self, pfad, ctype):
+            """Datei mit Range-Unterstuetzung (Safari auf iPad/iPhone spielt Videos nur so ab)."""
+            size = os.path.getsize(pfad)
+            start, end = 0, size - 1
+            m = re.fullmatch(r"bytes=(\d*)-(\d*)", self.headers.get("Range", "").strip())
+            teil = bool(m) and bool(m.group(1) or m.group(2))
+            if teil:
+                if m.group(1):
+                    start = int(m.group(1))
+                    end = int(m.group(2)) if m.group(2) else size - 1
+                else:
+                    start = max(0, size - int(m.group(2)))
+                end = min(end, size - 1)
+                if start > end:
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{size}")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return None
+            self.send_response(206 if teil else 200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Length", str(end - start + 1))
+            self.send_header("Cache-Control", "private, max-age=86400")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            if teil:
+                self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+            self.end_headers()
+            if self.command == "HEAD":
+                return None
+            try:
+                with open(pfad, "rb") as f:
+                    f.seek(start)
+                    rest = end - start + 1
+                    while rest > 0:
+                        chunk = f.read(min(1 << 16, rest))
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        rest -= len(chunk)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return None
 
         def _pi(self):
             """Der Pi am Tisch (gleicher Schluessel wie beim Hochladen der Bilder)?"""
@@ -783,7 +840,8 @@ def make_handler(daten: Daten, mod=None):
                 return self._send(200, {"zaehler": daten.zaehler(), "personen": daten.personen(),
                                         "letzte": daten.letzte(), "upload": bool(UPLOAD_KEY),
                                         "letzter_eingang": daten.letzter_eingang(),
-                                        "modelle": mod.status() if mod else None})
+                                        "modelle": mod.status() if mod else None,
+                                        "videos": dict(auf.status(), liste=auf.liste(20)) if auf else None})
             if pfad == "/api/admin/bild":
                 name = (q.get("name") or [""])[0]
                 jpg = daten.bild_pfad(name)
@@ -807,6 +865,16 @@ def make_handler(daten: Daten, mod=None):
                     if not UPLOAD_KEY or not hmac.compare_digest(key, UPLOAD_KEY):
                         return self._send(403, {"error": "Kein Zugriff"})
                     neu = daten.upload(self._json())
+                    return self._send(200, {"ok": True, "neu": neu})
+                if pfad == "/api/aufzeichnung":
+                    if not self._pi():
+                        return self._send(403, {"error": "Kein Zugriff"})
+                    if auf is None:
+                        return self._send(503, {"error": "Spielaufzeichnung auf dem Server aus"})
+                    try:
+                        neu = auf.eingang(self._json())
+                    except aufzeichnung.AufzeichnungFehler as e:
+                        raise Fehler(str(e)) from None
                     return self._send(200, {"ok": True, "neu": neu})
                 if pfad.startswith("/api/admin/"):
                     return self._admin_post(pfad)
@@ -892,8 +960,9 @@ def make_handler(daten: Daten, mod=None):
 def main():
     daten = Daten(DATA_DIR)
     mod = modelle.Modelle(DATA_DIR) if modelle else None
+    auf = aufzeichnung.Aufzeichnungen(DATA_DIR)
     port = int(os.environ.get("PORT", "8000"))
-    srv = http.server.ThreadingHTTPServer(("0.0.0.0", port), make_handler(daten, mod))
+    srv = http.server.ThreadingHTTPServer(("0.0.0.0", port), make_handler(daten, mod, auf))
     srv.daemon_threads = True
     print(f"Billard-Training auf Port {port}, Daten in {DATA_DIR}, Upload {'an' if UPLOAD_KEY else 'AUS (UPLOAD_KEY fehlt)'}, "
           f"Modelle fuer den Pi {'an' if mod else 'AUS (OpenCV fehlt)'}", flush=True)

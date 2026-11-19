@@ -26,10 +26,8 @@ jobs:
           pip install -q --disable-pip-version-check ruff
           ruff check --select E9,F --output-format github app training_server training
           python3 -m compileall -q app training_server training
-      - name: Trainingsserver nutzt dieselbe Erkennung wie der Pi (Kopien gleich)
-        run: |
-          cmp app/kugel_merkmale.py training_server/kugel_merkmale.py
-          cmp app/models/start_merkmale.json training_server/start_merkmale.json
+      - name: Trainingsserver nutzt denselben Code wie der Pi (Kopien gleich)
+        run: bash scripts/kopien.sh --pruefen
       - name: Shell-Skripte (shellcheck)
         run: shellcheck -S warning scripts/*.sh
       - name: docker-compose.yml (Pi und Server)
