@@ -117,6 +117,9 @@ def run_panels(d):
     check(req("/admin/")[0] == 200, "/admin/ geht auch")
     code, body, _ = req("/notify.js")
     check(code == 200 and b"Notify" in body, "Meldungen-Skript wird ausgeliefert")
+    code, body, hdr = req("/ui.css")
+    check(code == 200 and b"--tint" in body, "gemeinsames Aussehen (ui.css) wird ausgeliefert")
+    check(b"/ui.css" in req("/")[1] and b"/ui.css" in req("/admin")[1], "Spiel- und Admin-Panel binden ui.css ein")
     check(req("/api/game")[0] == 401, "Spiel-Panel ohne PIN: gesperrt")
 
     code, data, game = login("1212")

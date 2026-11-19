@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Gemeinsamer Code von Pi und Trainingsserver: training_server/ bekommt Kopien aus app/,
 # damit der Server genauso lernt (Farben) und genauso zeichnet (Videos der Spielaufzeichnung)
-# wie der Pi - und als eigener Ordner (Release billard-server.zip) fuer sich laeuft.
+# wie der Pi, und genauso aussieht (ui.css) - und als eigener Ordner (Release billard-server.zip) fuer sich laeuft.
 #
 #   scripts/kopien.sh            Kopien aktualisieren (nach Aenderungen an diesen Dateien in app/)
 #   scripts/kopien.sh --pruefen  nur pruefen, ob alle Kopien gleich sind (Formpruefung in CI)
@@ -18,6 +18,7 @@ DATEIEN=(
   "replay.py:replay.py"
   "kugel_merkmale.py:kugel_merkmale.py"
   "models/start_merkmale.json:start_merkmale.json"
+  "ui.css:ui.css"
 )
 
 fehler=0

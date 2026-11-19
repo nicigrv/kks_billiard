@@ -27,7 +27,8 @@ MAX_JSON_BYTES = 2 * 1024 * 1024                         # Befehle sind klein
 
 
 PAGES = {"/": "game", "/index.html": "game", "/admin": "admin"}
-STATIC = {"/notify.js": ("notify.js", "application/javascript; charset=utf-8")}
+STATIC = {"/notify.js": ("notify.js", "application/javascript; charset=utf-8"),
+          "/ui.css": ("ui.css", "text/css; charset=utf-8")}
 PUBLIC_GET = set(PAGES) | set(STATIC) | {"/api/me"}
 SPIEL_GET = {"/api/game", "/api/graphic.jpg"}            # + /videos/...
 PUBLIC_POST = {"/api/login", "/api/logout"}
