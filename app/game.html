@@ -256,8 +256,7 @@ details > div { margin-top: 12px; }
 
   <section>
     <h2>Spielaufzeichnung</h2>
-    <p class="hint">Speichert bei jedem Zug die Grafik und macht am Ende ein kurzes Video. Endet automatisch, wenn das Rack vorbei ist.</p>
-    <button type="button" id="roundBtn" style="width:100%">Runde aufzeichnen</button>
+    <p class="hint">Jedes Rack wird automatisch aufgezeichnet (nur die Kugeln je Zug, keine Kamerabilder). Ist das Rack vorbei, baut die Trainingsseite daraus ein kurzes Video – der Pi muss dafür nicht rechnen.</p>
     <p class="statusline" id="recStatus"></p>
     <ul class="videos" id="videos"></ul>
     <video class="player" id="player" controls playsinline preload="metadata"></video>
@@ -386,10 +385,10 @@ details > div { margin-top: 12px; }
     $("cueCalib").disabled = !c.connected;
 
     const r = s.round || {};
-    $("roundBtn").textContent = r.active ? "Aufzeichnung beenden" : "Runde aufzeichnen";
-    $("roundBtn").className = r.active ? "danger" : "";
-    $("recStatus").textContent = r.active ? "Aufzeichnung läuft, " + r.steps + " Züge gespeichert."
-      : r.building ? "Video wird erstellt ..." : "";
+    $("recStatus").textContent = r.active ? "● Aufzeichnung läuft, " + r.steps + (r.steps === 1 ? " Zug" : " Züge") + " bisher."
+      : r.building ? "Video wird auf dem Pi erstellt …"
+      : r.waiting ? r.waiting + (r.waiting === 1 ? " Rack wartet" : " Racks warten") + " auf den Upload zur Trainingsseite."
+      : "Startet von selbst mit dem nächsten Spiel.";
     renderVideos(s.videos || []);
     const t = s.training || {};
     $("autoSw").setAttribute("aria-checked", t.auto_capture ? "true" : "false");
@@ -412,30 +411,42 @@ details > div { margin-top: 12px; }
     im.src = "/api/graphic.jpg?t=" + Date.now();
   }
 
+  const groesse = (mb) => (mb || 0) < 1 ? Math.max(1, Math.round((mb || 0) * 1000)) + " KB"
+    : Number(mb).toFixed(1).replace(".", ",") + " MB";
   let videoKey = "";
   function renderVideos(list) {
-    const key = list.map((v) => v.name + v.size_mb).join("|");
+    const key = list.map((v) => v.name + v.status + v.size_mb).join("|");
     if (key === videoKey) return;
     videoKey = key;
     const ul = $("videos");
     ul.innerHTML = "";
+    const STAND = { wartet: "wartet auf die Trainingsseite", baut: "Video wird gebaut …", fehler: "Video fehlgeschlagen" };
     for (const v of list) {
       const li = document.createElement("li");
       const span = document.createElement("span");
-      span.textContent = v.time + "  ·  " + v.size_mb.toFixed(1).replace(".", ",") + " MB";
-      const play = document.createElement("a");
-      play.href = "/videos/" + encodeURIComponent(v.name);
-      play.textContent = "Ansehen";
-      play.addEventListener("click", (e) => {
-        e.preventDefault();
-        const p = $("player"); p.src = play.href; p.classList.add("show"); p.play().catch(() => {});
-      });
-      const dl = document.createElement("a");
-      dl.href = play.href; dl.download = v.name; dl.textContent = "Laden";
+      span.textContent = v.time + (v.teams && v.teams.length ? "  ·  " + v.teams.join(" – ") : "") +
+        (v.url ? "  ·  " + groesse(v.size_mb) : "  ·  " + (STAND[v.status] || v.status));
       const right = document.createElement("span");
       right.style.display = "flex"; right.style.gap = "16px";
-      right.append(play, dl);
+      if (v.url) {
+        const play = document.createElement("a");
+        play.href = v.url;                      // Videos der Trainingsseite kommen direkt von dort
+        play.textContent = "Ansehen";
+        play.addEventListener("click", (e) => {
+          e.preventDefault();
+          const p = $("player"); p.src = play.href; p.classList.add("show"); p.play().catch(() => {});
+        });
+        const dl = document.createElement("a");
+        dl.href = v.url; dl.textContent = "Laden";
+        if (v.url.startsWith("/")) dl.download = v.name; else { dl.target = "_blank"; dl.rel = "noopener"; }
+        right.append(play, dl);
+      }
       li.append(span, right);
+      ul.appendChild(li);
+    }
+    if (!list.length) {
+      const li = document.createElement("li");
+      li.textContent = "Noch keine Videos.";
       ul.appendChild(li);
     }
   }
@@ -471,7 +482,6 @@ details > div { margin-top: 12px; }
     setTimeout(() => { b.disabled = false; }, 600);
   });
   $("autoSw").addEventListener("click", () => post("auto_capture", { enabled: !(state && state.training && state.training.auto_capture) }));
-  $("roundBtn").addEventListener("click", () => post("record_round", { enabled: !(state && state.round && state.round.active) }));
 
   let polling = false, pollTimer = null;
   async function poll() {

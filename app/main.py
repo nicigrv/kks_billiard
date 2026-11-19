@@ -97,7 +97,11 @@ class App:
                              on_stroke=self._cue_stroke).start()
         self.align = AlignChecker(self.cfg.get("cue_tolerance", 2.0))
         self.cue_fw = CueUpdater(self.cue)                    # Firmware des Queues ueber das WLAN
-        self.rounds = RoundRecorder(os.path.join(config.DATA_DIR, "recordings"))
+        # jedes Rack wird aufgezeichnet (nur Daten); das Video baut der VPS - ohne VPS der Pi selbst
+        self.rounds = RoundRecorder(os.path.join(config.DATA_DIR, "recordings"),
+                                    local_build=lambda: self.uploader is None)
+        if self.uploader is not None:
+            self.uploader.rounds = self.rounds           # fertige Racks gehen mit zum VPS
         self.auth = None                                      # setzt web.start()
         self.panel_url = ""                                   # Adresse des Spiel-Panels (QR-Code)
         self.notes = Notices()                                # Meldungen oben rechts
@@ -340,7 +344,7 @@ class App:
         sc = self.scene(live=False)
         self.rounds.add(sc)
         if sc["game"]["phase"] != "playing":
-            self.rounds.stop()             # Rack vorbei -> Video bauen
+            self.rounds.stop()             # Rack vorbei -> Aufzeichnung fertig (Video baut der VPS)
 
     # ------------------------------------------------- Trainingsbilder (festgelegt wird auf dem VPS)
     def _capture_text(self):
@@ -509,7 +513,7 @@ class App:
             "qr": dict(self.cfg.get("qr") or {}, url=self.qr_text(), panel_url=self.panel_url),
             "notices": self.notices(),
             "round": self.rounds.status(),
-            "videos": self.rounds.videos(),
+            "videos": self.videos(),
             "single": self.single.status(),
         }
 
@@ -533,11 +537,16 @@ class App:
                     "stroke": c["stroke"], "strokes": c["strokes"],
                     "ok": self.align.ok, "err": None if self.align.err is None else round(self.align.err, 1)},
             "round": self.rounds.status(),
-            "videos": self.rounds.videos(),
+            "videos": self.videos(),
             "training": {"pending": self.recorder.waiting, "auto_capture": self.pipe.auto_capture,
                          "upload": self.uploader is not None},
             "notices": self.notices(),
         }
+
+    def videos(self):
+        """Videos der aufgezeichneten Racks: vom VPS (Links direkt dorthin) und - ohne VPS - vom Pi."""
+        remote = self.uploader.videos() if self.uploader else []
+        return (remote + self.rounds.videos())[:30]
 
     def qr_preview(self):
         return qr_png(self.qr_text())
@@ -568,14 +577,21 @@ class App:
                 with self.scene_lock:
                     self.seen_numbers = set()
             self.refresh_scene()
-            if self.rounds.active and name in ("start", "new_rack", "foul", "undo", "undo_shot",
-                                               "winner", "abort", "switch_turn"):
-                sc = self.scene(live=False)
-                if name in ("winner", "abort") or sc["game"]["phase"] != "playing":
-                    self.rounds.stop(sc)
-                else:
-                    self.rounds.add(sc)
+            self._record_command(name)
         return result
+
+    def _record_command(self, name):
+        """Jedes Rack automatisch aufzeichnen: Start / Neues Rack beginnt, Korrekturen sind Schritte,
+        Sieg oder Abbruch beendet die Aufzeichnung."""
+        if name in ("start", "new_rack"):
+            self.rounds.start(self.scene(live=False))      # eine noch laufende wird vorher abgeschlossen
+        elif self.rounds.active and name in ("foul", "undo", "undo_shot", "winner", "abort", "switch_turn",
+                                             "set_group", "adjust"):
+            sc = self.scene(live=False)
+            if name in ("winner", "abort") or sc["game"]["phase"] != "playing":
+                self.rounds.stop(sc)
+            else:
+                self.rounds.add(sc)
 
     def _command(self, name, p):
         g = self.pipe.game
@@ -598,14 +614,6 @@ class App:
             except ValueError as e:
                 raise config.UserError(str(e))
             return None
-        if name == "record_round":
-            if p.get("enabled"):
-                if not self.rounds.start(self.scene(live=False)):
-                    return "Aufzeichnung läuft bereits"
-                return "Aufzeichnung läuft. Endet automatisch, wenn das Rack vorbei ist."
-            if not self.rounds.stop(self.scene(live=False)):
-                return "Es läuft keine Aufzeichnung"
-            return "Aufzeichnung beendet, Video wird erstellt ..."
         if name == "assist":
             self.cfg["assist"] = bool(p.get("enabled"))
             config.save(self.cfg)

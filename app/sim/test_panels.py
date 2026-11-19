@@ -129,6 +129,8 @@ def run_panels(d):
     check(code == 200 and json.loads(body)["state"]["assist"] is True, "Spiel-Panel: Schlagverbesserung an")
     code, body, _ = req("/api/start", {"team_a": "Rot", "team_b": "Blau", "breaker": 0}, cookie=game)
     check(code == 200 and json.loads(body)["state"]["game"]["phase"] == "playing", "Spiel-Panel: Spiel starten")
+    check(json.loads(body)["state"]["round"]["active"], "Spielstart: Aufzeichnung läuft automatisch")
+    check(req("/api/record_round", {"enabled": True}, cookie=game)[0] == 403, "Aufzeichnen-Knopf gibt es nicht mehr")
     code, body, _ = req("/api/cue_use", {"enabled": False}, cookie=game)
     check(code == 200 and json.loads(body)["state"]["cue"]["enabled"] is False, "Spiel-Panel: Queue aus")
     for cmd, payload in (("camera", {"source": "demo"}), ("qr_settings", {"enabled": False}),

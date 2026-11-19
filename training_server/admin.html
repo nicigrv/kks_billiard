@@ -107,6 +107,19 @@ tr.gesperrt td { opacity: .5; }
     </div>
   </section>
 
+  <section class="box" id="videosBox" hidden>
+    <h2>Spielaufzeichnungen</h2>
+    <p class="hinweis" style="margin:0 0 12px">Der Pi zeichnet jedes Rack auf und schickt die Spielzüge hierher; dieser Server
+      baut daraus das Video (gleiche Grafik wie auf dem Beamer). Im Spiel-Panel am Tisch stehen die Videos zum Ansehen.
+      Es bleiben die neuesten <b id="videosMax"></b>.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Rack</th><th>Teams</th><th>Züge</th><th>Stand</th><th></th></tr></thead>
+        <tbody id="videos"></tbody>
+      </table>
+    </div>
+  </section>
+
   <section class="box">
     <h2>Trainer und Codes</h2>
     <form class="reihe" id="neuForm" autocomplete="off">
@@ -292,6 +305,33 @@ tr.gesperrt td { opacity: .5; }
     laden();
   });
 
+  // ---------------- Spielaufzeichnungen ----------------
+  const VIDEO_STAND = { wartet: "wartet", baut: "wird gebaut …", fertig: "fertig", fehler: "Fehler" };
+  function videosZeigen(v) {
+    $("videosBox").hidden = !v;
+    if (!v) return;
+    $("videosMax").textContent = v.max;
+    const tb = $("videos");
+    tb.innerHTML = "";
+    if (!v.liste.length) {
+      const tr = document.createElement("tr");
+      zelle(tr, "Noch keine Aufzeichnung – der Pi schickt jedes Rack, sobald es vorbei ist.").colSpan = 5;
+      tb.appendChild(tr);
+    }
+    for (const a of v.liste) {
+      const tr = document.createElement("tr");
+      zelle(tr, new Date((a.zeit || 0) * 1000).toLocaleString("de-DE"));
+      zelle(tr, (a.teams || []).join(" – "));
+      zelle(tr, String(a.schritte || ""), "zahl-z");
+      zelle(tr, (VIDEO_STAND[a.status] || a.status) + (a.fehler ? ": " + a.fehler : "") +
+        (a.groesse ? " · " + (a.groesse / 1e6).toFixed(1).replace(".", ",") + " MB" : ""));
+      const link = document.createElement("a");
+      if (a.url) { link.href = a.url; link.textContent = "Ansehen"; link.className = "btn quiet"; link.target = "_blank"; }
+      zelle(tr, link);
+      tb.appendChild(tr);
+    }
+  }
+
   async function laden() {
     try {
       const r = await fetch("/api/admin/stand", { cache: "no-store" });
@@ -299,6 +339,7 @@ tr.gesperrt td { opacity: .5; }
       const d = await r.json();
       zeigen(d);
       modelleZeigen(d.modelle);
+      videosZeigen(d.videos);
     } catch (e) { /* naechster Versuch */ }
   }
 

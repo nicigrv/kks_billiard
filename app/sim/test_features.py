@@ -173,21 +173,40 @@ def test_replay():
         n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         check(n >= 20, f"Video hat Bilder ({n})")
 
-        rec = RoundRecorder(os.path.join(d, "rec"), size=(320, 180), fps=5)
+        # Mit Trainingsseite: nur Daten, der Pi baut kein Video
+        rec = RoundRecorder(os.path.join(d, "rec"), size=(320, 180), fps=5, local_build=lambda: False)
         rec.start(scene_of(a, g))
         rec.add(scene_of(b, g))
-        rd = rec.dir
-        check(sorted(f for f in os.listdir(rd) if f.endswith(".png")) == ["schritt-001.png", "schritt-002.png"],
-              "Grafik je Zug als PNG gespeichert")
-        check(not any("cam" in f or f.endswith(".jpg") for f in os.listdir(rd)), "keine Kamerabilder gespeichert")
+        check(rec.active and os.path.isfile(os.path.join(d, "rec", "laufend.json")), "laufendes Rack wird gesichert")
+        check(not any(f.endswith((".png", ".jpg")) for f in os.listdir(os.path.join(d, "rec"))),
+              "keine Bilder auf dem Pi (weder Grafik noch Kamera)")
+        rec.stop(scene_of(b, g))
+        fertig = rec.finished()
+        check(len(fertig) == 1 and not rec.active and not rec.building, "Rack vorbei: Daten fertig, kein Video auf dem Pi")
+        with open(fertig[0][1]) as f:
+            data = json.load(f)
+        check(len(data["schritte"]) == 3 and data["teams"] == g["teams"] and data["ende"], "Daten fürs Video (3 Züge, Teams)")
+        rec.start(scene_of(a, g))
         rec.stop()
+        check(len(rec.finished()) == 1, "nur gestartet und gleich abgebrochen: keine Aufzeichnung")
+        rec.start(scene_of(a, g))
+        rec.add(scene_of(b, g))
+        rec2 = RoundRecorder(os.path.join(d, "rec"), local_build=lambda: False)   # "Neustart" mitten im Rack
+        check(len(rec2.finished()) == 2 and not os.path.exists(os.path.join(d, "rec", "laufend.json")),
+              "nach einem Neustart wird das angefangene Rack abgeschlossen")
+
+        # Ohne Trainingsseite baut der Pi das Video selbst
+        rec = RoundRecorder(os.path.join(d, "lokal"), size=(320, 180), fps=5, local_build=lambda: True)
+        rec.start(scene_of(a, g))
+        rec.stop(scene_of(b, g))
         import time
         for _ in range(100):
             if not rec.building:
                 break
             time.sleep(0.1)
         vids = rec.videos()
-        check(len(vids) == 1 and rec.video_path(vids[0]["name"]), "Video in der Liste")
+        check(len(vids) == 1 and rec.video_path(vids[0]["name"]) and not rec.finished(),
+              "ohne Trainingsseite: Video auf dem Pi, Daten danach weg")
         check(rec.video_path("../config.json") is None and rec.video_path("x.mp4") is None, "nur echte Videos abrufbar")
 
 
