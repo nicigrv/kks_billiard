@@ -73,7 +73,7 @@ Es bleiben die neuesten 200 Videos (`MAX_VIDEOS` in `aufzeichnung.py`); die Admi
 bauen: `docker compose up -d --build`). Ablage: `data/videos/`.
 
 **Gemeinsamer Code:** `ballnum.py`, `geometry.py`, `notices.py`, `planner.py`, `scene.py`, `replay.py`,
-`kugel_merkmale.py` und `start_merkmale.json` sind Kopien aus `app/`. Nach Änderungen dort
+`kugel_merkmale.py`, `start_merkmale.json` und `ui.css` (gemeinsames Aussehen aller Seiten) sind Kopien aus `app/`. Nach Änderungen dort
 `scripts/kopien.sh` ausführen; die Formprüfung meldet, wenn eine Kopie abweicht.
 
 ## Trainings-ZIP direkt in Google Colab laden

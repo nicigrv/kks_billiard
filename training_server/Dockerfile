@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg fonts-fr
 RUN pip install --no-cache-dir pillow==11.* numpy==2.* opencv-python-headless==4.10.0.84 pygame==2.6.*
 COPY server.py einzelkugel.py modelle.py aufzeichnung.py kugel_merkmale.py start_merkmale.json \
      ballnum.py geometry.py notices.py planner.py scene.py replay.py \
-     trainieren.html admin.html notify.js ./
+     trainieren.html admin.html notify.js ui.css ./
 RUN useradd -u 10001 -M -d /app billard && mkdir /data && chown 10001 /data
 USER 10001
 # pygame ohne Bildschirm; Schrift-Cache im beschreibbaren /tmp (Container ist sonst schreibgeschuetzt)

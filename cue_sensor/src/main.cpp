@@ -358,14 +358,30 @@ static String esc(const String& s) {
 }
 
 static const char PAGE_HEAD[] = R"HTML(<!doctype html><html lang="de"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Billard-Queue</title>
-<style>body{font-family:system-ui,sans-serif;max-width:460px;margin:20px auto;padding:0 16px;color:#222;background:#f6f4ee}
-h1{font-size:22px}input,button,select{font-size:17px;margin:4px 0 14px;width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #bbb}
-button{background:#0E3F31;color:#fff;border:0;font-weight:700}button:disabled{opacity:.4}
-label{font-size:14px;color:#555}.code{font:700 44px/1.1 ui-monospace,monospace;letter-spacing:6px;text-align:center;
-background:#fff;border:3px solid #0E3F31;border-radius:12px;padding:14px;margin:12px 0}
-.chk{display:flex;gap:10px;align-items:center;font-size:16px;margin:10px 0 16px}.chk input{width:26px;height:26px;margin:0}
-.bad{color:#b00}.ok{color:#080}small{color:#666}a{color:#06c}</style></head><body>)HTML";
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>Billard-Queue</title>
+<style>:root{color-scheme:light dark;--bg:#F2F2F7;--card:#fff;--l:#000;--l2:rgba(60,60,67,.64);--fill:rgba(118,118,128,.12);
+--tint:#007AFF;--good:#248A3D;--bad:#D70015}
+@media(prefers-color-scheme:dark){:root{--bg:#000;--card:#1C1C1E;--l:#fff;--l2:rgba(235,235,245,.64);--fill:rgba(118,118,128,.24);
+--tint:#0A84FF;--good:#30D158;--bad:#FF6961}}
+*{box-sizing:border-box}body{font:17px/1.47 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,system-ui,sans-serif;
+letter-spacing:-.012em;max-width:460px;margin:0 auto;padding:20px 16px 40px;color:var(--l);background:var(--bg);-webkit-font-smoothing:antialiased}
+h1{font-size:28px;line-height:1.15;letter-spacing:-.024em;margin:8px 0 16px}
+h2{font-size:20px;line-height:1.25;letter-spacing:-.02em;margin:24px 0 10px}
+input:not([type=checkbox]),select{font:inherit;color:inherit;width:100%;margin:4px 0 16px;padding:11px 14px;min-height:46px;border:0;
+border-radius:10px;background-color:var(--fill);-webkit-appearance:none;appearance:none}
+select{padding-right:40px;background:var(--fill) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%238E8E93' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 14px center/12px}
+input:focus-visible,select:focus-visible{outline:none;box-shadow:0 0 0 3px var(--tint)}
+input[type=file]::file-selector-button{font:inherit;font-weight:600;border:0;border-radius:8px;padding:6px 12px;margin-right:10px;background:var(--card);color:var(--tint)}
+button{font:inherit;font-weight:600;width:100%;min-height:50px;margin:4px 0 16px;padding:12px;border:0;border-radius:12px;
+background:var(--tint);color:#fff;cursor:pointer;touch-action:manipulation;transition:transform .45s cubic-bezier(.22,1,.36,1),opacity .2s}
+button:active:not(:disabled){transform:scale(.97);opacity:.8;transition-duration:.08s}button:disabled{opacity:.38}
+label{display:block;font-size:13px;color:var(--l2);margin:0 0 4px 4px;letter-spacing:0}
+.code{font:600 44px/1.1 ui-monospace,"SF Mono",Menlo,monospace;letter-spacing:.15em;text-indent:.15em;text-align:center;color:var(--tint);
+background:var(--card);border-radius:20px;padding:18px 12px;margin:12px 0 18px}
+.chk{display:flex;gap:12px;align-items:center;font-size:16px;color:var(--l);margin:10px 0 18px 0}.chk input{width:24px;height:24px;margin:0;accent-color:var(--tint)}
+progress{width:100%;height:6px;border:0;border-radius:3px;overflow:hidden;accent-color:var(--tint)}
+.bad{color:var(--bad)}.ok{color:var(--good)}small{color:var(--l2);font-size:13px;letter-spacing:0}a{color:var(--tint);font-weight:600;text-decoration:none}
+@media(prefers-reduced-motion:reduce){button{transition:opacity .15s}button:active:not(:disabled){transform:none}}</style></head><body>)HTML";
 
 static void sendPage(const String& body) {
   server.send(200, "text/html; charset=utf-8", String(PAGE_HEAD) + body + "</body></html>");
@@ -376,11 +392,14 @@ static void sendPage(const String& body) {
 // Liegt der Queue bis +-2 Grad auf dem Ziel, kommt der gruene Haken - wie auf dem Beamer.
 // Seitenansicht: Neigung. Die Seite fragt ca. 15x pro Sekunde /demo/lage ab.
 static const char DEMO_WIDGET[] = R"HTML(<style>
-.demo{background:#fff;border:2px solid #0E3F31;border-radius:14px;padding:10px 12px;margin:10px 0 18px}
-.demo h2{font-size:17px;margin:2px 0 8px}.demo svg{display:block;width:100%;height:auto}
-.dv{display:grid;grid-template-columns:repeat(3,1fr);gap:8px 6px;text-align:center;margin:8px 0}
-.dv small{display:block;font-size:12px;color:#666}.dv b{font:700 22px/1.2 ui-monospace,monospace}
-.demo button{margin:6px 0 4px}.demo p{margin:4px 0;font-size:13px;color:#555}
+.demo{background:var(--card);border-radius:20px;padding:14px 16px;margin:10px 0 20px}
+.demo h2{font-size:13px;font-weight:500;text-transform:uppercase;letter-spacing:.03em;color:var(--l2);margin:0 0 10px}
+.demo svg{display:block;width:100%;height:auto;border-radius:10px}
+.dv{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center;margin:12px 0}
+.dv>div{background:var(--fill);border-radius:12px;padding:8px 4px}
+.dv small{display:block;font-size:12px;color:var(--l2);letter-spacing:0}.dv b{font:600 20px/1.25 -apple-system,system-ui,sans-serif;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.demo button{margin:8px 0 6px}.demo p{margin:6px 0;font-size:13px;color:var(--l2);letter-spacing:0}
+.demo input#dm{display:inline-block;width:72px!important;min-height:0;margin:0!important;padding:4px 8px!important;font-size:15px!important;text-align:center}
 </style><div class=demo><h2>Demo: so sieht der Pi den Queue</h2>
 <svg viewBox="-112 -62 224 124" aria-label="Draufsicht auf den Tisch mit dem Queue">
 <rect x=-110 y=-60 width=220 height=120 rx=10 fill="#5A3520"/><rect x=-100 y=-50 width=200 height=100 fill="#1C5496"/>
@@ -414,13 +433,13 @@ x.onload=function(){try{var d=JSON.parse(x.responseText);y0=d.yaw;var r=nm(d.yaw
 $('dcu').setAttribute('transform','rotate('+(-r).toFixed(2)+')');
 $('dsi').setAttribute('transform','rotate('+(-d.pitch).toFixed(2)+' 40 0)');
 $('dy').textContent=z===null?f(nm(d.yaw)):f(r);$('dp').textContent=f(d.pitch);
-$('ds').textContent=!d.sensor?'fehlt!':d.still?'ruhig':'bewegt';$('ds').style.color=d.sensor?'#080':'#b00';
+$('ds').textContent=!d.sensor?'fehlt!':d.still?'ruhig':'bewegt';$('ds').style.color=d.sensor?'var(--good)':'var(--bad)';
 var m=parseFloat($('dm').value)||0.55;$('dk').textContent=d.stoesse?d.stoss.toFixed(1).replace('.',',')+' g':'-';
 $('df').textContent=d.stoesse?(m*d.stoss*9.81).toFixed(0)+' N':'-';$('dn').textContent=d.stoesse;
 $('da').textContent=d.a.toFixed(2).replace('.',',')+' g';$('dv').textContent=d.verworfen;
 $('dtg').setAttribute('visibility',z===null?'hidden':'visible');
 $('dok').setAttribute('visibility',z!==null&&Math.abs(r)<=2?'visible':'hidden');}catch(e){}setTimeout(poll,60)};
-x.onerror=x.ontimeout=function(){$('ds').textContent='getrennt';$('ds').style.color='#b00';setTimeout(poll,500)};x.send()}
+x.onerror=x.ontimeout=function(){$('ds').textContent='getrennt';$('ds').style.color='var(--bad)';setTimeout(poll,500)};x.send()}
 poll()})();</script>)HTML";
 
 static void demoLage() {
@@ -466,7 +485,7 @@ einzeln unter Releases auf GitHub). Nicht die Datei fuer USB (ab 0x0) nehmen.</s
 <label>Castcode</label><input id=c value="%CODE%" autocapitalize=characters>
 <label>Firmware-Datei (.bin)</label><input id=f type=file accept=".bin">
 <button id=b>Hochladen und neu starten</button>
-<progress id=p max=100 value=0 style="width:100%;height:22px;display:none"></progress><p id=m></p>
+<progress id=p max=100 value=0 style="display:none"></progress><p id=m></p>
 <p><a href="/">Zurueck</a></p>
 <script>(function(){var $=function(i){return document.getElementById(i)};
 $('b').onclick=function(){var f=$('f').files[0];if(!f){$('m').textContent='Bitte eine .bin-Datei waehlen.';return}

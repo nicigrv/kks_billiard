@@ -2,70 +2,74 @@
 <html lang="de">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <title>Billard-Training – Admin</title>
+<link rel="stylesheet" href="/ui.css">
 <style>
-:root {
-  --bg: #0B1712; --panel: #12241C; --line: #2A4436; --ink: #EFE6D2; --dim: #A9B3A6;
-  --chalk: #6FB3E0; --ok: #7FE0A0; --gold: #FFD180; --bad: #FF8A80; --rail: #5A3520; --foul: #D2453B; --r: 12px;
-}
-* { box-sizing: border-box; }
-[hidden] { display: none !important; }
-body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-main { width: min(1100px, 100% - 32px); margin: 0 auto; padding: 24px 0 64px; display: grid; gap: 18px; }
-h1 { margin: 0; font-size: 26px; }
-h2 { margin: 0 0 12px; font-size: 18px; }
-.kopf { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; justify-content: space-between; }
-.dim { color: var(--dim); }
-.box { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
-.zahlen { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-.zahl { background: var(--bg); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; }
-.zahl b { display: block; font-size: 30px; line-height: 1.1; font-variant-numeric: tabular-nums; }
-.zahl span { color: var(--dim); font-size: 14px; }
-.zahl.r1 b { color: var(--chalk); } .zahl.r2 b { color: var(--gold); } .zahl.ok b { color: var(--ok); }
-button, a.btn { font: inherit; font-weight: 700; color: var(--ink); background: var(--rail); border: 0; border-radius: var(--r);
-  min-height: 42px; padding: 8px 14px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
-button.primary, a.btn.primary { background: var(--chalk); color: #0A2F25; }
-button.quiet, a.btn.quiet { background: transparent; border: 2px solid var(--line); }
-button.klein { min-height: 34px; padding: 4px 10px; font-size: 14px; }
-button.danger { background: var(--foul); }
-a.btn.aus { opacity: .4; pointer-events: none; }
-:focus-visible { outline: 3px solid var(--chalk); outline-offset: 2px; }
-.reihe { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-input[type=text] { font: inherit; color: var(--ink); background: var(--bg); border: 2px solid var(--line); border-radius: var(--r);
-  padding: 8px 12px; min-height: 42px; min-width: 220px; }
-table { width: 100%; border-collapse: collapse; font-size: 15px; }
-th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
-th { color: var(--dim); font-weight: 600; font-size: 13px; }
-td.zahl-z { font-variant-numeric: tabular-nums; }
-.code { font: 700 18px/1 ui-monospace, Menlo, Consolas, monospace; letter-spacing: 3px; color: var(--gold); }
-tr.gesperrt td { opacity: .5; }
-.punkt { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--line); margin-right: 6px; }
-.punkt.an { background: var(--ok); }
-.aktionen { display: flex; gap: 6px; flex-wrap: wrap; }
-.bilder { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
-.bild { background: var(--bg); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; font-size: 13px; }
-.bild img { width: 100%; aspect-ratio: 2 / 1; object-fit: cover; display: block; background: #000; }
-.bild div { padding: 6px 8px; display: grid; gap: 2px; }
-.marke { font-weight: 800; font-size: 12px; border-radius: 6px; padding: 1px 6px; justify-self: start; color: #0A2F25; }
-.m-offen { background: var(--chalk); } .m-teil { background: var(--gold); } .m-fertig { background: var(--ok); } .m-verworfen { background: var(--bad); }
-.hinweis { color: var(--dim); font-size: 14px; margin: 10px 0 0; }
-.neu-code { margin-top: 12px; padding: 12px 14px; border-radius: var(--r); background: #1d3a2c; border: 1px solid var(--ok); }
-.scroll { overflow-x: auto; }
-.lern { white-space: pre-line; background: var(--bg); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; margin-top: 12px; font-size: 14px; }
-.lern.bad { border-color: var(--bad); }
+:root { --page: 1100px; --gold: #B25000; --chalk: var(--tint); }
+@media (prefers-color-scheme: dark) { :root { --gold: #FFB340; } }
+main { width: min(var(--page), 100% - 2rem); margin: 0 auto; padding: 1.25rem 0 4rem; display: grid; gap: 1rem; }
+.navin { align-items: baseline; }
+.navin .dim { font-size: .8125rem; letter-spacing: 0; flex: 1 1 18rem; }
+.card > h2 { margin-bottom: .75rem; }
+
+/* Stand: vier Zahlen wie Kacheln */
+.zahlen { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .75rem; }
+.zahl { background: var(--card2); border-radius: 14px; padding: .875rem 1rem; }
+.zahl b { display: block; font: 700 2rem/1.1 var(--font-display); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.zahl span { color: var(--label2); font-size: .8125rem; line-height: 1.35; letter-spacing: 0; display: block; margin-top: .25rem; }
+.zahl.r1 b { color: var(--tint); } .zahl.r2 b { color: var(--gold); } .zahl.ok b { color: var(--good); }
 @media (max-width: 700px) { .zahlen { grid-template-columns: 1fr 1fr; } }
+
+.reihe { display: flex; flex-wrap: wrap; gap: .625rem; align-items: center; }
+.reihe input[type=text] { flex: 1 1 14rem; width: auto; }
+.hinweis { color: var(--label2); font-size: .875rem; line-height: 1.45; margin: .75rem 0 0; letter-spacing: 0; }
+
+/* Tabellen wie gruppierte Listen: nur feine Linien */
+.scroll { overflow-x: auto; margin: 0 -.25rem; padding: 0 .25rem; }
+table { width: 100%; border-collapse: collapse; font-size: .9375rem; }
+th, td { text-align: left; padding: .625rem .5rem; border-bottom: .5px solid var(--sep); vertical-align: middle; }
+th { color: var(--label2); font-weight: 500; font-size: .75rem; text-transform: uppercase; letter-spacing: .03em; }
+tbody tr:last-child td { border-bottom: 0; }
+td.zahl-z { font-variant-numeric: tabular-nums; }
+tr.gesperrt td { opacity: .45; }
+td .btn, td a.btn { min-height: 2.125rem; padding: .375rem .875rem; font-size: .9375rem; border-radius: 999px; }
+button.klein.danger { background-color: var(--red-soft); color: var(--bad); }
+.code { font: 600 1.0625rem/1 var(--mono); letter-spacing: .18em; color: var(--gold); }
+.punkt { display: inline-block; width: .5rem; height: .5rem; border-radius: 50%; background: var(--label3); margin-right: .5rem; vertical-align: .1em; }
+.punkt.an { background: var(--green); }
+.aktionen { display: flex; gap: .375rem; flex-wrap: wrap; }
+
+/* neueste Bilder */
+.bilder { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); gap: .75rem; }
+.bild { background: var(--card2); border-radius: 14px; overflow: hidden; font-size: .8125rem; letter-spacing: 0; }
+.bild img { width: 100%; aspect-ratio: 2 / 1; object-fit: cover; display: block; background: #000; }
+.bild div { padding: .5rem .625rem .625rem; display: grid; gap: .25rem; }
+.marke { font-weight: 600; font-size: .75rem; border-radius: 999px; padding: .125rem .5rem; justify-self: start; }
+.m-offen { background: var(--tint-soft); color: var(--tint); }
+.m-teil { background: rgba(255, 149, 0, .16); color: var(--gold); }
+.m-fertig { background: rgba(52, 199, 89, .16); color: var(--good); }
+.m-verworfen { background: var(--red-soft); color: var(--bad); }
+
+.neu-code { margin-top: .75rem; padding: .875rem 1rem; border-radius: 14px; background: rgba(52, 199, 89, .12);
+  box-shadow: inset 0 0 0 1px rgba(52, 199, 89, .45); }
+.lern { white-space: pre-line; background: var(--card2); border-radius: 12px; padding: .75rem .875rem; margin-top: .75rem;
+  font-size: .875rem; letter-spacing: 0; }
+.lern.bad { box-shadow: inset 0 0 0 1px var(--red); }
 </style>
 </head>
 <body>
-<main>
-  <div class="kopf">
-    <h1>🎱 Billard-Training · Admin</h1>
+<header class="navbar">
+  <div class="navin">
+    <h1>Billard-Training</h1>
     <span class="dim" id="eingang"></span>
   </div>
-
-  <section class="box">
+</header>
+<main>
+  <section class="card">
     <h2>Stand</h2>
     <div class="zahlen">
       <div class="zahl r1"><b id="z1">–</b><span>noch nie festgelegt</span></div>
@@ -75,7 +79,7 @@ tr.gesperrt td { opacity: .5; }
     </div>
   </section>
 
-  <section class="box">
+  <section class="card">
     <h2>Trainingsdaten herunterladen</h2>
     <div class="reihe">
       <a class="btn primary" id="zipFertig" href="/api/admin/zip">ZIP laden (fertige Bilder)</a>
@@ -88,9 +92,9 @@ tr.gesperrt td { opacity: .5; }
       die erst teilweise festgelegt sind – mehr Bilder, aber evtl. mit Fehlern.</p>
   </section>
 
-  <section class="box" id="modelleBox">
+  <section class="card" id="modelleBox">
     <h2>Modelle für den Pi</h2>
-    <p class="hinweis" style="margin:0 0 12px">Der Pi lernt nichts selbst. Er holt sich alle paar Minuten, was hier liegt, und prüft es,
+    <p class="hinweis" style="margin:0 0 .875rem">Der Pi lernt nichts selbst. Er holt sich alle paar Minuten, was hier liegt, und prüft es,
       bevor er es benutzt. Farben + Streifen (Stufe 2 + 3) lernt dieser Server aus den fertigen Bildern; die Modelle für den
       KI-Chip kommen aus Google Colab (<code>train_coral.py</code>, <code>train_klassen.py</code>) und werden hier hochgeladen.</p>
     <div class="reihe">
@@ -99,7 +103,7 @@ tr.gesperrt td { opacity: .5; }
       <input type="file" id="hochDatei" accept=".tflite,.json" multiple hidden>
     </div>
     <div class="lern" id="lernErgebnis" hidden></div>
-    <div class="scroll" style="margin-top:12px">
+    <div class="scroll" style="margin-top:.75rem">
       <table>
         <thead><tr><th>Datei</th><th>Stand</th><th>Größe</th><th>vom Pi abgeholt</th><th></th></tr></thead>
         <tbody id="modelle"></tbody>
@@ -107,9 +111,9 @@ tr.gesperrt td { opacity: .5; }
     </div>
   </section>
 
-  <section class="box" id="videosBox" hidden>
+  <section class="card" id="videosBox" hidden>
     <h2>Spielaufzeichnungen</h2>
-    <p class="hinweis" style="margin:0 0 12px">Der Pi zeichnet jedes Rack auf und schickt die Spielzüge hierher; dieser Server
+    <p class="hinweis" style="margin:0 0 .875rem">Der Pi zeichnet jedes Rack auf und schickt die Spielzüge hierher; dieser Server
       baut daraus das Video (gleiche Grafik wie auf dem Beamer). Im Spiel-Panel am Tisch stehen die Videos zum Ansehen.
       Es bleiben die neuesten <b id="videosMax"></b>.</p>
     <div class="scroll">
@@ -120,14 +124,14 @@ tr.gesperrt td { opacity: .5; }
     </div>
   </section>
 
-  <section class="box">
+  <section class="card">
     <h2>Trainer und Codes</h2>
     <form class="reihe" id="neuForm" autocomplete="off">
       <input type="text" id="neuName" placeholder="Name, z. B. Lukas" maxlength="40" aria-label="Name des Trainers">
       <button class="primary" type="submit">Hinzufügen</button>
     </form>
     <div class="neu-code" id="neuCode" hidden></div>
-    <div class="scroll" style="margin-top:14px">
+    <div class="scroll" style="margin-top:.875rem">
       <table>
         <thead><tr><th>Name</th><th>Code</th><th>Festgelegt</th><th>Aussortiert</th><th>Zuletzt da</th><th></th></tr></thead>
         <tbody id="personen"></tbody>
@@ -138,7 +142,7 @@ tr.gesperrt td { opacity: .5; }
       leg dich auch als Trainer an.</p>
   </section>
 
-  <section class="box">
+  <section class="card">
     <h2>Neueste Bilder</h2>
     <div class="bilder" id="bilder"></div>
   </section>

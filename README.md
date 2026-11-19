@@ -319,6 +319,12 @@ Beide im Querformat: links die **aktuelle Grafik vom Pi** (wie auf dem Beamer), 
 Der Admin darf alles, was das Spiel-Panel darf (Admin-PIN funktioniert auch auf der Startseite).
 Kugeln festlegen und das KI-Training laufen nicht auf dem Pi, sondern auf der **Trainingsseite im Netz** (Abschnitt 5).
 
+Alle Seiten (Spiel-Panel, Admin-Panel, Trainingsseite, Admin im Netz und die Seiten des Queues) sehen aus wie
+Apps auf iPhone/Mac: Systemschrift, hell oder dunkel je nach Gerät, Schalter und Segmente wie in den
+Einstellungen; Knöpfe reagieren schon beim Antippen. Mit „Bewegung reduzieren“, „Transparenz reduzieren“ oder
+„Kontrast erhöhen“ am Gerät passen sich die Seiten an. Das gemeinsame Aussehen steht in `app/ui.css`
+(Kopie für den VPS mit `scripts/kopien.sh`), keine Schriften aus dem Internet – läuft also auch offline.
+
 ## 3b. KI-Schlagverbesserung + Queue mit Gyroskop (optional)
 
 Schlagverbesserung an/aus im Spiel-Panel. Ist sie an, rechnet der Pi nach jedem Stoß den **einfachsten direkten Stoß** für die Mannschaft

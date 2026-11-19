@@ -602,7 +602,8 @@ class Daten:
 
 # ------------------------------------------------------------------ Web
 SEITEN = {"/": "trainieren.html", "/index.html": "trainieren.html", "/admin": "admin.html", "/admin/": "admin.html"}
-STATISCH = {"/notify.js": ("notify.js", "application/javascript; charset=utf-8")}
+STATISCH = {"/notify.js": ("notify.js", "application/javascript; charset=utf-8"),
+            "/ui.css": ("ui.css", "text/css; charset=utf-8")}
 
 
 def ist_admin_pfad(pfad):

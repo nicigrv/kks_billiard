@@ -4,279 +4,125 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Billard">
+<meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <title>Billard Admin</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Barlow+Condensed:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/ui.css">
 <style>
-:root {
-  --felt: #0E3F31;
-  --felt-dark: #0A2F25;
-  --rail: #5A3520;
-  --rail-light: #7A4B2E;
-  --chalk: #6FB3E0;
-  --ivory: #EFE6D2;
-  --ivory-dim: #B9B09D;
-  --solid: #F2B705;
-  --foul: #D2453B;
-  --radius-board: 18px;
-  --card: rgba(8, 36, 28, .62);
-  --line: rgba(122, 75, 46, .45);
-  --radius-btn: 12px;
-  --display: "Barlow Condensed", "Arial Narrow", sans-serif;
-  --body: "Atkinson Hyperlegible", system-ui, sans-serif;
-}
-* { box-sizing: border-box; }
-[hidden] { display: none !important; }
-html { -webkit-text-size-adjust: 100%; background: var(--felt-dark); }
-body {
-  margin: 0;
-  background: var(--felt);
-  /* Tuchstruktur, ganz leicht */
-  background-image: radial-gradient(ellipse at 50% 0%, #135140 0%, var(--felt) 60%, var(--felt-dark) 100%);
-  background-repeat: no-repeat;
-  min-height: 100vh;
-  color: var(--ivory);
-  font: 17px/1.5 var(--body);
-  padding: 16px max(16px, env(safe-area-inset-left)) 48px;
-}
-main { max-width: 1240px; margin: 0 auto; }
+:root { --page: 1240px; }
+main { max-width: var(--page); margin: 0 auto;
+  padding: 1.25rem max(1rem, env(safe-area-inset-right)) 3rem max(1rem, env(safe-area-inset-left)); }
 
-/* ---------- Kopfzeile + Reiter ---------- */
-.top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 14px; }
-.top h1 { font: 700 32px/1 var(--display); margin: 0 8px 0 0; letter-spacing: .5px; }
-/* Links bleiben links: oben rechts erscheinen die Meldungen (notify.js) */
-.links { display: flex; flex-wrap: wrap; gap: 8px; }
-.links a, .links button { min-height: 40px; padding: 8px 14px; font-size: 15px; border-radius: 10px; }
-.links a { display: inline-flex; align-items: center; color: var(--ivory); text-decoration: none;
-  border: 2px solid var(--rail-light); font-weight: 700; }
-@media (max-width: 520px) {
-  .top h1 { font-size: 28px; }
-  .links a, .links button { min-height: 36px; padding: 6px 10px; font-size: 14px; }
-  .card { padding: 14px; }
-}
-.tabs { position: sticky; top: 0; z-index: 5; display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none;
-  margin: 0 -4px 18px; padding: 6px 4px; background: rgba(10, 47, 37, .92); backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+/* ---------- Reiter: Segmente in der Leiste, der Schieber gleitet mit (aus der aktuellen Lage) ---------- */
+.navin.tabrow { margin-top: .625rem; }
+.tabs { position: relative; isolation: isolate; display: flex; max-width: 100%; overflow-x: auto; scrollbar-width: none;
+  padding: 2px; border-radius: 10px; background: var(--fill); }
 .tabs::-webkit-scrollbar { display: none; }
-.tab { flex: 0 0 auto; min-height: 44px; padding: 8px 16px; border-radius: 10px; background: transparent;
-  color: var(--ivory-dim); font-weight: 700; white-space: nowrap; }
-.tab:hover { color: var(--ivory); }
-.tab[aria-selected="true"] { background: var(--rail); color: var(--ivory); box-shadow: inset 0 0 0 1px var(--rail-light); }
-.tab .badge { font-size: 14px; margin-left: 4px; }
+.tabs::before { content: ""; position: absolute; z-index: 0; top: 2px; bottom: 2px; left: 0;
+  width: var(--tab-w, 0); transform: translateX(var(--tab-x, 0)); border-radius: 8px; background: var(--seg-thumb);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, .12), 0 3px 1px rgba(0, 0, 0, .04); }
+.tabs.ready::before { transition: transform var(--spring-time) var(--spring), width var(--spring-time) var(--spring); }
+.tab { position: relative; z-index: 1; flex: 0 0 auto; min-height: 2.25rem; padding: .375rem 1rem; border-radius: 8px;
+  background: transparent; color: var(--label); font: 500 .9375rem/1.2 var(--font); white-space: nowrap; }
+.tab[aria-selected="true"] { font-weight: 600; }
+.tab:active:not(:disabled) { transform: none; opacity: .55; }
+@media (hover: hover) { .tab:hover:not(:disabled) { background-image: none; opacity: .75; } .tab[aria-selected="true"]:hover { opacity: 1; } }
+@media (max-width: 520px) {
+  .navin.tabrow .tabs { width: 100%; }
+  .tab { flex: 1 0 auto; padding: .375rem .5rem; font-size: .8125rem; }   /* wie in iOS: 13 pt, alle vier passen aufs Handy */
+}
 
 /* ---------- Karten ---------- */
-.cards { display: grid; gap: 16px; grid-template-columns: 1fr; align-items: start; }
+.cards { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr); align-items: start; }
 @media (min-width: 900px) {
-  .cards { grid-template-columns: 1fr 1fr; }
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cards .wide { grid-column: 1 / -1; }
   .cards.overview { grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); }
   .cards.overview .game { grid-row: span 2; }
 }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px; min-width: 0; }
-.card h2, .h2 { font: 700 24px/1.15 var(--display); margin: 0 0 10px; letter-spacing: .3px; display: block; }
-.card h3 { font: 700 19px/1.2 var(--display); margin: 14px 0 4px; }
-.cardhead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
-.cardhead h2 { margin: 0; }
-.block { width: 100%; }
-button.big { min-height: 64px; font-size: 19px; }
-.hint.small, .statusline { font-size: 14px; }
-.graphic { width: 100%; aspect-ratio: 16 / 9; display: block; border-radius: 12px; background: #0E1218; margin-bottom: 14px; }
-.game .board { border-width: 6px; padding: 10px 12px; }
-.game .team .name { font-size: 26px; }
-.game .team .frames { font-size: 40px; }
+.card.game { padding: .75rem; }
+.game .graphic { margin-bottom: 1.25rem; border-radius: 14px; }
+.game .team .frames { font-size: 2.75rem; }
+button.big { min-height: 3.75rem; font-size: 1.1875rem; }
 
 /* aufklappbare Karte (Tisch einrichten, Kamerabild) */
-details.expand > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-details.expand > summary::-webkit-details-marker { display: none; }
+details.expand > summary { display: flex; align-items: center; justify-content: space-between; gap: .75rem; min-height: 2.75rem; }
 details.expand > summary .h2 { margin: 0; }
-details.expand > summary .sub { display: block; font-size: 14px; color: var(--ivory-dim); }
-details.expand > summary::after { content: "Öffnen"; flex: 0 0 auto; padding: 8px 14px; border-radius: 10px;
-  border: 2px solid var(--rail-light); font-weight: 700; font-size: 15px; }
-details.expand[open] > summary::after { content: "Schließen"; }
-details.expand > div { margin-top: 14px; }
+details.expand > summary .sub { display: block; font-size: .875rem; color: var(--label2); letter-spacing: 0; }
+details.expand > div { margin-top: 1rem; }
 
 /* "So geht's": Erklaertexte eingeklappt */
-details.help { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
-details.help > summary { cursor: pointer; color: var(--chalk); font-weight: 700; font-size: 15px; list-style: none; }
-details.help > summary::-webkit-details-marker { display: none; }
-details.help > summary::before { content: "\25B8"; display: inline-block; margin-right: 6px; transition: transform .2s; }
-details.help[open] > summary::before { transform: rotate(90deg); }
-details.help p { color: var(--ivory-dim); font-size: 15px; margin: 10px 0 0; }
+details.help { margin-top: 1rem; border-top: .5px solid var(--sep); }
+details.help > summary { display: flex; align-items: center; justify-content: space-between; min-height: 2.75rem;
+  color: var(--tint); font-weight: 500; font-size: .9375rem; }
+details.help p { color: var(--label2); font-size: .9375rem; line-height: 1.45; margin: .25rem 0 .625rem; }
 
-/* Systemstatus */
+/* Systemstatus wie eine Einstellungsliste */
 .status { list-style: none; padding: 0; margin: 0; }
-.status li { display: grid; grid-template-columns: 14px 1fr auto; align-items: center; gap: 4px 12px;
-  padding: 10px 0; border-bottom: 1px solid var(--line); }
-.status li:last-child { border-bottom: 0; }
-.status .lamp { width: 12px; height: 12px; border-radius: 50%; background: #55645C; }
-.status .ok .lamp { background: #30D158; }
-.status .warn .lamp { background: #FF9F0A; }
-.status .bad .lamp { background: #FF453A; }
-.status .off .lamp { background: #55645C; }
-.status .what { font-weight: 700; }
-.status .val { display: block; font-weight: 400; font-size: 14px; color: var(--ivory-dim); }
-.status button { min-height: 36px; padding: 6px 12px; font-size: 14px; background: transparent; border: 2px solid var(--rail-light); }
+.status li { display: grid; grid-template-columns: .625rem minmax(0, 1fr) auto; align-items: center; gap: .25rem .875rem;
+  min-height: 2.75rem; padding: .625rem 0; border-top: .5px solid var(--sep); }
+.status li:first-child { border-top: 0; }
+.status .lamp { width: .625rem; height: .625rem; border-radius: 50%; background: var(--label3); }
+.status .ok .lamp { background: var(--green); }
+.status .warn .lamp { background: var(--orange); }
+.status .bad .lamp { background: var(--red); box-shadow: 0 0 0 3px var(--red-soft); }
+.status .what { font-weight: 400; }
+.status .val { display: block; font-size: .8125rem; color: var(--label2); letter-spacing: 0; }
+.status button { min-height: 2rem; padding: .25rem .875rem; font-size: .875rem; border-radius: 999px; }
 
-.switchrow.plain { background: none; border: 0; padding: 0; margin: 0; }
-.qrrow { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-.qrrow .statusline { flex: 1 1 160px; overflow-wrap: anywhere; }
-.code-input { text-transform: uppercase; letter-spacing: 3px; }
-.seg.compact label { padding: 8px 14px; font-size: 15px; }
-.single { display: grid; gap: 4px 24px; }
+.switchrow.plain { padding: 0; }
+.switchrow.plain .lbl .h2 { margin: 0; }
+.qrrow { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.qrrow .statusline { flex: 1 1 10rem; }
+.qrprev { display: block; width: 132px; height: 132px; margin: .25rem 0 .75rem; border-radius: 14px; background: #fff;
+  image-rendering: pixelated; box-shadow: 0 0 0 .5px var(--sep); }
+.code-input { text-transform: uppercase; letter-spacing: .2em; font-family: var(--mono) !important; }
+.code-input::placeholder { text-transform: none; letter-spacing: -.012em; font-family: var(--font); }
+.addrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .5rem; }
+.single { display: grid; gap: .25rem 1.5rem; }
 @media (min-width: 900px) { .single { grid-template-columns: 1fr 1fr; } }
-.singleimg { width: 100%; border-radius: 10px; margin-top: 6px; display: block; }
-.danger-zone { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
-  border-color: rgba(210, 69, 59, .45); }
-a.btnlink.quiet { background: transparent; border: 2px solid var(--rail-light); }
-.toggle.on { background: var(--chalk); color: var(--felt-dark); }
-.statusline { font-size: 15px; color: var(--ivory-dim); margin: 8px 0 12px; }
-.statusline b { color: var(--ivory); }
-.statusline .good { color: #7FE0A0; }
-.statusline .bad { color: var(--foul); }
-.videos { list-style: none; padding: 0; margin: 12px 0 0; }
-.videos li { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid rgba(239, 230, 210, .08); font-size: 15px; }
-.videos a { color: var(--chalk); font-weight: 700; text-decoration: none; padding: 8px 0; }
-.player { width: 100%; border-radius: 10px; margin-top: 12px; background: #000; display: none; }
-.player.show { display: block; }
-.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.chip { min-height: 44px; min-width: 44px; padding: 8px 12px; border-radius: 22px; border: 2px solid transparent; font-weight: 700; }
-.chip.sel { border-color: var(--ivory); box-shadow: 0 0 0 2px var(--felt-dark) inset; }
-.badge { display: inline-block; min-width: 26px; padding: 2px 8px; margin-left: 6px; border-radius: 13px; background: var(--chalk); color: var(--felt-dark); font: 700 16px/1.3 var(--body); text-align: center; vertical-align: middle; }
-.btnlink { display: flex; align-items: center; justify-content: center; min-height: 52px; padding: 14px 12px; border-radius: var(--radius-btn); background: var(--rail); color: var(--ivory); font-weight: 700; text-decoration: none; text-align: center; }
-a.link { color: var(--chalk); font-weight: 700; }
-.btnlink.off { opacity: .45; pointer-events: none; }
-.check { display: flex; align-items: center; gap: 10px; margin: 12px 0; font-size: 15px; color: var(--ivory); }
-.check input { width: 24px; height: 24px; }
+.singleimg { width: 100%; border-radius: 14px; margin-top: .375rem; display: block; }
+.danger-zone { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; }
+.chips { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .5rem; }
+.chip { min-height: 2.75rem; min-width: 2.75rem; padding: .5rem .75rem; border-radius: 999px; font-weight: 700;
+  box-shadow: inset 0 0 0 .5px rgba(0, 0, 0, .15); }
+.chip.sel { box-shadow: 0 0 0 2px var(--card), 0 0 0 4.5px var(--tint); }
+.check { display: flex; align-items: center; gap: .625rem; margin: .75rem 0; font-size: .9375rem; color: var(--label); }
+.check input { width: 1.375rem; height: 1.375rem; }
 
-/* ---------- Spielstandstafel ---------- */
-.board {
-  border: 10px solid var(--rail);
-  border-radius: var(--radius-board);
-  background: var(--felt-dark);
-  box-shadow: inset 0 0 0 2px var(--rail-light);
-  padding: 14px 14px 12px;
-  position: relative;
-}
-.teams { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.team { padding: 6px 8px 8px; border-radius: 10px; transition: background .3s; }
-.team.active { background: rgba(111, 179, 224, 0.12); }
-.team.winner { background: rgba(242, 183, 5, 0.14); box-shadow: inset 0 0 0 2px rgba(242, 183, 5, .55); }
-.team.winner .name::after { content: " \2605"; color: var(--solid); }
-.team .name {
-  font: 700 clamp(26px, 7vw, 34px)/1.05 var(--display);
-  overflow-wrap: anywhere;
-}
-.team .frames { font: 700 54px/1 var(--display); }
-.team .group { color: var(--ivory-dim); font-size: 15px; min-height: 22px; }
-.team:last-child { text-align: right; }
-.rack { display: flex; gap: 4px; flex-wrap: wrap; min-height: 16px; margin-top: 4px; }
-.team:last-child .rack { justify-content: flex-end; }
-.ball { width: 14px; height: 14px; border-radius: 50%; }
-.ball.solid { background: var(--solid); }
-.ball.stripe { background: linear-gradient(var(--ivory) 30%, var(--chalk) 30% 70%, var(--ivory) 70%); }
-.cueball {
-  position: absolute; top: -17px; width: 24px; height: 24px; border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, #fff, #d8d2c4 70%);
-  box-shadow: 0 2px 4px rgba(0,0,0,.4);
-  left: calc(25% - 12px);
-  transition: left .5s cubic-bezier(.3,1.4,.5,1);
-}
-.cueball.right { left: calc(75% - 12px); }
-.cueball.hidden { opacity: 0; }
-.message { margin: 12px 4px 0; font-size: 16px; min-height: 24px; }
-.message.idle { color: var(--ivory-dim); }
-.sys { display: flex; justify-content: space-between; gap: 8px; margin: 10px 4px 0; font-size: 14px; color: var(--ivory-dim); }
-.sys .ok { color: var(--chalk); }
+.log { list-style: none; padding: 0; margin: 0; font-size: .875rem; color: var(--label2); max-height: 22.5rem; overflow-y: auto; letter-spacing: 0; }
+.log li { padding: .5rem 0; border-top: .5px solid var(--sep); }
+.log li:first-child { border-top: 0; }
+.log time { color: var(--label); margin-right: .5rem; font-variant-numeric: tabular-nums; }
 
-/* ---------- Bereiche ---------- */
-h2 { font: 700 26px/1.2 var(--display); margin: 0 0 10px; }
-p.hint { color: var(--ivory-dim); margin: 0 0 12px; font-size: 15px; }
-
-button, select, input {
-  font: inherit; color: inherit;
-}
-button {
-  border: 0; border-radius: var(--radius-btn);
-  padding: 14px 12px; min-height: 52px;
-  background: var(--rail); color: var(--ivory);
-  font-weight: 700; cursor: pointer;
-  touch-action: manipulation;
-}
-button:active { transform: translateY(1px); }
-button.primary { background: var(--chalk); color: var(--felt-dark); }
-button.danger { background: var(--foul); }
-button.quiet { background: transparent; border: 2px solid var(--rail-light); }
-button:disabled { opacity: .45; cursor: default; }
-:focus-visible { outline: 3px solid var(--chalk); outline-offset: 2px; }
-.grid { display: grid; gap: 10px; grid-template-columns: repeat(3, 1fr); }
-.grid.two { grid-template-columns: 1fr 1fr; }
-.span2 { grid-column: span 2; }
-.span3 { grid-column: 1 / -1; }
-
-label { display: block; font-size: 15px; color: var(--ivory-dim); margin-bottom: 4px; }
-input[type=text], input[type=password], input[type=number], select {
-  width: 100%; padding: 12px; min-height: 48px;
-  background: var(--felt-dark); border: 2px solid var(--rail-light); border-radius: 10px;
-}
-.field { margin-bottom: 12px; }
-.seg { display: grid; grid-template-columns: 1fr 1fr; border: 2px solid var(--rail-light); border-radius: 10px; overflow: hidden; }
-.seg input { position: absolute; opacity: 0; }
-.seg label { margin: 0; padding: 12px; text-align: center; color: var(--ivory); cursor: pointer; font-size: 16px; }
-.seg input:checked + label { background: var(--rail); font-weight: 700; }
-.seg input:focus-visible + label { outline: 3px solid var(--chalk); outline-offset: -3px; }
-
-
-.log { list-style: none; padding: 0; margin: 0; font-size: 14px; color: var(--ivory-dim); max-height: 360px; overflow-y: auto; }
-.log li { padding: 6px 0; border-bottom: 1px solid rgba(239, 230, 210, .08); }
-.log time { color: var(--ivory); margin-right: 8px; font-variant-numeric: tabular-nums; }
-
-.calib { position: relative; border-radius: 10px; overflow: hidden; background: #000; touch-action: none; }
+.calib { position: relative; border-radius: 14px; overflow: hidden; background: #000; touch-action: none; }
 .calib canvas { display: block; width: 100%; height: auto; }
-.liveview { width: 100%; border-radius: 10px; display: block; background: #000; min-height: 120px; }
-
-/* Anmeldung (Admin-PIN) */
-.login { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center;
-  background: rgba(10, 47, 37, .97); padding: 16px; }
-.login[hidden] { display: none; }
-.login form { width: min(380px, 100%); display: grid; gap: 14px; text-align: center; }
-.login h2 { margin: 0; }
-.login input { font: 700 32px/1 var(--body); letter-spacing: 8px; text-align: center; }
-.addrow { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
-.switchrow { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 16px;
-  border-radius: 14px; background: rgba(10, 47, 37, .7); border: 2px solid rgba(122, 75, 46, .55); margin-bottom: 10px; }
-.switchrow .lbl { font-weight: 700; }
-.switchrow .sub { display: block; font-weight: 400; font-size: 14px; color: var(--ivory-dim); }
-.switch { position: relative; flex: 0 0 auto; width: 56px; height: 34px; min-height: 0; padding: 0; border-radius: 17px;
-  background: #3A4A44; transition: background .25s; }
-.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 28px; height: 28px; border-radius: 50%;
-  background: #fff; box-shadow: 0 2px 4px rgba(0,0,0,.3); transition: transform .25s cubic-bezier(.3,1.3,.5,1); }
-.switch[aria-checked="true"] { background: #30D158; }
-.switch[aria-checked="true"]::after { transform: translateX(22px); }
-.qrprev { display: block; width: 132px; height: 132px; margin: 4px 0 12px; border-radius: 12px; background: #fff; image-rendering: pixelated; }
-
-@media (prefers-reduced-motion: reduce) {
-  * { transition: none !important; }
-}
+.liveview { width: 100%; border-radius: 14px; display: block; background: #000; min-height: 120px; }
+#cueFwBar { margin-top: .25rem; }
 </style>
 </head>
 <body>
-<main>
-  <header class="top">
+<header class="navbar">
+  <div class="navin">
     <h1>Admin</h1>
-    <nav class="links" aria-label="Seiten">
-      <a href="/">Spiel-Panel</a>
-      <button class="quiet" type="button" id="logoutBtn">Abmelden</button>
+    <!-- Links bleiben links: oben rechts erscheinen die Meldungen (notify.js) -->
+    <nav class="navlinks" aria-label="Seiten">
+      <a class="btn plain" href="/">Spiel-Panel</a>
+      <button class="plain" type="button" id="logoutBtn">Abmelden</button>
     </nav>
-  </header>
-
-  <nav class="tabs" role="tablist" aria-label="Bereiche">
-    <button type="button" role="tab" class="tab" data-tab="overview" id="tab-overview" aria-controls="panel-overview">Übersicht</button>
-    <button type="button" role="tab" class="tab" data-tab="setup" id="tab-setup" aria-controls="panel-setup">Einrichtung</button>
-    <button type="button" role="tab" class="tab" data-tab="queue" id="tab-queue" aria-controls="panel-queue">Queue</button>
-    <button type="button" role="tab" class="tab" data-tab="training" id="tab-training" aria-controls="panel-training">Bilder &amp; Modelle <span class="badge" id="uploadBadge" hidden></span></button>
-  </nav>
-
+  </div>
+  <div class="navin tabrow">
+    <nav class="tabs" role="tablist" aria-label="Bereiche">
+      <button type="button" role="tab" class="tab" data-tab="overview" id="tab-overview" aria-controls="panel-overview">Übersicht</button>
+      <button type="button" role="tab" class="tab" data-tab="setup" id="tab-setup" aria-controls="panel-setup">Einrichtung</button>
+      <button type="button" role="tab" class="tab" data-tab="queue" id="tab-queue" aria-controls="panel-queue">Queue</button>
+      <button type="button" role="tab" class="tab" data-tab="training" id="tab-training" aria-controls="panel-training">Bilder &amp; Modelle <span class="badge" id="uploadBadge" hidden></span></button>
+    </nav>
+  </div>
+</header>
+<main>
   <!-- ===================================================== Übersicht -->
   <section class="panel" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview">
     <div class="cards overview">
@@ -298,7 +144,7 @@ input[type=text], input[type=password], input[type=number], select {
               <div class="frames" id="frames1">0</div>
             </div>
           </div>
-          <div class="message idle" id="message">Verbinde mit dem Tisch ...</div>
+          <div class="message idle" id="message">Verbinde mit dem Tisch …</div>
           <div class="sys"><span id="status">-</span><span id="fps"></span></div>
         </div>
       </div>
@@ -365,7 +211,7 @@ input[type=text], input[type=password], input[type=number], select {
         </form>
       </div>
 
-      <details class="card wide expand" id="calibDetails">
+      <details class="card wide expand disclose" id="calibDetails">
         <summary><span><span class="h2">Tisch einrichten</span><span class="sub" id="tableInfo">Ecken, Tischgröße, Tuchfarbe</span></span></summary>
         <div>
           <p class="hint">Die vier Ecken der Spielfläche antippen, dort wo das Tuch auf die Bande trifft – einmal rundherum, beginnend an einer langen Seite.</p>
@@ -394,7 +240,7 @@ input[type=text], input[type=password], input[type=number], select {
         </div>
       </details>
 
-      <details class="card wide expand" id="viewDetails">
+      <details class="card wide expand disclose" id="viewDetails">
         <summary><span><span class="h2">Was die Kamera sieht</span><span class="sub">Entzerrte Draufsicht mit den erkannten Kugeln</span></span></summary>
         <div>
           <img class="liveview" id="liveview" alt="Entzerrte Draufsicht mit erkannten Kugeln">
@@ -419,7 +265,7 @@ input[type=text], input[type=password], input[type=number], select {
           <button type="submit" class="primary">Koppeln</button>
         </form>
         <button class="quiet block" type="button" id="cueUnpair" style="margin-top:8px" hidden>Queue entkoppeln</button>
-        <details class="help">
+        <details class="help disclose">
           <summary>So wird gekoppelt</summary>
           <p>Queue einschalten, am Handy mit dem WLAN <b>„Billard-Queue-…“</b> verbinden. Auf der Seite, die sich öffnet, euer WLAN wählen. Der Queue zeigt dann seinen <b>Castcode</b> – hier eintragen, dort den Haken setzen und „Verbinden“. Danach finden sich Pi und Queue über das Netzwerk von selbst.</p>
           <p>LED am Queue (M5Stack Atom): <b>rot</b> = keine Verbindung zum Pi, <b>grün</b> = verbunden, kein Spiel. Knopf drücken, wenn sie grün ist: Spiel <b>Team A</b> (blau) gegen <b>Team B</b> (orange) startet. Die LED zeigt dann die Farbe des Teams, das dran ist. Im Spiel heißt der Knopf <b>„Stoß fertig“</b>: Der Stoß wird sofort ausgewertet (LED blinkt kurz weiß).</p>
@@ -446,14 +292,14 @@ input[type=text], input[type=password], input[type=number], select {
         <h2>Firmware des Queues</h2>
         <p class="hint">Neue Firmware über das WLAN aufspielen – ohne USB-Kabel. Der Queue muss verbunden sein, der Pi braucht für „Neueste Version“ Internet.</p>
         <p class="statusline" id="cueFwStatus">-</p>
-        <progress id="cueFwBar" max="100" value="0" style="width:100%;height:16px" hidden></progress>
+        <progress id="cueFwBar" max="100" value="0" hidden></progress>
         <div class="grid two" style="margin-top:8px">
           <button class="quiet" type="button" id="cueFwCheck">Nach Update suchen</button>
           <button class="primary" type="button" id="cueFwUpdate">Neueste Version installieren</button>
         </div>
         <button class="quiet block" type="button" id="cueFwFileBtn" style="margin-top:8px">Eigene .bin hochladen</button>
         <input type="file" id="cueFwFile" accept=".bin" hidden>
-        <details class="help">
+        <details class="help disclose">
           <summary>So funktioniert das</summary>
           <p>Der Pi holt aus dem neuesten <b>Release</b> auf GitHub die Datei <b>queue-ota-&lt;board&gt;.bin</b> und schickt sie an den Queue. Die LED blinkt dabei <b>blau</b>, danach startet der Queue neu (ca. 10 s) und verbindet sich wieder.</p>
           <p>Bricht die Übertragung ab, läuft einfach die alte Firmware weiter. Eigene Builds: <code>cue_sensor/.pio/build/&lt;board&gt;/firmware.bin</code> hochladen – nicht die Datei für USB (ab 0x0).</p>
@@ -478,7 +324,7 @@ input[type=text], input[type=password], input[type=number], select {
           <button type="button" class="primary" id="captureBtn">Jetzt ein Bild aufnehmen</button>
           <a class="btnlink quiet" id="vpsLink" href="#" target="_blank" rel="noopener" hidden>Trainingsseite öffnen</a>
         </div>
-        <details class="help">
+        <details class="help disclose">
           <summary>So läuft das Training</summary>
           <p>Der Pi nimmt nur Bilder auf – per Knopf (hier oder „Bild speichern“ im Spiel-Panel) oder automatisch nach jedem Stoß – und schickt sie an die <b>Trainingsseite im Netz</b>. Was dort angekommen ist, wird auf dem Pi gelöscht.</p>
           <p>Festlegen, Farben lernen und das Trainieren der Modelle passieren nur dort bzw. in Google Colab. Neue Modelle holt sich der Pi von der Trainingsseite von selbst (alle paar Minuten) – so bleibt der Pi frei für Erkennung und Beamer.</p>
@@ -492,7 +338,7 @@ input[type=text], input[type=password], input[type=number], select {
         <p class="statusline" id="vpsModels"></p>
         <button type="button" class="quiet block" id="modelUploadBtn">Modell / Farben von Hand hochladen</button>
         <input type="file" id="modelFile" accept=".tflite,.json" multiple hidden>
-        <details class="help">
+        <details class="help disclose">
           <summary>Mehr: Zurücksetzen, Erklärung</summary>
           <div class="grid two" style="margin:10px 0">
             <button type="button" class="quiet" id="resetFeaturesBtn">Farben auf Startwerte</button>
@@ -540,10 +386,10 @@ input[type=text], input[type=password], input[type=number], select {
 <div class="login" id="login" hidden>
   <form id="loginForm" autocomplete="off">
     <h2>Admin-Panel</h2>
-    <p class="hint" id="loginHint" style="margin:0">Bitte den Admin-PIN eingeben.</p>
+    <p class="hint" id="loginHint">Bitte den Admin-PIN eingeben.</p>
     <input type="password" id="loginInput" inputmode="numeric" maxlength="12" aria-label="Admin-PIN">
     <button class="primary" type="submit">Anmelden</button>
-    <p class="hint" style="margin:0">Spieler nehmen das Spiel-Panel (Startseite).</p>
+    <p class="hint small">Spieler nehmen das Spiel-Panel (Startseite).</p>
   </form>
 </div>
 
@@ -1089,16 +935,16 @@ input[type=text], input[type=password], input[type=number], select {
     const pts = points.length ? points : ((state && state.corners) || []);
     if (pts.length) {
       ctx.lineWidth = 3;
-      ctx.strokeStyle = points.length ? "#6FB3E0" : "rgba(239,230,210,.7)";
+      ctx.strokeStyle = points.length ? "#0A84FF" : "rgba(255,255,255,.75)";
       ctx.beginPath();
       pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
       if (pts.length === 4) ctx.closePath();
       ctx.stroke();
       pts.forEach((p, i) => {
-        ctx.fillStyle = "#6FB3E0";
+        ctx.fillStyle = "#0A84FF";
         ctx.beginPath(); ctx.arc(p[0], p[1], 9, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = "#0A2F25";
-        ctx.font = "bold 13px sans-serif";
+        ctx.fillStyle = "#FFFFFF";
+        ctx.font = "600 13px -apple-system, system-ui, sans-serif";
         ctx.textAlign = "center"; ctx.textBaseline = "middle";
         ctx.fillText(String(i + 1), p[0], p[1]);
       });
@@ -1144,6 +990,18 @@ input[type=text], input[type=password], input[type=number], select {
   // ---------------- Reiter ----------------
   const TABS = ["overview", "setup", "queue", "training"];
   let tab = null;
+  // heller Schieber unter dem gewaehlten Reiter: gleitet per Uebergang, also auch mitten im Gleiten umlenkbar
+  function moveTabThumb() {
+    const b = $("tab-" + tab);
+    if (!b) return;
+    const bar = b.parentElement;
+    bar.style.setProperty("--tab-x", b.offsetLeft + "px");
+    bar.style.setProperty("--tab-w", b.offsetWidth + "px");
+    if (!bar.classList.contains("ready")) requestAnimationFrame(() => bar.classList.add("ready"));   // erst danach gleiten
+    if (bar.scrollWidth > bar.clientWidth) b.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+  window.addEventListener("resize", moveTabThumb);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(moveTabThumb);
   function showTab(name) {
     if (!TABS.includes(name)) name = "overview";
     if (name === tab) return;
@@ -1155,6 +1013,7 @@ input[type=text], input[type=password], input[type=number], select {
       $("tab-" + t).tabIndex = on ? 0 : -1;
       $("panel-" + t).hidden = !on;
     }
+    moveTabThumb();
     try { history.replaceState(null, "", "#" + name); } catch (e) { /* egal */ }
     if (prev !== null) window.scrollTo({ top: 0 });            // neuer Reiter beginnt oben
     if (prev === "setup") clearInterval(viewTimer);              // Live-Kamerabild nur, solange sichtbar

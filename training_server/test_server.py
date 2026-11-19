@@ -111,6 +111,9 @@ def main():
         print("Anmeldung")
         anna, ben, carl = Client(base), Client(base), Client(base)
         check(anna.call("GET", "/api/next")[0] == 401, "ohne Code kein Bild")
+        for pfad, merkmal in (("/", b"loginForm"), ("/ui.css", b"--tint"), ("/notify.js", b"Notify")):
+            st, roh = Client(base).call("GET", pfad)
+            check(st == 200 and merkmal in roh, pfad + " wird ohne Anmeldung ausgeliefert (Seite, Aussehen, Meldungen)")
         check(admin.call("POST", "/api/admin/person", {"name": "Anna"})[0] == 200, "Admin legt Anna an")
         code_a = admin.call("GET", "/api/admin/stand")[1]["personen"][0]["code"]
         code_b = admin.call("POST", "/api/admin/person", {"name": "Ben"})[1]["code"]

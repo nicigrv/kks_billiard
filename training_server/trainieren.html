@@ -6,85 +6,65 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Billard-Training">
 <meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <title>Billard-Training</title>
+<link rel="stylesheet" href="/ui.css">
 <style>
-:root {
-  --bg: #0B1712;
-  --panel: #12241C;
-  --line: #2A4436;
-  --ink: #EFE6D2;
-  --dim: #A9B3A6;
-  --chalk: #6FB3E0;
-  --ok: #7FE0A0;
-  --gold: #FFD180;
-  --bad: #FF8A80;
-  --rail: #5A3520;
-  --foul: #D2453B;
-  --r: 12px;
-}
-* { box-sizing: border-box; }
-[hidden] { display: none !important; }
-html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
-  font: 16px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; }
-body { display: grid; grid-template-rows: auto 1fr; height: 100dvh; overflow: hidden;
-  padding: max(8px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); gap: 8px; }
+/* Werkzeug auf einer Bildschirmseite: links das Tischbild, rechts die Bedienung */
+:root { --ink: var(--label); --dim: var(--label2); --r: 14px; }
+html, body { height: 100%; }
+body { display: grid; grid-template-rows: auto 1fr; height: 100dvh; min-height: 0; overflow: hidden; gap: .625rem;
+  padding: max(.5rem, env(safe-area-inset-top)) max(.75rem, env(safe-area-inset-right)) max(.5rem, env(safe-area-inset-bottom)) max(.75rem, env(safe-area-inset-left)); }
 
-header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }
-header h1 { font-size: 20px; margin: 0; white-space: nowrap; }
-.stats { color: var(--dim); font-size: 14px; flex: 1 1 260px; min-width: 0; }
-.stats b { color: var(--ink); }
-.stats .q { color: var(--ok); }
-#who { color: var(--chalk); font-weight: 700; white-space: nowrap; }
+header { display: flex; align-items: center; gap: .5rem .875rem; flex-wrap: wrap; min-width: 0; padding: .125rem .25rem; }
+header h1 { font-size: 1.375rem; white-space: nowrap; }
+.stats { color: var(--label2); font-size: .875rem; letter-spacing: 0; flex: 1 1 16rem; min-width: 0; font-variant-numeric: tabular-nums; }
+.stats b { color: var(--label); }
+.stats .q { color: var(--good); }
+#who { color: var(--tint); font-weight: 600; white-space: nowrap; }
 
-button, a.btn { font: inherit; font-weight: 700; color: var(--ink); background: var(--rail); border: 0;
-  border-radius: var(--r); min-height: 44px; padding: 8px 14px; cursor: pointer; touch-action: manipulation;
-  text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
-button:disabled { opacity: .4; cursor: default; }
-button.primary { background: var(--chalk); color: #0A2F25; }
-button.ok { background: var(--ok); color: #0A2F25; }
-button.danger { background: var(--foul); }
-button.quiet { background: transparent; border: 2px solid var(--line); }
-:focus-visible { outline: 3px solid var(--chalk); outline-offset: 2px; }
-
-main { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 10px; min-height: 0; }
+main { display: grid; grid-template-columns: minmax(0, 1fr) 19rem; gap: .625rem; min-height: 0; }
 .stage { position: relative; min-height: 0; display: flex; align-items: center; justify-content: center;
-  background: #000; border-radius: var(--r); overflow: hidden; }
+  background: #000; border-radius: var(--r-card); overflow: hidden; }
 #canvas { display: block; touch-action: manipulation; cursor: crosshair; }
 .empty { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
-  text-align: center; padding: 24px; color: var(--dim); font-size: 18px; }
-.empty.show { display: flex; flex-direction: column; gap: 8px; }
-.caption { position: absolute; left: 10px; top: 8px; right: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  text-align: center; padding: 1.5rem; color: rgba(235, 235, 245, .64); font-size: 1.0625rem; }
+.empty.show { display: flex; flex-direction: column; gap: .5rem; }
+.empty.show > div:first-child { color: #FFFFFF !important; font: 600 1.375rem/1.2 var(--font-display) !important; letter-spacing: -.02em; }
+/* Beschriftung ueber dem Bild: kleine Kapseln aus dunklem Material */
+.caption { position: absolute; left: .625rem; top: .625rem; right: .625rem; display: flex; gap: .5rem; align-items: center; flex-wrap: wrap;
   pointer-events: none; }
-.caption span { background: rgba(0,0,0,.65); padding: 4px 10px; border-radius: 8px; font-size: 14px; color: var(--dim); }
-.caption .runde { color: #0A2F25; font-weight: 800; }
-.caption .runde.r1 { background: var(--chalk); }
-.caption .runde.r2 { background: var(--gold); }
+.caption span { background: rgba(28, 28, 30, .6); -webkit-backdrop-filter: blur(16px) saturate(180%); backdrop-filter: blur(16px) saturate(180%);
+  padding: .25rem .75rem; border-radius: 999px; font-size: .8125rem; color: rgba(255, 255, 255, .85); letter-spacing: 0; }
+.caption .runde { color: #FFFFFF; font-weight: 600; }
+.caption .runde.r1 { background: rgba(10, 132, 255, .85); }
+.caption .runde.r2 { background: rgba(255, 159, 10, .85); color: #000; }
 
-aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow-y: auto; }
-.box { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 10px; }
-.box h2 { font-size: 14px; margin: 0 0 8px; color: var(--dim); font-weight: 600; }
-.auftrag { font-size: 15px; }
-.auftrag b { color: var(--ink); }
-.auftrag .leise { display: block; margin-top: 6px; font-size: 13px; opacity: .75; }
-#zoom { width: 100%; max-width: 26vh; aspect-ratio: 1; display: block; margin: 0 auto; background: #000; border-radius: 8px; touch-action: manipulation; cursor: crosshair; }
-.hint { color: var(--dim); font-size: 13px; margin: 6px 0 0; }
-.chips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
-.chip { min-height: 44px; padding: 4px; border-radius: 24px; font-size: 18px; border: 3px solid transparent; }
-.chip.sel { border-color: var(--ink); }
-.chip.wide { grid-column: span 4; font-size: 15px; border-radius: var(--r); }
-.save { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
-.save .big { grid-column: span 3; min-height: 60px; font-size: 20px; }
-.save button:not(.big) { padding: 8px 6px; font-size: 15px; }
+aside { display: flex; flex-direction: column; gap: .625rem; min-height: 0; overflow-y: auto; }
+.box { background: var(--card); border-radius: var(--r-card); padding: .875rem; box-shadow: var(--shadow-card); }
+.box h2 { font: 500 .8125rem/1.3 var(--font); color: var(--label2); text-transform: uppercase; letter-spacing: .03em; margin: 0 0 .625rem .125rem; }
+.auftrag { font-size: .9375rem; line-height: 1.4; }
+.auftrag b { color: var(--label); }
+.auftrag .leise { display: block; margin-top: .375rem; font-size: .8125rem; color: var(--label2); letter-spacing: 0; }
+#zoom { width: 100%; max-width: 26vh; aspect-ratio: 1; display: block; margin: 0 auto; background: #000; border-radius: 12px; touch-action: manipulation; cursor: crosshair; }
+.hint { font-size: .8125rem; margin: .5rem 0 0; letter-spacing: 0; }
 
-.login { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center;
-  background: rgba(5, 12, 9, .94); padding: 16px; }
-.login form { width: min(400px, 100%); display: grid; gap: 12px; text-align: center; }
-.login h2 { margin: 0; font-size: 24px; color: var(--ink); }
-.login p { margin: 0; color: var(--dim); }
-.login input { font: 700 34px/1 system-ui, sans-serif; letter-spacing: 10px; text-align: center; padding: 14px;
-  border-radius: var(--r); border: 2px solid var(--line); background: var(--bg); color: var(--ink); width: 100%; }
-.login button { min-height: 56px; font-size: 20px; }
-.login .fehler { color: var(--bad); font-weight: 600; min-height: 1.3em; }
+/* Nummern: Kugeln zum Antippen */
+.chips { display: grid; grid-template-columns: repeat(4, 1fr); gap: .375rem; }
+.chip { min-height: 2.75rem; padding: .25rem; border-radius: 999px; font-size: 1.0625rem; font-weight: 700;
+  box-shadow: inset 0 0 0 .5px rgba(0, 0, 0, .2); }
+.chip.sel { box-shadow: 0 0 0 2px var(--card), 0 0 0 4.5px var(--tint); }
+.chip.wide { grid-column: span 4; font-size: .9375rem; border-radius: var(--r-ctl); background: var(--fill); color: var(--label); box-shadow: none; }
+
+.save { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem; }
+.save .big { grid-column: span 3; min-height: 3.5rem; font-size: 1.1875rem; }
+.save button:not(.big) { padding: .5rem .25rem; font-size: .875rem; min-height: 2.75rem; }
+
+.login h2 { font: 600 1.5rem/1.2 var(--font-display); letter-spacing: -.022em; text-transform: none; color: var(--label); margin: 0; }
+.login p { color: var(--label2); }
+.login .fehler { color: var(--bad); font-weight: 500; min-height: 1.3em; font-size: .9375rem; }
+.login input { font-family: var(--mono); }
 
 /* Meldungen unten links ueber dem Bild - oben rechts lagen sie ueber den Nummern 1-7 und schluckten die Klicks */
 .ntf-stack { top: auto !important; right: auto !important; left: max(14px, env(safe-area-inset-left)) !important;
@@ -95,7 +75,7 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
   body { overflow: auto; height: auto; min-height: 100dvh; }
   main { grid-template-columns: 1fr; }
   .stage { min-height: 45vh; }
-  #zoom { max-width: 220px; margin: 0 auto; }
+  #zoom { max-width: 13.75rem; margin: 0 auto; }
   .chips { grid-template-columns: repeat(8, 1fr); }
   .chip.wide { grid-column: span 8; }
 }
@@ -103,10 +83,10 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
 </head>
 <body>
 <header>
-  <h1>🎱 Billard-Training</h1>
+  <h1>Billard-Training</h1>
   <span id="who"></span>
   <div class="stats" id="stats" aria-live="polite"></div>
-  <button class="quiet" type="button" id="logoutBtn" hidden>Abmelden</button>
+  <button class="plain" type="button" id="logoutBtn" hidden>Abmelden</button>
 </header>
 <div class="login" id="login" hidden>
   <form id="loginForm" class="box" autocomplete="off">
@@ -364,7 +344,7 @@ aside { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow
     const e = $("empty");
     e.innerHTML = "";
     const h = document.createElement("div"); h.style.fontSize = "22px"; h.style.color = "var(--ink)";
-    h.textContent = "Alles erledigt 🎉";
+    h.textContent = "Alles erledigt";
     const p = document.createElement("div");
     p.textContent = stand && stand.offen > 0
       ? "Die restlichen offenen Bilder hast du schon festgelegt – die legen jetzt andere fest."
