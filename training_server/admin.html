@@ -197,7 +197,8 @@ button.klein.danger { background-color: var(--red-soft); color: var(--bad); }
     $("z3t").textContent = "fertig (" + z.ziel + "× festgelegt), davon " + z.einig + " einstimmig";
     $("eingang").textContent = (d.upload ? "Upload vom Tisch an" : "Upload vom Tisch AUS (UPLOAD_KEY fehlt)") +
       " · letztes Bild: " + seit(d.letzter_eingang) +
-      (z.einzel ? " · Einzelkugel-Bilder: " + z.einzel + ", davon " + z.einzel_erkannt + " von der Bilderkennung festgelegt" : "");
+      (z.einzel ? " · Einzelkugel-Bilder: " + z.einzel + ", davon " + z.einzel_erkannt + " erkannt" +
+        (z.einzel_aussortiert ? ", " + z.einzel_aussortiert + " nicht erkannt (aussortiert)" : "") : "");
     $("zipFertig").textContent = "ZIP laden (" + z.fertig + " fertige Bilder)";
     $("zipFertig").classList.toggle("aus", !z.fertig);
     $("zipEinig").textContent = "nur einstimmige (" + z.einig + ")";
@@ -246,11 +247,14 @@ button.klein.danger { background-color: var(--red-soft); color: var(--bad); }
       const z1 = document.createElement("span"); z1.className = "dim";
       z1.textContent = b.name.slice(6, 8) + "." + b.name.slice(4, 6) + ". " + b.name.slice(9, 11) + ":" + b.name.slice(11, 13) + " · " + b.kugeln + " Kugeln";
       t.append(m, z1);
-      const einzel = b.einzel === null || b.einzel === undefined ? "" :
-        "Einzelkugel " + (b.einzel === 0 ? "Weiße" : b.einzel) + (b.erkennung === "gefunden" ? "" : " – Bilderkennung: " + b.erkennung + ", Trainer legen fest");
+      const istEinzel = b.einzel !== null && b.einzel !== undefined;
+      const einzel = !istEinzel ? "" :                  // Einzelkugel-Bilder legt nur die Bilderkennung fest
+        "Einzelkugel " + (b.einzel === 0 ? "Weiße" : b.einzel) + (b.erkennung === "gefunden" ? " – erkannt" :
+          b.status === "verworfen" ? " – nicht erkannt: " + b.erkennung : " – " + b.erkennung);
       const wer = [einzel, b.wer.length && b.wer.join(", "), b.verworfen_von && "aussortiert: " + b.verworfen_von].filter(Boolean).join(" · ");
       if (wer) { const w = document.createElement("span"); w.className = "dim"; w.textContent = wer; t.append(w); }
-      if (b.status === "verworfen") t.append(knopf("Wieder freigeben", "quiet", () => post("zurueck", { name: b.name })));
+      if (b.status === "verworfen") t.append(knopf(istEinzel ? "Nochmal erkennen" : "Wieder freigeben", "quiet",
+        () => post("zurueck", { name: b.name })));
       el.append(im, t);
       box.appendChild(el);
     });

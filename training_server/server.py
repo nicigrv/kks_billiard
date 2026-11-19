@@ -13,11 +13,13 @@ Billard-Training im Netz (VPS): Bilder vom Tisch zuhause festlegen.
     (GET /api/modelle, GET /api/modell?name=..., beides mit X-Upload-Key). Auf dem Pi wird nichts gelernt.
   Spielaufzeichnung (aufzeichnung.py): der Pi schickt jedes Rack als Daten, der Server baut das Video
     (gleiche Grafik wie der Beamer) und liefert es unter einer nicht erratbaren Adresse aus.
-  Einzelkugel-Bilder (am Pi per Knopf, Nummer am Pi festgelegt): die Kugel findet eine einfache
-    Bilderkennung hier auf dem Server (einzelkugel.py, Vergleich mit dem leeren Tisch). Genau eine
-    Kugel gefunden -> Bild ist sofort fertig ("Bilderkennung"); sonst legen es Trainer wie gewohnt fest.
+  Einzelkugel-Bilder (am Pi per Knopf, Nummer am Pi festgelegt): brauchen keine Menschen. Die Stelle
+    der Kugel findet die Bilderkennung hier auf dem Server (einzelkugel.py: Vergleich mit dem leeren
+    Tisch, Licht/Schatten/Verschiebung ausgeglichen, Farbe passend zur Nummer). Gefunden -> sofort
+    fertig ("Bilderkennung"); nicht sicher gefunden -> von selbst aussortiert. Trainer sehen sie nie.
+    Was beim Start noch offen ist (aeltere Versionen), wird im Hintergrund nachgeholt.
 
-Python-Standardbibliothek, fuer die Einzelkugel-Erkennung zusaetzlich Pillow + numpy, fuers
+Python-Standardbibliothek, fuer die Einzelkugel-Erkennung zusaetzlich OpenCV + numpy + Pillow, fuers
 Farben-Lernen OpenCV + numpy (kugel_merkmale.py, Kopie aus app/).
 Daten in DATA_DIR: billard.sqlite, bilder/<name>.jpg, bilder/leer/<hash>.jpg, geheim.key, modelle/.
 """
@@ -38,7 +40,7 @@ import urllib.parse
 import zipfile
 
 try:
-    import einzelkugel                 # Pillow + numpy; ohne: Einzelkugel-Bilder legen Trainer fest
+    import einzelkugel                 # OpenCV + numpy + Pillow; ohne: Einzelkugel-Bilder warten auf die Erkennung
 except ImportError:
     einzelkugel = None
 try:
@@ -200,7 +202,10 @@ class Daten:
         if "einzel" not in spalten:            # Kugelnummer bei Einzelkugel-Bildern, sonst NULL
             self.db.execute("ALTER TABLE bilder ADD COLUMN einzel INTEGER")
             self.db.execute("ALTER TABLE bilder ADD COLUMN erkennung TEXT")
+        if "leer" not in spalten:              # welcher leere Tisch dazugehoert (Hash, bilder/leer/<hash>.jpg)
+            self.db.execute("ALTER TABLE bilder ADD COLUMN leer TEXT")
         os.makedirs(os.path.join(self.bilder, "leer"), exist_ok=True)
+        self._geerbtes_trennen()
         # Umstellung auf "jedes Bild mehrfach, ohne Vorschlaege": alte Runden werden zu "offen".
         # Am Tisch festgelegte Kugeln bleiben in kugeln1 stehen, zaehlen aber nicht als Festlegung.
         self.db.execute("""UPDATE bilder SET status = 'offen' WHERE status IN ('runde1', 'runde2', 'fertig')
@@ -229,9 +234,35 @@ class Daten:
             if self.db.execute("SELECT 1 FROM personen WHERE lower(name) = lower(?)", (name,)).fetchone():
                 raise Fehler(f"„{name}“ gibt es schon")
             code = self._neuer_code()
-            self.db.execute("INSERT INTO personen (name, code, erstellt) VALUES (?, ?, ?)", (name, code, self.clock()))
+            self.db.execute("INSERT INTO personen (id, name, code, erstellt) VALUES (?, ?, ?, ?)",
+                            (self._freie_id(), name, code, self.clock()))
             self.db.commit()
         return code
+
+    def _freie_id(self):
+        """Neue Nummer fuer einen Trainer - nie die eines geloeschten. Dessen Festlegungen und
+        Aussortierungen bleiben ja unter seiner Nummer stehen; sonst wuerde der neue sie "erben"
+        (und die Bilder, die der alte schon festgelegt hat, nie bekommen)."""
+        return 1 + max(self.db.execute(
+            """SELECT MAX(m) FROM (SELECT MAX(id) m FROM personen UNION ALL SELECT MAX(person) FROM festlegungen
+               UNION ALL SELECT MAX(verworfen_von) FROM bilder UNION ALL SELECT MAX(von1) FROM bilder
+               UNION ALL SELECT MAX(von2) FROM bilder)""").fetchone()[0] or 0, 0)
+
+    def _geerbtes_trennen(self):
+        """Reparatur (aeltere Versionen haben Nummern geloeschter Trainer neu vergeben): Wer Festlegungen
+        von VOR seiner Anlage hat - oder noch nie da war und trotzdem welche hat -, bekommt eine neue Nummer.
+        Die alten Festlegungen bleiben beim geloeschten Trainer (Name steht daran)."""
+        for p in list(self.db.execute("SELECT id, name, erstellt, zuletzt FROM personen")):
+            frueher = self.db.execute("SELECT 1 FROM festlegungen WHERE person = ? AND zeit < ? LIMIT 1",
+                                      (p["id"], p["erstellt"])).fetchone()
+            nie_da = p["zuletzt"] is None and self.db.execute(
+                """SELECT 1 FROM festlegungen WHERE person = ? UNION ALL
+                   SELECT 1 FROM bilder WHERE verworfen_von = ? LIMIT 1""", (p["id"], p["id"])).fetchone()
+            if frueher or nie_da:
+                neu = self._freie_id()
+                self.db.execute("UPDATE personen SET id = ? WHERE id = ?", (neu, p["id"]))
+                print(f"[trainer] {p['name']}: neue Nummer {neu} (alte Festlegungen gehören einem gelöschten Trainer)",
+                      flush=True)
 
     def person_code_neu(self, pid):
         with self.lock:
@@ -373,46 +404,122 @@ class Daten:
             raise Fehler("Bild des leeren Tisches") from None
         if not leer.startswith(b"\xff\xd8") or len(leer) > MAX_UPLOAD:
             raise Fehler("Bild des leeren Tisches ist kein JPEG")
-        pfad = os.path.join(self.bilder, "leer", hashlib.sha256(leer).hexdigest()[:20] + ".jpg")
+        kennung = hashlib.sha256(leer).hexdigest()[:20]
+        pfad = os.path.join(self.bilder, "leer", kennung + ".jpg")
         if not os.path.exists(pfad):
             with open(pfad + ".tmp", "wb") as f:
                 f.write(leer)
             os.replace(pfad + ".tmp", pfad)
-        return leer
+        return leer, kennung
 
     def _upload_einzel(self, name, jpg, leer_b64, w, h, radius, nummer):
-        """Einzelkugel-Bild: Nummer kommt vom Pi, die Position findet die Bilderkennung."""
-        leer = self._leer_speichern(leer_b64)
-        kugeln, grund = [], "Bilderkennung nicht installiert (Pillow/numpy)"
-        if einzelkugel is not None:
-            try:
-                kugeln, grund = einzelkugel.finde_kugel(jpg, leer, radius)
-            except Exception as e:                       # kaputtes Bild o. ae.: dann legen Trainer fest
-                kugeln, grund = [], f"Bilderkennung: {e}"
-        basis = {"x": 0, "y": 0, "kind": "cue" if nummer == 0 else "eight" if nummer == 8 else
-                  ("solid" if nummer < 8 else "stripe"),
-                  "color": "" if nummer == 0 else "schwarz" if nummer == 8 else
-                  next(c for c, v in COLOR_NUMBER.items() if v == (nummer if nummer < 8 else nummer - 8)),
-                  "number": nummer}
-        gefunden = len(kugeln) == 1
-        now = self.clock()
+        """Einzelkugel-Bild: Nummer kommt vom Pi, die Stelle findet die Bilderkennung - ohne Menschen."""
+        leer, kennung = self._leer_speichern(leer_b64)
+        with self.lock:
+            if self.db.execute("SELECT 1 FROM bilder WHERE name = ?", (name,)).fetchone():
+                return False
+        ergebnis = self._einzel_erkennen(jpg, leer, radius, nummer)        # dauert etwas: ohne Sperre
         with self.lock:
             if self.db.execute("SELECT 1 FROM bilder WHERE name = ?", (name,)).fetchone():
                 return False
             self._bild_speichern(name, jpg)
-            if gefunden:
-                kugel = dict(basis, x=kugeln[0][0], y=kugeln[0][1])
-                self.db.execute("""INSERT INTO bilder (name, eingang, breite, hoehe, radius, modell, vorschlag, status,
-                                   einzel, erkennung) VALUES (?,?,?,?,?,?,?, 'fertig', ?, ?)""",
-                                (name, now, w, h, radius, "Einzelkugel", json.dumps([kugel]), nummer, "gefunden"))
-                self.db.execute("INSERT INTO festlegungen (bild, person, person_name, kugeln, zeit) VALUES (?,?,?,?,?)",
-                                (name, 0, ERKENNUNG, json.dumps([kugel]), now))
-            else:
-                self.db.execute("""INSERT INTO bilder (name, eingang, breite, hoehe, radius, modell, vorschlag, status,
-                                   einzel, erkennung) VALUES (?,?,?,?,?,?,?, 'offen', ?, ?)""",
-                                (name, now, w, h, radius, "Einzelkugel", "[]", nummer, grund or "unsicher"))
+            self.db.execute("""INSERT INTO bilder (name, eingang, breite, hoehe, radius, modell, vorschlag, status,
+                               einzel, erkennung, leer) VALUES (?,?,?,?,?,?,'[]','offen',?,?,?)""",
+                            (name, self.clock(), w, h, radius, "Einzelkugel", nummer, "wartet auf die Bilderkennung",
+                             kennung))
+            self._einzel_eintragen(name, nummer, ergebnis)
             self.db.commit()
         return True
+
+    @staticmethod
+    def _einzel_erkennen(jpg, leer, radius, nummer):
+        """-> [(x, y)] und Grund ("" = sicher gefunden), oder None, wenn die Bilderkennung fehlt."""
+        if einzelkugel is None:
+            return None
+        try:
+            return einzelkugel.finde_kugel(jpg, leer, radius, nummer)
+        except Exception as e:                       # kaputtes Bild o. ae.: gilt als nicht erkannt
+            return [], f"Bilderkennung: {e}"
+
+    def _einzel_eintragen(self, name, nummer, ergebnis):
+        """Ergebnis der Bilderkennung festhalten (unter self.lock). Gefunden -> fertig, sonst aussortiert.
+        Ohne Bilderkennung (Pillow/numpy/OpenCV fehlen) bleibt es offen - Trainer bekommen es trotzdem nicht."""
+        if ergebnis is None:
+            return
+        kugeln, grund = ergebnis
+        if len(kugeln) == 1:
+            kugel = {"x": kugeln[0][0], "y": kugeln[0][1], "number": nummer,
+                     "kind": "cue" if nummer == 0 else "eight" if nummer == 8 else ("solid" if nummer < 8 else "stripe"),
+                     "color": "" if nummer == 0 else "schwarz" if nummer == 8 else
+                     next(c for c, v in COLOR_NUMBER.items() if v == (nummer if nummer < 8 else nummer - 8))}
+            self.db.execute("""UPDATE bilder SET status = 'fertig', erkennung = 'gefunden', vorschlag = ?,
+                               verworfen_von = NULL, verworfen_runde = NULL WHERE name = ?""", (json.dumps([kugel]), name))
+            self.db.execute("""INSERT INTO festlegungen (bild, person, person_name, kugeln, zeit) VALUES (?,?,?,?,?)
+                               ON CONFLICT (bild, person) DO UPDATE SET kugeln = excluded.kugeln, zeit = excluded.zeit""",
+                            (name, 0, ERKENNUNG, json.dumps([kugel]), self.clock()))
+        else:
+            self.db.execute("DELETE FROM festlegungen WHERE bild = ? AND person = 0", (name,))
+            self.db.execute("""UPDATE bilder SET status = 'verworfen', erkennung = ?, verworfen_von = 0, verworfen_runde = 0
+                               WHERE name = ?""", (grund or "nicht sicher erkannt", name))
+
+    def _leer_fuer(self, r, jpg):
+        """Bild des leeren Tisches zu einem Einzelkugel-Bild. Aeltere Bilder wissen es nicht: dann das
+        gespeicherte leere Bild, das am besten passt (gleiche Groesse, geringster Unterschied)."""
+        ordner = os.path.join(self.bilder, "leer")
+        if r["leer"]:
+            try:
+                with open(os.path.join(ordner, r["leer"] + ".jpg"), "rb") as f:
+                    return f.read()
+            except OSError:
+                pass
+        if einzelkugel is None:
+            return None
+        import cv2
+        import numpy as np
+        bild = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_GRAYSCALE)
+        beste, abstand = None, None
+        for datei in sorted(os.listdir(ordner)) if os.path.isdir(ordner) else []:
+            if not datei.endswith(".jpg"):
+                continue
+            with open(os.path.join(ordner, datei), "rb") as f:
+                roh = f.read()
+            leer = cv2.imdecode(np.frombuffer(roh, np.uint8), cv2.IMREAD_GRAYSCALE)
+            if bild is None or leer is None or leer.shape != bild.shape:
+                continue
+            d = float(np.median(np.abs(bild.astype(np.int16) - leer.astype(np.int16))))
+            if abstand is None or d < abstand:
+                beste, abstand = roh, d
+        return beste
+
+    def einzel_nachholen(self, auch_aussortierte=False):
+        """Einzelkugel-Bilder, die noch auf Menschen warten (aeltere Versionen), selbst erkennen.
+        -> (gefunden, aussortiert). Laeuft beim Start im Hintergrund."""
+        if einzelkugel is None:
+            return 0, 0
+        status = ("offen", "verworfen") if auch_aussortierte else ("offen",)
+        with self.lock:
+            rows = list(self.db.execute(f"""SELECT name, radius, einzel, leer FROM bilder WHERE einzel IS NOT NULL
+                                            AND status IN ({",".join("?" * len(status))})
+                                            AND (status = 'offen' OR verworfen_von = 0) ORDER BY name""", status))
+        gefunden = aussortiert = 0
+        for r in rows:
+            pfad = self.bild_pfad(r["name"])
+            if not pfad:
+                continue
+            with open(pfad, "rb") as f:
+                jpg = f.read()
+            ergebnis = self._einzel_erkennen(jpg, self._leer_fuer(r, jpg), r["radius"], r["einzel"])
+            with self.lock:
+                self._einzel_eintragen(r["name"], r["einzel"], ergebnis)
+                self.db.commit()
+            self.claims.pop(r["name"], None)
+            if ergebnis and len(ergebnis[0]) == 1:
+                gefunden += 1
+            else:
+                aussortiert += 1
+        if rows:
+            print(f"[einzelkugel] {len(rows)} Bilder nachgeholt: {gefunden} erkannt, {aussortiert} aussortiert", flush=True)
+        return gefunden, aussortiert
 
     # --------------------------------------------------------------- Festlegen
     def _andere_dran(self, name, pid, now):
@@ -446,9 +553,11 @@ class Daten:
         z["einzel"] = self.db.execute("SELECT COUNT(*) FROM bilder WHERE einzel IS NOT NULL").fetchone()[0]
         z["einzel_erkannt"] = self.db.execute(
             "SELECT COUNT(*) FROM bilder WHERE einzel IS NOT NULL AND erkennung = 'gefunden'").fetchone()[0]
+        z["einzel_aussortiert"] = self.db.execute(
+            "SELECT COUNT(*) FROM bilder WHERE einzel IS NOT NULL AND status = 'verworfen'").fetchone()[0]
         if pid is not None:
             z["fuer_mich"] = self.db.execute(
-                """SELECT COUNT(*) FROM bilder b WHERE status = 'offen'
+                """SELECT COUNT(*) FROM bilder b WHERE status = 'offen' AND einzel IS NULL
                    AND NOT EXISTS (SELECT 1 FROM festlegungen f WHERE f.bild = b.name AND f.person = ?)""", (pid,)).fetchone()[0]
             z["ich"] = self.db.execute(
                 "SELECT (SELECT COUNT(*) FROM festlegungen WHERE person = ?) + (SELECT COUNT(*) FROM bilder WHERE verworfen_von = ?)",
@@ -456,7 +565,7 @@ class Daten:
         else:
             je = {k: 0 for k in range(ZIEL)}
             for r in self.db.execute("""SELECT (SELECT COUNT(*) FROM festlegungen f WHERE f.bild = b.name) n
-                                        FROM bilder b WHERE status = 'offen'"""):
+                                        FROM bilder b WHERE status = 'offen' AND einzel IS NULL"""):
                 je[min(r["n"], ZIEL - 1)] += 1
             z["offen_je"] = [je[k] for k in range(ZIEL)]
             z["einig"] = sum(1 for r in self.db.execute("SELECT name, radius FROM bilder WHERE status = 'fertig'")
@@ -475,7 +584,8 @@ class Daten:
         with self.lock:
             rows = [r for r in self.db.execute(
                 """SELECT b.*, (SELECT COUNT(*) FROM festlegungen f WHERE f.bild = b.name) n FROM bilder b
-                   WHERE status = 'offen' AND NOT EXISTS (SELECT 1 FROM festlegungen f WHERE f.bild = b.name AND f.person = ?)
+                   WHERE status = 'offen' AND einzel IS NULL
+                   AND NOT EXISTS (SELECT 1 FROM festlegungen f WHERE f.bild = b.name AND f.person = ?)
                    ORDER BY n DESC, name""", (pid,))
                 if r["n"] + self._andere_dran(r["name"], pid, now) < ZIEL]
             if nach:
@@ -496,7 +606,7 @@ class Daten:
             r = self.db.execute("SELECT * FROM bilder WHERE name = ?", (name,)).fetchone()
             if not r:
                 raise Fehler("Bild nicht gefunden", 404)
-            if r["status"] != "offen":
+            if r["status"] != "offen" or r["einzel"] is not None:
                 self.claims.pop(name, None)
                 raise Fehler("Dieses Bild ist schon fertig – weiter mit dem nächsten", 409)
             if self.db.execute("SELECT 1 FROM festlegungen WHERE bild = ? AND person = ?", (name, pid)).fetchone():
@@ -537,12 +647,28 @@ class Daten:
         return p if os.path.isfile(p) else None
 
     def zurueck_in_runde1(self, name):
-        """Admin: verworfenes Bild doch wieder festlegen lassen (vorhandene Festlegungen bleiben)."""
+        """Admin: verworfenes Bild doch wieder festlegen lassen (vorhandene Festlegungen bleiben).
+        Einzelkugel-Bilder gehen nicht an Trainer - sie werden noch einmal erkannt. -> Meldung"""
+        with self.lock:
+            r = self.db.execute("SELECT name, radius, einzel, leer, status FROM bilder WHERE name = ?", (name,)).fetchone()
+        if r and r["einzel"] is not None and r["status"] == "verworfen":
+            pfad = self.bild_pfad(name)
+            if not pfad or einzelkugel is None:
+                raise Fehler("Bilderkennung nicht möglich", 409)
+            with open(pfad, "rb") as f:
+                jpg = f.read()
+            ergebnis = self._einzel_erkennen(jpg, self._leer_fuer(r, jpg), r["radius"], r["einzel"])
+            with self.lock:
+                self._einzel_eintragen(name, r["einzel"], ergebnis)
+                self.db.commit()
+            return ("Kugel jetzt erkannt – Bild ist fertig" if ergebnis and len(ergebnis[0]) == 1
+                    else "Wieder nicht sicher erkannt (" + ergebnis[1] + ") – bleibt aussortiert")
         with self.lock:
             if not self.db.execute("""UPDATE bilder SET status = 'offen', verworfen_von = NULL, verworfen_runde = NULL
                                       WHERE name = ? AND status = 'verworfen'""", (name,)).rowcount:
                 raise Fehler("Bild nicht gefunden", 404)
             self.db.commit()
+        return "Bild ist wieder offen"
 
     def letzte(self, n=40):
         out = []
@@ -557,7 +683,8 @@ class Daten:
                             "einzel": r["einzel"], "erkennung": r["erkennung"],
                             "wer": [namen.get(f["person"], f["person_name"]) for f in fl],
                             "einig": einig if len(fl) >= 2 else None,
-                            "verworfen_von": namen.get(r["verworfen_von"]), "kugeln": len(kugeln)})
+                            "verworfen_von": ERKENNUNG if r["verworfen_von"] == 0 else namen.get(r["verworfen_von"]),
+                            "kugeln": len(kugeln)})
         return out
 
     # --------------------------------------------------------------- Lernen (Farben, Stufe 2 + 3)
@@ -923,8 +1050,7 @@ def make_handler(daten: Daten, mod=None, auf=None):
                 daten.person_loeschen(d.get("id"))
                 return self._send(200, {"message": "Entfernt – festgelegte Bilder bleiben"})
             if pfad == "/api/admin/zurueck":
-                daten.zurueck_in_runde1(str(d.get("name", "")))
-                return self._send(200, {"message": "Bild ist wieder in Runde 1"})
+                return self._send(200, {"message": daten.zurueck_in_runde1(str(d.get("name", "")))})
             return self._send(404, {"error": "Nicht gefunden"})
 
         def _modell_post(self, pfad):
@@ -960,6 +1086,7 @@ def make_handler(daten: Daten, mod=None, auf=None):
 
 def main():
     daten = Daten(DATA_DIR)
+    threading.Thread(target=daten.einzel_nachholen, name="einzelkugel", daemon=True).start()
     mod = modelle.Modelle(DATA_DIR) if modelle else None
     auf = aufzeichnung.Aufzeichnungen(DATA_DIR)
     port = int(os.environ.get("PORT", "8000"))

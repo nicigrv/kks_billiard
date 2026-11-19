@@ -12,6 +12,7 @@ Tests fuer die Trainingsseite (ohne Netz, ohne Docker):
 
 import io
 import json
+import math
 import os
 import sys
 import tempfile
@@ -182,6 +183,12 @@ def main():
         check(anna.call("GET", "/api/next")[0] == 401 and anna.call("POST", "/api/login", {"code": code_a})[0] == 401,
               "neuer Code: alter Code und alte Sitzung gelten nicht mehr")
         check(anna.call("POST", "/api/login", {"code": neu})[0] == 200, "mit neuem Code wieder drin")
+        carl_p = next(p for p in st["personen"] if p["name"] == "Carl")
+        admin.call("POST", "/api/admin/person/loeschen", {"id": carl_p["id"]})
+        admin.call("POST", "/api/admin/person", {"name": "Dora"})
+        dora = next(p for p in admin.call("GET", "/api/admin/stand")[1]["personen"] if p["name"] == "Dora")
+        check(dora["id"] != carl_p["id"] and dora["festgelegt"] == 0 and dora["verworfen"] == 0,
+              "neuer Trainer erbt nichts vom gelöschten (eigene Nummer, Zähler 0)")
 
         print("ZIP")
         s, raw = admin.call("GET", "/api/admin/zip")
@@ -206,7 +213,7 @@ def main():
         check(s == 200 and sum(n.startswith("images/") for n in zipfile.ZipFile(io.BytesIO(raw)).namelist()) == 1,
               "Export mit Schlüssel (für Colab): dieselbe ZIP ohne greylo-Login")
 
-        print("Einzelkugel: Bild per Knopf am Pi, Kreis zieht der Server")
+        print("Einzelkugel: Bild per Knopf am Pi, die Stelle findet der Server - ohne Menschen")
         import numpy as np
         import cv2
         rng = np.random.default_rng(3)
@@ -215,32 +222,45 @@ def main():
         ok, leer_jpg = cv2.imencode(".jpg", leer)
         rec2 = Recorder(os.path.join(d, "pi2"))
         bilder = {}
-        for i, (x, y, hand) in enumerate([(200, 150, False), (610, 320, False), (400, 200, True)]):
-            img = np.clip(tuch + rng.normal(0, 3, tuch.shape), 0, 255).astype(np.uint8)
-            cv2.circle(img, (x, y), 10, (40, 40, 210), -1)                           # rote Kugel (3)
+        # (x, y, Hand, Helligkeit, Kugel da?) - Hand daneben und andere Belichtung stoeren nicht mehr
+        faelle = [(200, 150, False, 1.0, True), (610, 320, False, 1.15, True), (400, 200, True, 1.0, True),
+                  (500, 100, True, 0.9, False)]
+        for i, (x, y, hand, hell, da) in enumerate(faelle):
+            img = np.clip(tuch * hell + rng.normal(0, 3, tuch.shape), 0, 255).astype(np.uint8)
+            if da:
+                cv2.circle(img, (x, y), 10, (40, 40, 210), -1)                       # rote Kugel (3)
             if hand:
                 cv2.rectangle(img, (300, 0), (380, 260), (120, 160, 210), -1)
-            bilder[rec2.save_single(img, 3, 10.2, leer_jpg.tobytes())] = (x, y, hand)
+            bilder[rec2.save_single(img, 3, 10.2, leer_jpg.tobytes())] = (x, y, hand, da)
             time.sleep(0.002)
-        check(rec2.single == 3 and len([f for f in os.listdir(rec2.single_dir) if f.startswith("leer-")]) == 1,
-              "Pi: 3 Knopf-Bilder, leerer Tisch nur einmal abgelegt")
+        check(rec2.single == 4 and len([f for f in os.listdir(rec2.single_dir) if f.startswith("leer-")]) == 1,
+              "Pi: 4 Knopf-Bilder, leerer Tisch nur einmal abgelegt")
         vorher = daten.zaehler()
         up2 = Uploader(rec2, base, "test-schluessel-123")
-        check(up2.run_once() == 3, "3 Einzelkugel-Bilder hochgeladen (mit Bild des leeren Tisches)")
+        check(up2.run_once() == 4, "4 Einzelkugel-Bilder hochgeladen (mit Bild des leeren Tisches)")
         z = daten.zaehler()
-        check(z["einzel"] == 3 and z["einzel_erkannt"] == 2, f"Server: 3 Einzelkugel-Bilder, 2 erkannt ({z['einzel_erkannt']})")
-        check(z["fertig"] == vorher["fertig"] + 2 and z["offen"] == vorher["offen"] + 1,
-              "erkannte sind sofort fertig, das mit Hand im Bild bleibt offen für die Trainer")
+        check(z["einzel"] == 4 and z["einzel_erkannt"] == 3 and z["einzel_aussortiert"] == 1,
+              f"Server: 4 Einzelkugel-Bilder, 3 erkannt ({z['einzel_erkannt']}), 1 aussortiert")
+        check(z["fertig"] == vorher["fertig"] + 3 and z["offen"] == vorher["offen"]
+              and z["verworfen"] == vorher["verworfen"] + 1,
+              "erkannte sind sofort fertig, ohne Kugel von selbst aussortiert - nichts wartet auf Trainer")
         check(z["festlegungen"] == vorher["festlegungen"], "Bilderkennung zählt nicht als Trainer-Festlegung")
-        for name, (x, y, hand) in bilder.items():
+        for name, (x, y, hand, da) in bilder.items():
             fl = daten.festlegungen(name)
-            if hand:
-                check(not fl, "Hand im Bild: keine automatische Festlegung")
+            if not da:
+                check(not fl, "ohne Kugel (nur Hand): keine Festlegung, aussortiert")
                 continue
             k = json.loads(fl[0]["kugeln"])[0] if fl else {}
             check(fl and fl[0]["person_name"] == "Bilderkennung" and k.get("number") == 3 and k.get("kind") == "solid"
                   and k.get("color") == "rot" and abs(k["x"] - x) < 2 and abs(k["y"] - y) < 2,
                   f"Kugel 3 bei ({x}, {y}) gefunden: {k.get('x')}, {k.get('y')}")
+        ohne = next(n for n, v in bilder.items() if not v[3])
+        eintrag = next(b for b in admin.call("GET", "/api/admin/stand")[1]["letzte"] if b["name"] == ohne)
+        check(eintrag["status"] == "verworfen" and eintrag["verworfen_von"] == "Bilderkennung"
+              and eintrag["erkennung"] == "keine Kugel gefunden", "Admin sieht: von der Bilderkennung aussortiert, mit Grund")
+        s, msg = admin.call("POST", "/api/admin/zurueck", {"name": ohne})
+        check(s == 200 and "nicht sicher erkannt" in msg["message"] and daten.zaehler()["offen"] == z["offen"],
+              "„Nochmal erkennen“: bleibt aussortiert, geht nicht an Trainer")
         erster = sorted(bilder)[0]
         s1, roh = admin.call("GET", "/api/admin/bild?name=" + erster)
         s2, kreis = admin.call("GET", "/api/admin/bild?kreis=1&name=" + erster)
@@ -252,6 +272,19 @@ def main():
         zz = zipfile.ZipFile(io.BytesIO(raw))
         check(f"images/{erster}.jpg" in zz.namelist() and zz.read(f"labels/{erster}.txt").decode().startswith("3 0.25"),
               "erkannte Einzelkugel-Bilder sind in der Trainings-ZIP (Klasse 3)")
+        alt_name = "20261001-090000-000"
+        img = np.clip(tuch + rng.normal(0, 3, tuch.shape), 0, 255).astype(np.uint8)
+        cv2.circle(img, (321, 123), 10, (40, 40, 210), -1)
+        with open(os.path.join(daten.bilder, alt_name + ".jpg"), "wb") as f:
+            f.write(cv2.imencode(".jpg", img)[1].tobytes())
+        daten.db.execute("""INSERT INTO bilder (name, eingang, breite, hoehe, radius, modell, vorschlag, status, einzel,
+                            erkennung) VALUES (?, 1, 800, 400, 10.2, 'Einzelkugel', '[]', 'offen', 3, 'unsicher')""", (alt_name,))
+        daten.db.commit()
+        check(all(daten.naechstes(p["id"]) is None or daten.naechstes(p["id"])["name"] != alt_name
+                  for p in daten.personen()), "offene Einzelkugel-Bilder gehen nie an Trainer")
+        check(daten.einzel_nachholen() == (1, 0), "altes offenes Einzelkugel-Bild nachgeholt (leerer Tisch passend gesucht)")
+        k = json.loads(daten.festlegungen(alt_name)[0]["kugeln"])[0]
+        check(abs(k["x"] - 321) < 2 and abs(k["y"] - 123) < 2 and k["number"] == 3, "… und an der richtigen Stelle")
         nicht = Client(base).call("POST", "/api/upload", {"name": "20261113-130000-000"})
         check(nicht[0] == 403, "Upload ohne Schlüssel weiter gesperrt")
 
@@ -391,12 +424,48 @@ def main():
         check(sorted(aufraeumen.index) == ["runde-20261119-100002", "runde-20261119-100003"],
               "nur die neuesten Videos bleiben")
 
+        print("Einzelkugel-Erkennung an Simulator-Bildern (Schatten, Glanz, Licht, Arm im Bild)")
+        app_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app")
+        if os.path.isdir(os.path.join(app_dir, "sim")):
+            sys.path.append(app_dir)
+            from geometry import TABLE_SIZES, WARP_H, WARP_W, Table
+            from sim.render import DEFAULT_CORNERS, SimBall, render_topdown, to_camera
+            import einzelkugel
+            lang = TABLE_SIZES["8ft"]
+            tisch = Table(DEFAULT_CORNERS, lang)
+            rs = np.random.default_rng(5)
+
+            def sim_bild(kugeln, tuch_farbe, arm=None, hell=1.0):
+                w = tisch.warp(to_camera(render_topdown(kugeln, lang, lang / 2, tuch_farbe, rs, arm), DEFAULT_CORNERS, rng=rs))
+                return cv2.imencode(".jpg", np.clip(w * hell, 0, 255).astype(np.uint8))[1].tobytes()
+            treffer, n_sim = 0, 0
+            for tuch_farbe in ("blau", "gruen"):
+                leer_sim = sim_bild([], tuch_farbe)
+                for nr in range(16):
+                    x, y = rs.uniform(0.1, lang - 0.1), rs.uniform(0.1, lang / 2 - 0.1)
+                    arm = ((x + 0.6) % lang, rs.uniform(0, lang / 2), 0.12) if nr % 2 else None
+                    kug, _ = einzelkugel.finde_kugel(
+                        sim_bild([SimBall(nr, x, y, int(rs.integers(1 << 30)))], tuch_farbe, arm, rs.uniform(0.85, 1.15)),
+                        leer_sim, tisch.ball_radius_px, nr)
+                    n_sim += 1
+                    treffer += len(kug) == 1 and math.hypot(kug[0][0] - x / lang * WARP_W, kug[0][1] - y / (lang / 2) * WARP_H) < 4
+            check(treffer == n_sim, f"Simulator: {treffer} von {n_sim} Einzelkugeln richtig gefunden (alle Nummern, beide Tücher)")
+
         print("Umstellung alter Daten")
         alt = server.Daten(os.path.join(d, "alt"))
         alt.db.execute("INSERT INTO bilder (name, eingang, breite, hoehe, radius, vorschlag, status) VALUES ('20261101-100000-000', 1, 800, 400, 10, '[]', 'runde2')")
         alt.db.commit()
         alt2 = server.Daten(os.path.join(d, "alt"))
         check(alt2.zaehler()["offen"] == 1, "alte Runde-2-Bilder werden beim Start zu offen")
+        # alte Version: geloeschter Trainer 1 hatte festgelegt, der neue bekam wieder Nummer 1
+        alt2.db.execute("INSERT INTO festlegungen (bild, person, person_name, kugeln, zeit) VALUES ('20261101-100000-000', 1, 'Weg', '[]', 5)")
+        alt2.db.execute("INSERT INTO personen (id, name, code, erstellt) VALUES (1, 'PC-01', '105098', 100)")
+        alt2.db.commit()
+        alt3 = server.Daten(os.path.join(d, "alt"))
+        pc = alt3.personen()[0]
+        check(pc["id"] != 1 and pc["festgelegt"] == 0 and pc["code"] == "105098",
+              "Reparatur: geerbte Festlegungen gehören nicht mehr zum neuen Trainer (Code bleibt)")
+        check(alt3.naechstes(pc["id"]) is not None, "… und er bekommt das Bild, das der gelöschte schon hatte")
         srv.shutdown()
 
     print()
