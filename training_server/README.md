@@ -27,14 +27,20 @@ Pi am Tisch ◀──(alle 5 Minuten: neue Modelle?)── GET /api/modelle, /ap
 Am Tisch schon festgelegte Bilder werden genauso dreimal online festgelegt; die Kugeln vom Tisch bleiben nur
 in der Datenbank stehen. Wie oft jedes Bild festgelegt wird, stellt `FESTLEGUNGEN` ein (Standard 3).
 
-**Einzelkugel-Bilder** (am Pi im Admin-Panel → Bilder & Modelle → Einzelkugel per Knopf → „Bild jetzt aufnehmen“):
-Der Pi schickt das Bild mit der dort gewählten Kugelnummer und dem Bild des leeren Tisches. Eine einfache
-Bilderkennung hier auf dem Server (`einzelkugel.py`: was sich gegenüber dem leeren Tisch verändert hat und
-so groß wie eine Kugel ist) zieht den Kreis. Genau eine Kugel gefunden → das Bild ist sofort **fertig**
-(festgelegt von „Bilderkennung“) und kommt in die ZIP. Keine oder mehrere Kugeln (Hand im Bild …) → das Bild
-legen die Trainer wie gewohnt fest. Auf der Admin-Seite sind die Kreise in den Vorschaubildern eingezeichnet.
-Braucht Pillow und numpy – das Dockerfile installiert beides (nach dem Update einmal neu bauen:
-`docker compose up -d --build`).
+**Einzelkugel-Bilder** (am Pi im Admin-Panel → Bilder & Modelle → Einzelkugel per Knopf → „Bild jetzt aufnehmen“)
+brauchen **keine Menschen**: Die Nummer kommt vom Pi, die Stelle der Kugel findet die Bilderkennung hier auf dem
+Server (`einzelkugel.py`):
+- Vergleich mit dem Bild des leeren Tisches; Belichtung, Weißabgleich, Schatten von Personen und eine leicht
+  verrutschte Kamera werden vorher ausgeglichen. Ohne leeren Tisch: Vergleich mit der Tuchfarbe der Umgebung.
+- Kugel = ein runder Fleck in Kugelgröße. Hand, Arm, Queue oder Schattenkanten zählen nicht und stören auch
+  nicht, wenn die Kugel daneben frei liegt.
+- Mehrere kugelähnliche Stellen: Es entscheidet die Farbe, die zur Nummer passt.
+
+Gefunden → das Bild ist sofort **fertig** (festgelegt von „Bilderkennung“) und kommt in die ZIP. Nicht sicher
+gefunden (keine Kugel, zwei gleiche …) → das Bild wird **von selbst aussortiert**. Trainer bekommen
+Einzelkugel-Bilder nie. Was aus älteren Versionen noch offen war, holt der Server beim Start im Hintergrund nach.
+Auf der Admin-Seite sind die Kreise in den Vorschaubildern eingezeichnet; „Nochmal erkennen“ bei einem
+aussortierten Bild probiert es erneut. Braucht OpenCV, numpy und Pillow – das Dockerfile installiert alles.
 
 Tastatur: Enter = speichern, Ziffern = Nummer (zweistellig schnell hintereinander: 1, 2 = 12),
 W = Weiße, Entf = Kugel entfernen, Esc = abwählen.

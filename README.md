@@ -414,7 +414,7 @@ Colab – so bleibt der Pi frei für Erkennung und Beamer.
    2 Sekunden ruhig ist, wird ein Bild gespeichert (höchstens eins alle 8 Sekunden, geht auch ohne
    KI-Chip). Auf dem Beamer kommt kurz „Bild gespeichert“. Außerdem: Admin-Panel → „Bilder & Modelle“
    → „Jetzt ein Bild aufnehmen“, oder **Einzelkugel per Knopf** (eine Kugel, Nummer am Pi gewählt –
-   den Kreis zieht die Trainingsseite).
+   die Stelle findet die Trainingsseite selbst, kein Mensch muss diese Bilder festlegen).
 2. **Hochladen (von selbst):** Der Pi schickt jedes Bild zur Trainingsseite und **löscht es danach auf
    dem Pi**. Ohne Internet versucht er es später wieder.
 3. **Kugeln festlegen – auf der Trainingsseite:** Jeder Trainer meldet sich dort mit seinem Code an;
@@ -448,8 +448,9 @@ Technik: Googles Coral-Paketquelle gibt es nicht mehr. Der Treiber (`libedgetpu`
 Der Pi schickt jedes gespeicherte Bild automatisch auf den Server (`training_server/`) und löscht es danach.
 Jeder Trainer meldet sich dort mit seinem Code an.
 Jedes Bild legen mehrere Personen (Standard 3, `FESTLEGUNGEN`) unabhängig voneinander fest, ohne
-Vorschläge zu sehen; je Kugel zählt die Mehrheit. Einzelkugel-Bilder findet dort eine Bilderkennung
-von selbst. Auf der Admin-Seite: Trainings-ZIP für Colab, **„Farben aus fertigen Bildern lernen“** und
+Vorschläge zu sehen; je Kugel zählt die Mehrheit. Einzelkugel-Bilder legt dort nur die Bilderkennung
+fest (nicht sicher erkannte werden aussortiert) – Trainer bekommen sie nicht.
+Auf der Admin-Seite: Trainings-ZIP für Colab, **„Farben aus fertigen Bildern lernen“** und
 **„Modell hochladen“** (`.tflite` aus Colab) – der Pi holt beides von selbst. Einrichtung: `training_server/README.md`.
 
 ## 6. Tests
