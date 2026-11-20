@@ -189,6 +189,20 @@ def main():
         dora = next(p for p in admin.call("GET", "/api/admin/stand")[1]["personen"] if p["name"] == "Dora")
         check(dora["id"] != carl_p["id"] and dora["festgelegt"] == 0 and dora["verworfen"] == 0,
               "neuer Trainer erbt nichts vom gelöschten (eigene Nummer, Zähler 0)")
+        alle = admin.call("GET", "/api/admin/stand")[1]["personen"]
+        check(all(len(p["uuid"]) == 36 for p in alle) and len({p["uuid"] for p in alle}) == len(alle),
+              "jeder Trainer hat eine eigene UUID")
+        anna_alt = next(p for p in alle if p["name"] == "Anna")
+        admin.call("POST", "/api/admin/person/loeschen", {"id": anna_alt["id"]})
+        check(anna.call("GET", "/api/next")[0] == 401, "gelöschte Anna: Sitzung gilt nicht mehr")
+        code_neu = admin.call("POST", "/api/admin/person", {"name": "Anna"})[1]["code"]
+        anna_neu = next(p for p in admin.call("GET", "/api/admin/stand")[1]["personen"] if p["name"] == "Anna")
+        check(anna_neu["uuid"] != anna_alt["uuid"] and anna_alt["festgelegt"] >= 1 and anna_neu["festgelegt"] == 0
+              and anna_neu["verworfen"] == 0, "Anna neu angelegt (gleicher Name): neue UUID, alle Zähler bei 0")
+        check(anna.call("POST", "/api/login", {"code": code_neu})[0] == 200 and anna.call("GET", "/api/next")[0] == 200,
+              "neue Anna bekommt auch die Bilder, die die alte schon festgelegt hatte")
+        b_alt = next(b for b in admin.call("GET", "/api/admin/stand")[1]["letzte"] if b["name"] == a1["name"])
+        check("Anna" in b_alt["wer"], "Festlegungen der gelöschten Anna bleiben mit ihrem Namen stehen")
 
         print("ZIP")
         s, raw = admin.call("GET", "/api/admin/zip")

@@ -27,6 +27,12 @@ Pi am Tisch ◀──(alle 5 Minuten: neue Modelle?)── GET /api/modelle, /ap
 Am Tisch schon festgelegte Bilder werden genauso dreimal online festgelegt; die Kugeln vom Tisch bleiben nur
 in der Datenbank stehen. Wie oft jedes Bild festgelegt wird, stellt `FESTLEGUNGEN` ein (Standard 3).
 
+**Trainer:** Jeder Trainer hat eine eigene **UUID** (Admin-Seite, klein unter dem Namen). Festlegungen und
+Aussortierungen hängen an ihr. Wird ein Trainer gelöscht, bleiben seine Festlegungen mit seinem Namen stehen und
+zählen weiter für die Bilder. Ein neu angelegter Trainer – auch mit demselben Namen – bekommt eine neue UUID,
+fängt bei 0 an und bekommt auch die Bilder, die der gelöschte schon festgelegt hatte. Ältere Daten stellt der
+Server beim Start einmal um. Danach müssen sich alle Trainer einmal neu anmelden.
+
 **Einzelkugel-Bilder** (am Pi im Admin-Panel → Bilder & Modelle → Einzelkugel per Knopf → „Bild jetzt aufnehmen“)
 brauchen **keine Menschen**: Die Nummer kommt vom Pi, die Stelle der Kugel findet die Bilderkennung hier auf dem
 Server (`einzelkugel.py`):
