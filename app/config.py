@@ -18,6 +18,7 @@ DEFAULTS = {
     "cue_flip": False,          # Gyroskop: Drehrichtung umkehren
     "cue_tolerance": 2.0,       # Gyroskop: ab dieser Abweichung (Grad) gibt es den gruenen Haken
     "auto_capture": False,      # nach jedem Stoss automatisch ein Trainingsbild speichern
+    "manual": False,            # manueller Modus: Kamera aendert den Spielstand nicht (Kugeln im Panel antippen)
     "cue_enabled": True,        # Queue mit Gyroskop benutzen (optional, im Spiel-Panel schaltbar)
     # QR-Code unten rechts auf dem Beamer. Leerer Text = Adresse des Spiel-Panels.
     "qr": {"enabled": True, "text": "", "label": "Spiel-Panel"},

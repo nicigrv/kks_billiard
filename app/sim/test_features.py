@@ -111,15 +111,101 @@ def test_bar():
     print("Game-Bar")
     from scene import bar_balls, team_points
     g = playing(("solid", "stripe"), (5, 7))
-    visible = {1, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15}
-    bar = bar_balls(g, visible, visible | {2, 7})
-    check(not bar[2] and not bar[7] and all(bar[n] for n in (1, 3, 4, 5, 6)), "verschwundene 2 und 7 durchgestrichen")
+    g["on_table"] = [n for n in range(1, 16) if n not in (2, 7)]
+    bar = bar_balls(g, set(), set())
+    check(not bar[2] and not bar[7] and all(bar[n] for n in (1, 3, 4, 5, 6)), "Spielstand je Kugel: 2 und 7 durchgestrichen")
     check(all(bar[n] for n in range(9, 16)) and bar[8], "Halbe und 8 noch im Spiel")
-    bar = bar_balls(playing(("solid", "stripe"), (6, 7)), set(), set())
+    alt = dict(g)
+    del alt["on_table"]                                  # aeltere Aufzeichnung: nur Anzahl, Nummern von der Kamera
+    visible = {1, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15}
+    bar = bar_balls(alt, visible, visible | {2, 7})
+    check(not bar[2] and not bar[7] and all(bar[n] for n in (1, 3, 4, 5, 6)), "alte Aufzeichnung: verschwundene 2 und 7")
+    alt = playing(("solid", "stripe"), (6, 7))
+    del alt["on_table"]
+    bar = bar_balls(alt, set(), set())
     check(sum(not bar[n] for n in range(1, 8)) == 1, "ohne lesbare Farben: Anzahl stimmt trotzdem")
     check(team_points(g) == [2, 0], "Punkte = versenkte eigene Kugeln")
     idle = Game().to_dict()
     check(all(bar_balls(idle, set(), set()).values()), "ohne Spiel alle Kugeln im Spiel")
+
+
+def test_pockets():
+    print("Stand je Kugel, Kugel fehlt 4 Bilder = im Loch, manueller Modus")
+    from shots import PocketTracker
+    from ballnum import Ball
+
+    def kugel(n, x, y):
+        return Ball.from_number(x, y, R, n, 0.9)
+    liegen = [kugel(0, 100, 100), kugel(3, 300, 200), kugel(11, 500, 150), kugel(8, 600, 300)]
+    t = PocketTracker(R)
+    t.reset(liegen)
+    ohne3 = [b for b in liegen if ball_number(b.kind, b.color) != 3]
+    check([t.update(ohne3, False) for _ in range(3)] == [[], [], []], "3 Bilder ohne Kugel 3: noch nicht im Loch")
+    weg = t.update(ohne3, False)
+    check([ball_number(b.kind, b.color) for b in weg] == [3], "4. Bild ohne Kugel 3: im Loch")
+    t.reset(liegen)
+    for _ in range(6):
+        t.update(ohne3, True)
+    check(t.update(ohne3, False) == [], "verdeckte Bilder (Arm über dem Tisch) zählen nicht")
+    t.reset(liegen)
+    gerollt = [kugel(0, 120, 110), kugel(3, 760, 390), kugel(11, 520, 160), kugel(8, 600, 300)]
+    check(all(t.update(gerollt, False) == [] for _ in range(6)), "weit gerollte Kugel wird wiedergefunden (Nummer)")
+    t.reset(liegen)
+    ohne11 = [b for b in liegen if ball_number(b.kind, b.color) != 11] + [kugel(4, 520, 160)]
+    weg = [b for _ in range(4) for b in t.update(ohne11, False)]
+    check([ball_number(b.kind, b.color) for b in weg] == [11], "fällt die 11, springt keine andere Kugel daneben ein")
+
+    g = Game()
+    g.start_match("Rot", "Blau", 0)
+    g.breaking = False
+    g.ball_gone("solid", 3)
+    check(3 not in g.on_table and g.remaining == {"solid": 6, "stripe": 7} and "Kugel 3 im Loch" in g.message,
+          "Kamera: Kugel 3 sofort im Loch, Zähler 6/7")
+    msg = g.apply_shot({"solid": 7, "stripe": 7, "eight": 1}, {"solid": 6, "stripe": 7, "eight": 1}, True, True,
+                       seen={1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15})
+    check(g.remaining == {"solid": 6, "stripe": 7} and g.turn == 0 and g.groups == ["solid", "stripe"],
+          f"Stoßende zählt Kugel 3 nicht doppelt, Rot spielt Volle und bleibt dran ({msg})")
+    g.ball_gone("stripe", 12)
+    g.apply_shot({"solid": 6, "stripe": 7, "eight": 1}, {"solid": 6, "stripe": 7, "eight": 1}, True, True,
+                 seen={1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15})
+    check(12 in g.on_table and g.remaining["stripe"] == 7, "Kugel war nur verdeckt: nach dem Stoß wieder zu sehen -> zurück")
+    g.ball_gone("stripe", 13)
+    g.settled({1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15})
+    check(13 in g.on_table, "auch ohne Stoß: wieder zu sehen -> zurück")
+    vorher = sorted(g.on_table)
+    g.ball_gone("solid", 5)
+    g.apply_shot({"solid": 6, "stripe": 7, "eight": 1}, {"solid": 5, "stripe": 7, "eight": 1}, True, True)
+    g.undo_shot()
+    check(sorted(g.on_table) == vorher, "„Stoß verwerfen“ nimmt die gerade erkannte Kugel mit zurück")
+
+    check("schon versenkt" in g.pocket_ball(3), "Kugel 3 ist schon versenkt")
+    g.restore_ball(3)
+    check(3 in g.on_table and g.remaining["solid"] == 7, "Panel: Kugel 3 zurück auf den Tisch")
+    g.pocket_ball(9)
+    check(9 not in g.on_table and g.remaining["stripe"] == 6, "Panel: Kugel 9 ins Loch")
+    g.undo()
+    check(9 in g.on_table, "Rückgängig holt Kugel 9 zurück")
+
+    m = Game()
+    m.start_match("Rot", "Blau", 1)
+    m.breaking = False
+    m.set_manual(True)
+    m.ball_gone("solid", 2)
+    check(m.remaining["solid"] == 7, "manuell: Kamera nimmt keine Kugel weg")
+    check(m.apply_shot({"solid": 7, "stripe": 7, "eight": 1}, {"solid": 5, "stripe": 7, "eight": 1}, True, True) is None
+          and m.remaining["solid"] == 7 and m.turn == 1, "manuell: Kamera-Stoß ändert nichts")
+    m.pocket_ball(10)
+    check(m.groups == ["solid", "stripe"] and m.remaining["stripe"] == 6, "manuell: Blau tippt die 10 an -> spielt Halbe")
+    m.undo()
+    check(m.manual and m.groups == [None, None], "Rückgängig ändert den manuellen Modus nicht")
+    m.groups = ["solid", "stripe"]
+    for n in range(9, 16):
+        m.pocket_ball(n)
+    m.pocket_ball(8)
+    check(m.phase == "finished" and m.winner == 1, "manuell: Blau hat alle Halben, versenkt die 8 -> gewinnt")
+    d = m.to_dict()
+    check(d["manual"] is True and 8 not in d["on_table"] and d["remaining"] == {"solid": 7, "stripe": 0},
+          "Spielstand fürs Panel: manuell, Kugeln je Nummer")
 
 
 def test_undo_shot():
@@ -222,6 +308,7 @@ if __name__ == "__main__":
     test_planner()
     test_cue()
     test_bar()
+    test_pockets()
     test_undo_shot()
     test_replay()
     print()

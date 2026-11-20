@@ -1,6 +1,7 @@
 """
 Verarbeitungskette pro Kamerabild:
     Kamerabild -> Draufsicht -> Kugelerkennung (KI-Chip) -> Bewegung/Verdeckung -> Stoss -> Spielregeln
+                                                          -> Kugel fehlt 4 Bilder -> sofort im Loch
 
 Die Kugeln erkennt nur der Coral (coral_detector.py). Ist er nicht bereit (kein Stick, kein
 Modell), wird nichts ausgewertet - es gibt keine Ersatz-Erkennung auf dem Prozessor.
@@ -16,7 +17,7 @@ from ballnum import Ball, ball_number
 from coral_detector import CoralNotReady
 from game import Game
 from geometry import Table
-from shots import MotionMeter, OcclusionMeter, ShotEvent, ShotMonitor
+from shots import MotionMeter, OcclusionMeter, PocketTracker, ShotEvent, ShotMonitor
 
 OCCLUSION_LIMIT = 0.006   # Anteil Tischflaeche, ab dem "etwas haengt über dem Tisch"
 # Automatisch Trainingsbilder sammeln (falls eingeschaltet): nach einem Stoss, sobald der Tisch
@@ -48,6 +49,7 @@ class Pipeline:
             self.occlusion = OcclusionMeter(table.ball_radius_px)
             self.not_ready = ""
             self.monitor = ShotMonitor(table.ball_radius_px, clock=self.clock)
+            self.tracker = PocketTracker(table.ball_radius_px)
             self.balls = []
             self.moving = False
             self.occluded = False
@@ -73,16 +75,38 @@ class Pipeline:
                 return None
             self.not_ready = ""
             occluded = self.occlusion.update(warped, balls) > OCCLUSION_LIMIT
+            ref_vorher = self.monitor.ref_id
             ev = self.monitor.update(balls, moving, occluded)
             self.balls, self.moving, self.occluded = balls, moving, occluded
             self._auto(warped, moving, balls)
 
+            # Kugel auf MISS_FRAMES Bildern hintereinander nicht gesehen -> sofort im Loch
+            gone_msg = None
+            ref = self.monitor.reference
+            seen = self._numbers(ref.balls) if ref is not None else frozenset()
+            for b in self.tracker.update(balls, occluded):
+                gone_msg = self.game.ball_gone(b.kind, ball_number(b.kind, b.color), seen) or gone_msg
+
             if isinstance(ev, ShotEvent):
                 diff = ev.diff(self.table.ball_radius_px)
                 msg = self.game.apply_shot(ev.before.counts(), ev.after.counts(),
-                                           diff.cue_before, diff.cue_after, diff=diff)
+                                           diff.cue_before, diff.cue_after, diff=diff,
+                                           seen=self._numbers(ev.after.balls))
+                self.tracker.reset(ev.after.balls)
                 return ("shot", msg, ev)
+            if self.monitor.ref_id != ref_vorher and ref is not None:
+                # neuer ruhiger Zustand ohne Stoss: verdeckte Kugeln, die doch noch da sind, zurueck
+                self.tracker.reset(ref.balls)
+                back = self.game.settled(self._numbers(ref.balls))
+                if back:
+                    return ("shot", back, None)
+            if gone_msg:
+                return ("gone", gone_msg, None)
             return ev
+
+    @staticmethod
+    def _numbers(balls):
+        return frozenset(n for n in (ball_number(b.kind, b.color) for b in balls) if n is not None)
 
     def capture_now(self, source="knopf"):
         """Knopf "Bild speichern": aktuelles Bild (mit Vorschlag des KI-Chips, falls bereit)
@@ -141,6 +165,7 @@ class Pipeline:
         egal was vorher war (Aufbauen ist kein Stoss)."""
         with self.lock:
             self.monitor.reset()
+            self.tracker.reset([])
 
     def status_text(self):
         """Kurzer Systemzustand fuer Anzeige und Portal."""
@@ -189,6 +214,7 @@ class Pipeline:
                 near.color_votes = Counter({c["color"]: 300})
             changed += 1
         self.monitor.ref_id += 1
+        self.tracker.reset(ref.balls)
         return changed
 
     def stable_counts(self):

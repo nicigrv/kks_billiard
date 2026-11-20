@@ -77,11 +77,16 @@ def _ui_font_path(bold):
 def bar_balls(game, visible, seen):
     """Welche Kugeln zeigt die Game-Bar noch als 'im Spiel'?
 
-    Massgeblich ist der Spielstand (game['remaining']), denn der ist korrigierbar.
-    Welche NUMMERN durchgestrichen werden, kommt aus der Kamera: zuerst Kugeln, die
-    nicht mehr zu sehen sind, aber in diesem Rack schon gesehen wurden."""
+    Massgeblich ist der Spielstand, denn der ist korrigierbar: game['on_table'] (welche Nummern
+    liegen). Aeltere Aufzeichnungen haben nur game['remaining'] - dann kommt aus der Kamera, welche
+    NUMMERN durchgestrichen werden: zuerst Kugeln, die nicht mehr zu sehen sind, aber in diesem Rack
+    schon gesehen wurden."""
     out = {}
     playing = game.get("phase") in ("playing", "finished")
+    if playing and game.get("on_table") is not None:
+        # Spielstand kennt jede Kugel (seit dem Stand je Kugel) - genau so zeigen
+        liegt = set(game["on_table"])
+        return {n: n in liegt for n in list(SOLIDS) + list(STRIPES) + [8]}
     for group, nums in (("solid", SOLIDS), ("stripe", STRIPES)):
         n_off = 7 - game["remaining"][group] if playing else 0
         order = sorted(nums, key=lambda n: (n in visible, n not in seen, n))

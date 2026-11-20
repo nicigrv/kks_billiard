@@ -36,6 +36,21 @@ details.disclose > div { padding-top: .25rem; }
 #cueBox { border-top: .5px solid var(--sep); padding-top: .5rem; }
 .with-row { margin-top: .75rem; border-top: .5px solid var(--sep); }
 .cmdhint { margin: .625rem .25rem 0; }
+
+/* Kugeln zum Antippen: liegt = farbig, im Loch = blass und durchgestrichen */
+.pool { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: .5rem .375rem; margin: .25rem 0 .25rem; }
+.pball { position: relative; aspect-ratio: 1; min-height: 0; width: 100%; max-width: 3.25rem; justify-self: center;
+  padding: 0; border-radius: 50%; background: var(--c); color: #111; font: 700 .9375rem/1 var(--font);
+  box-shadow: inset 0 -3px 6px rgba(0, 0, 0, .28), inset 0 2px 4px rgba(255, 255, 255, .25), 0 0 0 1px var(--sep);
+  transition: transform var(--spring-time) var(--spring), opacity .25s var(--ease), filter .25s var(--ease); }
+.pball.halb { background: linear-gradient(#F4F1E8 0 27%, var(--c) 27% 73%, #F4F1E8 73%); }
+.pball span { display: grid; place-items: center; width: 56%; aspect-ratio: 1; border-radius: 50%; background: #FFF; }
+.pball[aria-pressed="true"] { opacity: .28; filter: grayscale(.8); }
+.pball[aria-pressed="true"]::after { content: ""; position: absolute; left: 12%; right: 12%; top: 50%; height: 2.5px;
+  margin-top: -1px; background: var(--label); transform: rotate(-35deg); border-radius: 2px; }
+.pball:active:not(:disabled) { transform: scale(.9); opacity: 1; }
+.pball:disabled { opacity: .5; }
+#poolHint { margin: .375rem .25rem 0; }
 </style>
 </head>
 <body>
@@ -73,14 +88,21 @@ details.disclose > div { padding-top: .25rem; }
  <div class="col-right">
   <section class="card" id="fixSection">
     <h2>Korrigieren</h2>
-    <div class="grid">
+    <div class="switchrow" style="padding-top:0">
+      <span class="lbl" id="manualLbl">Manuell zählen<span class="sub" id="manualSub">Die Kamera zählt die Kugeln selbst</span></span>
+      <button class="switch" type="button" role="switch" id="manualSw" aria-checked="false" aria-labelledby="manualLbl"></button>
+    </div>
+    <p class="grouphead" style="margin-top:.25rem">Kugeln – antippen: ins Loch / zurück</p>
+    <div class="pool" id="pool" role="group" aria-label="Kugeln: antippen, um sie ins Loch zu legen oder zurückzuholen"></div>
+    <p class="hint small" id="poolHint"></p>
+    <div class="grid" style="margin-top:.875rem">
       <button class="primary span3" data-cmd="shot_done" id="shotDoneBtn">Stoß fertig – jetzt auswerten</button>
       <button class="danger" data-cmd="foul">Foul</button>
       <button data-cmd="switch_turn">Zug wechseln</button>
       <button class="quiet" data-cmd="undo" id="undoBtn">Rückgängig</button>
       <button class="quiet span3" data-cmd="undo_shot" id="undoShotBtn">Letzten erkannten Stoß verwerfen</button>
     </div>
-    <p class="hint small cmdhint">„Stoß fertig“ (oder Knopf am Queue während des Spiels): wertet sofort aus, sobald der Tisch frei ist, und zählt den Stoß auch ohne Treffer. „Stoß verwerfen“, wenn das System einen Stoß erkannt hat, der keiner war (z. B. Kugel von Hand verschoben).</p>
+    <p class="hint small cmdhint" id="autoHint">„Stoß fertig“ (oder Knopf am Queue während des Spiels): wertet sofort aus, sobald der Tisch frei ist, und zählt den Stoß auch ohne Treffer. „Stoß verwerfen“, wenn das System einen Stoß erkannt hat, der keiner war (z. B. Kugel von Hand verschoben). Fehlt eine Kugel auf 4 Kamerabildern hintereinander (gut 1 Sekunde), zählt sie sofort als versenkt – stimmt das nicht, oben antippen.</p>
     <details class="disclose">
       <summary>Weitere Korrekturen</summary>
       <div>
@@ -229,6 +251,41 @@ details.disclose > div { padding-top: .25rem; }
     if (!group) return;
     for (let i = 0; i < n; i++) { const b = document.createElement("span"); b.className = "ball " + group; el.appendChild(b); }
   }
+  // ---------------- Kugeln zum Antippen ----------------
+  const FARBE = { 1: "#F2B705", 2: "#2463D1", 3: "#D7262E", 4: "#6A2E8C", 5: "#F07A12", 6: "#1E8A3E", 7: "#7A1E2C", 8: "#1C1C1E" };
+  const POOL = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+  const kugelKnopf = {};
+  for (const n of POOL) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "pball" + (n > 8 ? " halb" : "");
+    b.style.setProperty("--c", FARBE[n > 8 ? n - 8 : n]);
+    const z = document.createElement("span"); z.textContent = n; b.appendChild(z);
+    b.addEventListener("click", () => {
+      const imLoch = b.getAttribute("aria-pressed") === "true";
+      if (!imLoch && n === 8 && !confirm("Die 8 als versenkt markieren? Das Rack endet dann nach den Regeln.")) return;
+      post("ball", { number: n, pocketed: !imLoch });
+    });
+    kugelKnopf[n] = b;
+    $("pool").appendChild(b);
+  }
+  function renderPool(g) {
+    const liegt = new Set(g.on_table || POOL);
+    for (const n of POOL) {
+      const b = kugelKnopf[n], drin = !liegt.has(n);
+      b.setAttribute("aria-pressed", drin ? "true" : "false");
+      b.setAttribute("aria-label", (n === 8 ? "Die 8" : "Kugel " + n) + (drin ? " – im Loch, antippen holt sie zurück" : " – auf dem Tisch, antippen legt sie ins Loch"));
+      b.disabled = g.phase !== "playing";
+    }
+    $("manualSw").setAttribute("aria-checked", g.manual ? "true" : "false");
+    $("manualSub").textContent = g.manual ? "KI aus – versenkte Kugeln antippen, Zug selbst wechseln" : "Die Kamera zählt die Kugeln selbst";
+    $("poolHint").textContent = g.manual ? "Nach jedem Stoß die versenkten Kugeln antippen. Bleibt ihr nicht dran: „Zug wechseln“."
+      : "Die KI hat sich vertan? Kugel antippen – blass = im Loch.";
+    $("shotDoneBtn").hidden = !!g.manual;
+    $("undoShotBtn").hidden = !!g.manual;
+    $("autoHint").hidden = !!g.manual;
+  }
+
   const fmt = (v, d) => (v === null || v === undefined) ? "-" : Number(v).toFixed(d).replace(".", ",");
 
   function render(s) {
@@ -258,6 +315,7 @@ details.disclose > div { padding-top: .25rem; }
     $("undoShotBtn").disabled = !g.can_undo_shot;
     $("win0").textContent = g.teams[0] + " gewinnt";
     $("win1").textContent = g.teams[1] + " gewinnt";
+    renderPool(g);
     const g0 = document.querySelectorAll(".g0");
     g0[0].textContent = g.teams[0] + " spielt Volle";
     g0[1].textContent = g.teams[0] + " spielt Halbe";
@@ -375,6 +433,7 @@ details.disclose > div { padding-top: .25rem; }
     post("start", { team_a: $("ta").value, team_b: $("tb").value, breaker });
   });
   $("assistSw").addEventListener("click", () => post("assist", { enabled: !(state && state.assist) }));
+  $("manualSw").addEventListener("click", () => post("manual", { enabled: !(state && state.game && state.game.manual) }));
   $("cueSw").addEventListener("click", () => post("cue_use", { enabled: !(state && state.cue && state.cue.enabled) }));
   $("cueCalib").addEventListener("click", () => post("cue_calibrate", {}));
   $("captureBtn").addEventListener("click", async () => {

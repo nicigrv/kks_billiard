@@ -36,7 +36,7 @@ STREAM_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, Ti
 # Diese Befehle darf auch das Spiel-Panel (PIN 1212); alle anderen nur der Admin
 GAME_COMMANDS = {"start", "new_rack", "abort", "foul", "switch_turn", "undo", "undo_shot", "set_group",
                  "adjust", "winner", "assist", "cue_use", "cue_calibrate", "shot_done",
-                 "capture", "auto_capture"}
+                 "capture", "auto_capture", "ball", "manual"}
 
 
 def needed_role(path):
