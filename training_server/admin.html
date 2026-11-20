@@ -42,6 +42,7 @@ button.klein.danger { background-color: var(--red-soft); color: var(--bad); }
 .punkt { display: inline-block; width: .5rem; height: .5rem; border-radius: 50%; background: var(--label3); margin-right: .5rem; vertical-align: .1em; }
 .punkt.an { background: var(--green); }
 .aktionen { display: flex; gap: .375rem; flex-wrap: wrap; }
+.uuid { display: block; margin-left: 1rem; font: .75rem/1.3 var(--mono); color: var(--label3); letter-spacing: 0; }
 
 /* neueste Bilder */
 .bilder { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); gap: .75rem; }
@@ -216,7 +217,9 @@ button.klein.danger { background-color: var(--red-soft); color: var(--bad); }
       if (!p.aktiv) tr.className = "gesperrt";
       const n = document.createElement("span");
       const pk = document.createElement("span"); pk.className = "punkt" + (p.zuletzt && Date.now() / 1000 - p.zuletzt < 300 ? " an" : "");
-      n.append(pk, p.name);
+      const id = document.createElement("span"); id.className = "uuid"; id.textContent = (p.uuid || "").slice(0, 8);
+      id.title = "UUID " + (p.uuid || "");          // jeder Trainer hat seine eigene - Zaehler haengen an ihr
+      n.append(pk, p.name, id);
       zelle(tr, n);
       const c = document.createElement("span"); c.className = "code"; c.textContent = p.code;
       zelle(tr, c);

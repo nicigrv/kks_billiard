@@ -2,7 +2,9 @@
 Billard-Training im Netz (VPS): Bilder vom Tisch zuhause festlegen.
 
   Pi am Tisch ──(gespeicherte Bilder, Schluessel)──▶ POST /api/upload
-  Jeder Trainer meldet sich mit seinem Code an (/) und legt Kugeln fest:
+  Jeder Trainer meldet sich mit seinem Code an (/) und legt Kugeln fest. Jeder Trainer hat eine eigene
+    UUID; Festlegungen und Aussortierungen haengen an ihr. Ein neu angelegter Trainer faengt damit immer
+    bei 0 an - auch mit dem Namen eines geloeschten.
     Jedes Bild legen FESTLEGUNGEN (3) verschiedene Personen unabhaengig voneinander fest,
     ohne Vorschlaege (weder KI noch andere Personen). Wer ein Bild offen hat, haelt es 10 Minuten.
     Bilder, denen nur noch wenig fehlt, kommen zuerst.
@@ -37,6 +39,7 @@ import tempfile
 import threading
 import time
 import urllib.parse
+import uuid
 import zipfile
 
 try:
@@ -66,6 +69,7 @@ COOKIE = "billard_training"
 MAX_AGE = 120 * 24 * 3600
 MAX_UPLOAD = 8_000_000
 ERKENNUNG = "Bilderkennung"        # "Person", die Einzelkugel-Bilder festlegt (id 0)
+ERKENNUNG_UUID = "bilderkennung"   # ... und ihre feste UUID
 
 
 class Fehler(ValueError):
@@ -206,6 +210,7 @@ class Daten:
             self.db.execute("ALTER TABLE bilder ADD COLUMN leer TEXT")
         os.makedirs(os.path.join(self.bilder, "leer"), exist_ok=True)
         self._geerbtes_trennen()
+        self._uuids_einrichten()
         # Umstellung auf "jedes Bild mehrfach, ohne Vorschlaege": alte Runden werden zu "offen".
         # Am Tisch festgelegte Kugeln bleiben in kugeln1 stehen, zaehlen aber nicht als Festlegung.
         self.db.execute("""UPDATE bilder SET status = 'offen' WHERE status IN ('runde1', 'runde2', 'fertig')
@@ -234,8 +239,8 @@ class Daten:
             if self.db.execute("SELECT 1 FROM personen WHERE lower(name) = lower(?)", (name,)).fetchone():
                 raise Fehler(f"„{name}“ gibt es schon")
             code = self._neuer_code()
-            self.db.execute("INSERT INTO personen (id, name, code, erstellt) VALUES (?, ?, ?, ?)",
-                            (self._freie_id(), name, code, self.clock()))
+            self.db.execute("INSERT INTO personen (id, uuid, name, code, erstellt) VALUES (?, ?, ?, ?, ?)",
+                            (self._freie_id(), str(uuid.uuid4()), name, code, self.clock()))
             self.db.commit()
         return code
 
@@ -247,6 +252,38 @@ class Daten:
             """SELECT MAX(m) FROM (SELECT MAX(id) m FROM personen UNION ALL SELECT MAX(person) FROM festlegungen
                UNION ALL SELECT MAX(verworfen_von) FROM bilder UNION ALL SELECT MAX(von1) FROM bilder
                UNION ALL SELECT MAX(von2) FROM bilder)""").fetchone()[0] or 0, 0)
+
+    def _uuids_einrichten(self):
+        """Jeder Trainer bekommt eine UUID, Festlegungen und Aussortierungen zeigen auf sie (statt auf die
+        Nummer, die SQLite frueher nach dem Loeschen neu vergeben hat). Einmalige Umstellung alter Daten:
+        was einem geloeschten Trainer gehoerte, bekommt eine eigene UUID und bleibt ihm zugeordnet."""
+        spalten = {t: {r["name"] for r in self.db.execute(f"PRAGMA table_info({t})")}
+                   for t in ("personen", "festlegungen", "bilder")}
+        if "uuid" not in spalten["personen"]:
+            self.db.execute("ALTER TABLE personen ADD COLUMN uuid TEXT")
+        if "person_uuid" not in spalten["festlegungen"]:
+            self.db.execute("ALTER TABLE festlegungen ADD COLUMN person_uuid TEXT")
+        if "verworfen_uuid" not in spalten["bilder"]:
+            self.db.execute("ALTER TABLE bilder ADD COLUMN verworfen_uuid TEXT")
+        for (pid,) in list(self.db.execute("SELECT id FROM personen WHERE uuid IS NULL")):
+            self.db.execute("UPDATE personen SET uuid = ? WHERE id = ?", (str(uuid.uuid4()), pid))
+        self.db.execute("CREATE UNIQUE INDEX IF NOT EXISTS personen_uuid ON personen(uuid)")
+        zu = {r["id"]: r["uuid"] for r in self.db.execute("SELECT id, uuid FROM personen")}
+        zu[0] = ERKENNUNG_UUID
+        weg = {}                                         # geloeschte Trainer: je alter Nummer eine eigene UUID
+
+        def fuer(pid):
+            if pid in zu:
+                return zu[pid]
+            return weg.setdefault(pid, str(uuid.uuid4()))
+        for (pid,) in list(self.db.execute("SELECT DISTINCT person FROM festlegungen WHERE person_uuid IS NULL")):
+            self.db.execute("UPDATE festlegungen SET person_uuid = ? WHERE person = ? AND person_uuid IS NULL", (fuer(pid), pid))
+        for (pid,) in list(self.db.execute("""SELECT DISTINCT verworfen_von FROM bilder
+                                              WHERE verworfen_von IS NOT NULL AND verworfen_uuid IS NULL""")):
+            self.db.execute("UPDATE bilder SET verworfen_uuid = ? WHERE verworfen_von = ? AND verworfen_uuid IS NULL",
+                            (fuer(pid), pid))
+        self.db.execute("CREATE UNIQUE INDEX IF NOT EXISTS festlegungen_uuid ON festlegungen(bild, person_uuid)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS festlegungen_person_uuid ON festlegungen(person_uuid)")
 
     def _geerbtes_trennen(self):
         """Reparatur (aeltere Versionen haben Nummern geloeschter Trainer neu vergeben): Wer Festlegungen
@@ -274,11 +311,12 @@ class Daten:
 
     def person_aktiv(self, pid, aktiv):
         with self.lock:
-            if not self.db.execute("UPDATE personen SET aktiv = ? WHERE id = ?", (1 if aktiv else 0, int(pid))).rowcount:
+            p = self.db.execute("SELECT uuid FROM personen WHERE id = ?", (int(pid),)).fetchone()
+            if not p or not self.db.execute("UPDATE personen SET aktiv = ? WHERE id = ?", (1 if aktiv else 0, int(pid))).rowcount:
                 raise Fehler("Person nicht gefunden", 404)
             self.db.commit()
             if not aktiv:
-                self.freigeben(int(pid))
+                self.freigeben(p["uuid"])
 
     def person_loeschen(self, pid):
         """Entfernt die Anmeldung. Festgelegte Bilder bleiben, der Name bleibt daran stehen."""
@@ -289,19 +327,27 @@ class Daten:
             self.db.execute("UPDATE bilder SET von1_name = COALESCE(von1_name, ?) WHERE von1 = ?", (p["name"], p["id"]))
             self.db.execute("DELETE FROM personen WHERE id = ?", (p["id"],))
             self.db.commit()
-            self.freigeben(p["id"])
+            self.freigeben(p["uuid"])
 
     def person(self, pid):
         with self.lock:
             r = self.db.execute("SELECT * FROM personen WHERE id = ?", (pid,)).fetchone()
         return dict(r) if r else None
 
+    def person_mit_uuid(self, puid):
+        with self.lock:
+            r = self.db.execute("SELECT * FROM personen WHERE uuid = ?", (puid,)).fetchone()
+        return dict(r) if r else None
+
     def personen(self):
+        """Alle Trainer mit ihren Zaehlern - gezaehlt wird nach UUID, nie nach Nummer oder Name."""
         with self.lock:
             rows = [dict(r) for r in self.db.execute("SELECT * FROM personen ORDER BY lower(name)")]
             for p in rows:
-                p["festgelegt"] = self.db.execute("SELECT COUNT(*) FROM festlegungen WHERE person = ?", (p["id"],)).fetchone()[0]
-                p["verworfen"] = self.db.execute("SELECT COUNT(*) FROM bilder WHERE verworfen_von = ?", (p["id"],)).fetchone()[0]
+                p["festgelegt"] = self.db.execute("SELECT COUNT(*) FROM festlegungen WHERE person_uuid = ?",
+                                                  (p["uuid"],)).fetchone()[0]
+                p["verworfen"] = self.db.execute("SELECT COUNT(*) FROM bilder WHERE verworfen_uuid = ?",
+                                                 (p["uuid"],)).fetchone()[0]
         return rows
 
     def letzter_eingang(self):
@@ -310,7 +356,7 @@ class Daten:
 
     # --------------------------------------------------------------- Anmeldung
     def _token(self, p):
-        return hmac.new(self.geheim, f"{p['id']}:{p['code']}".encode(), hashlib.sha256).hexdigest()[:32]
+        return hmac.new(self.geheim, f"{p['uuid']}:{p['code']}".encode(), hashlib.sha256).hexdigest()[:32]
 
     def anmelden(self, code, ip):
         now = self.clock()
@@ -328,12 +374,12 @@ class Daten:
                 raise Fehler("Dieser Code ist gerade gesperrt – frag beim Admin nach", 403)
             self.fehlversuche.pop(ip, None)
             p = dict(r)
-        return p, f"{p['id']}.{self._token(p)}"
+        return p, f"{p['uuid']}.{self._token(p)}"
 
     def person_aus_cookie(self, wert):
         try:
-            pid, tok = (wert or "").split(".", 1)
-            p = self.person(int(pid))
+            puid, tok = (wert or "").split(".", 1)
+            p = self.person_mit_uuid(puid)
         except (ValueError, TypeError):
             return None
         if not p or not p["aktiv"] or not hmac.compare_digest(tok, self._token(p)):
@@ -453,14 +499,16 @@ class Daten:
                      "color": "" if nummer == 0 else "schwarz" if nummer == 8 else
                      next(c for c, v in COLOR_NUMBER.items() if v == (nummer if nummer < 8 else nummer - 8))}
             self.db.execute("""UPDATE bilder SET status = 'fertig', erkennung = 'gefunden', vorschlag = ?,
-                               verworfen_von = NULL, verworfen_runde = NULL WHERE name = ?""", (json.dumps([kugel]), name))
-            self.db.execute("""INSERT INTO festlegungen (bild, person, person_name, kugeln, zeit) VALUES (?,?,?,?,?)
+                               verworfen_von = NULL, verworfen_uuid = NULL, verworfen_runde = NULL WHERE name = ?""",
+                            (json.dumps([kugel]), name))
+            self.db.execute("""INSERT INTO festlegungen (bild, person, person_uuid, person_name, kugeln, zeit)
+                               VALUES (?,?,?,?,?,?)
                                ON CONFLICT (bild, person) DO UPDATE SET kugeln = excluded.kugeln, zeit = excluded.zeit""",
-                            (name, 0, ERKENNUNG, json.dumps([kugel]), self.clock()))
+                            (name, 0, ERKENNUNG_UUID, ERKENNUNG, json.dumps([kugel]), self.clock()))
         else:
             self.db.execute("DELETE FROM festlegungen WHERE bild = ? AND person = 0", (name,))
-            self.db.execute("""UPDATE bilder SET status = 'verworfen', erkennung = ?, verworfen_von = 0, verworfen_runde = 0
-                               WHERE name = ?""", (grund or "nicht sicher erkannt", name))
+            self.db.execute("""UPDATE bilder SET status = 'verworfen', erkennung = ?, verworfen_von = 0, verworfen_uuid = ?,
+                               verworfen_runde = 0 WHERE name = ?""", (grund or "nicht sicher erkannt", ERKENNUNG_UUID, name))
 
     def _leer_fuer(self, r, jpg):
         """Bild des leeren Tisches zu einem Einzelkugel-Bild. Aeltere Bilder wissen es nicht: dann das
@@ -522,14 +570,14 @@ class Daten:
         return gefunden, aussortiert
 
     # --------------------------------------------------------------- Festlegen
-    def _andere_dran(self, name, pid, now):
+    def _andere_dran(self, name, puid, now):
         """Wie viele ANDERE haben dieses Bild gerade offen?"""
-        return sum(1 for q, t in self.claims.get(name, {}).items() if q != pid and now - t < CLAIM_S)
+        return sum(1 for q, t in self.claims.get(name, {}).items() if q != puid and now - t < CLAIM_S)
 
-    def freigeben(self, pid):
+    def freigeben(self, puid):
         with self.lock:
             for n in list(self.claims):
-                self.claims[n].pop(pid, None)
+                self.claims[n].pop(puid, None)
                 if not self.claims[n]:
                     del self.claims[n]
 
@@ -540,28 +588,30 @@ class Daten:
         with self.lock:
             return [dict(r) for r in self.db.execute("SELECT * FROM festlegungen WHERE bild = ? ORDER BY zeit", (name,))]
 
-    def zaehler(self, pid=None):
+    def zaehler(self, puid=None):
         with self.lock:
-            return self._zaehler(pid)
+            return self._zaehler(puid)
 
-    def _zaehler(self, pid):
+    def _zaehler(self, puid):
         z = {s: 0 for s in ("offen", "fertig", "verworfen")}
         for r in self.db.execute("SELECT status, COUNT(*) n FROM bilder GROUP BY status"):
             z[r["status"]] = r["n"]
         z["ziel"] = ZIEL
-        z["festlegungen"] = self.db.execute("SELECT COUNT(*) FROM festlegungen WHERE person != 0").fetchone()[0]
+        z["festlegungen"] = self.db.execute("SELECT COUNT(*) FROM festlegungen WHERE person_uuid != ?",
+                                            (ERKENNUNG_UUID,)).fetchone()[0]
         z["einzel"] = self.db.execute("SELECT COUNT(*) FROM bilder WHERE einzel IS NOT NULL").fetchone()[0]
         z["einzel_erkannt"] = self.db.execute(
             "SELECT COUNT(*) FROM bilder WHERE einzel IS NOT NULL AND erkennung = 'gefunden'").fetchone()[0]
         z["einzel_aussortiert"] = self.db.execute(
             "SELECT COUNT(*) FROM bilder WHERE einzel IS NOT NULL AND status = 'verworfen'").fetchone()[0]
-        if pid is not None:
+        if puid is not None:
             z["fuer_mich"] = self.db.execute(
                 """SELECT COUNT(*) FROM bilder b WHERE status = 'offen' AND einzel IS NULL
-                   AND NOT EXISTS (SELECT 1 FROM festlegungen f WHERE f.bild = b.name AND f.person = ?)""", (pid,)).fetchone()[0]
+                   AND NOT EXISTS (SELECT 1 FROM festlegungen f WHERE f.bild = b.name AND f.person_uuid = ?)""",
+                (puid,)).fetchone()[0]
             z["ich"] = self.db.execute(
-                "SELECT (SELECT COUNT(*) FROM festlegungen WHERE person = ?) + (SELECT COUNT(*) FROM bilder WHERE verworfen_von = ?)",
-                (pid, pid)).fetchone()[0]
+                """SELECT (SELECT COUNT(*) FROM festlegungen WHERE person_uuid = ?)
+                        + (SELECT COUNT(*) FROM bilder WHERE verworfen_uuid = ?)""", (puid, puid)).fetchone()[0]
         else:
             je = {k: 0 for k in range(ZIEL)}
             for r in self.db.execute("""SELECT (SELECT COUNT(*) FROM festlegungen f WHERE f.bild = b.name) n
@@ -576,7 +626,7 @@ class Daten:
         listen = [json.loads(r["kugeln"]) for r in self.db.execute("SELECT kugeln FROM festlegungen WHERE bild = ?", (name,))]
         return konsens(listen, radius)
 
-    def naechstes(self, pid, nach=None):
+    def naechstes(self, puid, nach=None):
         """Ein offenes Bild, das diese Person noch nicht festgelegt hat - Bilder, denen am wenigsten fehlt, zuerst.
         Nie mehr Leute gleichzeitig an einem Bild, als noch Festlegungen fehlen. Ohne Vorschlaege.
         'nach' = Bild, das die Person gerade mit "Spaeter" uebersprungen hat (kommt ganz zum Schluss)."""
@@ -585,20 +635,20 @@ class Daten:
             rows = [r for r in self.db.execute(
                 """SELECT b.*, (SELECT COUNT(*) FROM festlegungen f WHERE f.bild = b.name) n FROM bilder b
                    WHERE status = 'offen' AND einzel IS NULL
-                   AND NOT EXISTS (SELECT 1 FROM festlegungen f WHERE f.bild = b.name AND f.person = ?)
-                   ORDER BY n DESC, name""", (pid,))
-                if r["n"] + self._andere_dran(r["name"], pid, now) < ZIEL]
+                   AND NOT EXISTS (SELECT 1 FROM festlegungen f WHERE f.bild = b.name AND f.person_uuid = ?)
+                   ORDER BY n DESC, name""", (puid,))
+                if r["n"] + self._andere_dran(r["name"], puid, now) < ZIEL]
             if nach:
                 rows = [r for r in rows if r["name"] != nach] + [r for r in rows if r["name"] == nach]
             if not rows:
                 return None
             r = rows[0]
-            self.freigeben(pid)
-            self.claims.setdefault(r["name"], {})[pid] = now
+            self.freigeben(puid)
+            self.claims.setdefault(r["name"], {})[puid] = now
             return {"name": r["name"], "width": r["breite"], "height": r["hoehe"], "radius": r["radius"],
-                    "durchgang": r["n"] + 1, "ziel": ZIEL, "balls": [], "stand": self._zaehler(pid)}
+                    "durchgang": r["n"] + 1, "ziel": ZIEL, "balls": [], "stand": self._zaehler(puid)}
 
-    def speichern(self, pid, name, balls, verwerfen=False):
+    def speichern(self, puid, name, balls, verwerfen=False):
         if not NAME_RE.fullmatch(name or ""):
             raise Fehler("Bildname")
         now = self.clock()
@@ -609,18 +659,20 @@ class Daten:
             if r["status"] != "offen" or r["einzel"] is not None:
                 self.claims.pop(name, None)
                 raise Fehler("Dieses Bild ist schon fertig – weiter mit dem nächsten", 409)
-            if self.db.execute("SELECT 1 FROM festlegungen WHERE bild = ? AND person = ?", (name, pid)).fetchone():
+            if self.db.execute("SELECT 1 FROM festlegungen WHERE bild = ? AND person_uuid = ?", (name, puid)).fetchone():
                 raise Fehler("Dieses Bild hast du schon festgelegt – weiter mit dem nächsten", 409)
             n = self._anzahl(name)
+            p = self.db.execute("SELECT id, name FROM personen WHERE uuid = ?", (puid,)).fetchone()
+            if not p:
+                raise Fehler("Bitte neu anmelden", 401)
             if verwerfen:
-                self.db.execute("UPDATE bilder SET status = 'verworfen', verworfen_von = ?, verworfen_runde = ? WHERE name = ?",
-                                (pid, n + 1, name))
+                self.db.execute("""UPDATE bilder SET status = 'verworfen', verworfen_von = ?, verworfen_uuid = ?,
+                                   verworfen_runde = ? WHERE name = ?""", (p["id"], puid, n + 1, name))
                 text = "Bild als unbrauchbar aussortiert"
             else:
                 kugeln = saubere_kugeln(balls)
-                p = self.person(pid)
-                self.db.execute("INSERT INTO festlegungen (bild, person, person_name, kugeln, zeit) VALUES (?,?,?,?,?)",
-                                (name, pid, p["name"] if p else "?", json.dumps(kugeln), now))
+                self.db.execute("""INSERT INTO festlegungen (bild, person, person_uuid, person_name, kugeln, zeit)
+                                   VALUES (?,?,?,?,?,?)""", (name, p["id"], puid, p["name"], json.dumps(kugeln), now))
                 if n + 1 >= ZIEL:
                     self.db.execute("UPDATE bilder SET status = 'fertig' WHERE name = ?", (name,))
                     text = f"Gespeichert – Bild ist jetzt {ZIEL}× festgelegt und fertig"
@@ -629,7 +681,7 @@ class Daten:
                     text = "Gespeichert – noch " + ("eine weitere Person legt" if rest == 1 else f"{rest} weitere Personen legen") + " es fest"
             self.db.commit()
             if name in self.claims:
-                self.claims[name].pop(pid, None)
+                self.claims[name].pop(puid, None)
         return text
 
     def kreise(self, name):
@@ -664,7 +716,8 @@ class Daten:
             return ("Kugel jetzt erkannt – Bild ist fertig" if ergebnis and len(ergebnis[0]) == 1
                     else "Wieder nicht sicher erkannt (" + ergebnis[1] + ") – bleibt aussortiert")
         with self.lock:
-            if not self.db.execute("""UPDATE bilder SET status = 'offen', verworfen_von = NULL, verworfen_runde = NULL
+            if not self.db.execute("""UPDATE bilder SET status = 'offen', verworfen_von = NULL, verworfen_uuid = NULL,
+                                      verworfen_runde = NULL
                                       WHERE name = ? AND status = 'verworfen'""", (name,)).rowcount:
                 raise Fehler("Bild nicht gefunden", 404)
             self.db.commit()
@@ -672,18 +725,20 @@ class Daten:
 
     def letzte(self, n=40):
         out = []
-        namen = {p["id"]: p["name"] for p in self.personen()}
+        namen = {p["uuid"]: p["name"] for p in self.personen()}
         with self.lock:
             rows = list(self.db.execute("SELECT * FROM bilder ORDER BY name DESC LIMIT ?", (n,)))
             for r in rows:
-                fl = [dict(f) for f in self.db.execute("SELECT person, person_name, kugeln FROM festlegungen WHERE bild = ? ORDER BY zeit", (r["name"],))]
+                fl = [dict(f) for f in self.db.execute(
+                    "SELECT person_uuid, person_name, kugeln FROM festlegungen WHERE bild = ? ORDER BY zeit", (r["name"],))]
                 kugeln, einig = konsens([json.loads(f["kugeln"]) for f in fl], r["radius"])
                 out.append({"name": r["name"], "status": r["status"], "festlegungen": len(fl),
                             "ziel": 1 if r["erkennung"] == "gefunden" else ZIEL,
                             "einzel": r["einzel"], "erkennung": r["erkennung"],
-                            "wer": [namen.get(f["person"], f["person_name"]) for f in fl],
+                            "wer": [namen.get(f["person_uuid"], f["person_name"]) for f in fl],
                             "einig": einig if len(fl) >= 2 else None,
-                            "verworfen_von": ERKENNUNG if r["verworfen_von"] == 0 else namen.get(r["verworfen_von"]),
+                            "verworfen_von": ERKENNUNG if r["verworfen_uuid"] == ERKENNUNG_UUID else
+                            namen.get(r["verworfen_uuid"], "gelöschter Trainer" if r["verworfen_uuid"] else None),
                             "kugeln": len(kugeln)})
         return out
 
@@ -853,9 +908,9 @@ def make_handler(daten: Daten, mod=None, auf=None):
                     return self._send(401, {"error": "Bitte mit deinem Code anmelden"})
                 if pfad == "/api/next":
                     nach = (q.get("after") or [None])[0]
-                    item = daten.naechstes(p["id"], nach)
+                    item = daten.naechstes(p["uuid"], nach)
                     if not item:
-                        return self._send(404, {"stand": daten.zaehler(p["id"])})
+                        return self._send(404, {"stand": daten.zaehler(p["uuid"])})
                     return self._send(200, item)
                 if pfad == "/api/bild":
                     jpg = daten.bild_pfad((q.get("name") or [""])[0])
@@ -863,7 +918,7 @@ def make_handler(daten: Daten, mod=None, auf=None):
                         return self._send(404, {"error": "Bild nicht gefunden"})
                     return self._datei(jpg, "image/jpeg")
                 if pfad == "/api/stand":
-                    return self._send(200, daten.zaehler(p["id"]))
+                    return self._send(200, daten.zaehler(p["uuid"]))
                 return self._send(404, {"error": "Nicht gefunden"})
             except Fehler as e:
                 self._send(e.code, {"error": str(e)})
@@ -1015,17 +1070,17 @@ def make_handler(daten: Daten, mod=None, auf=None):
                 if pfad == "/api/logout":
                     p = self._person()
                     if p:
-                        daten.freigeben(p["id"])
+                        daten.freigeben(p["uuid"])
                     return self._send(200, {"ok": True}, headers={"Set-Cookie": f"{COOKIE}=; Path=/; Max-Age=0"})
                 p = self._person()
                 if not p:
                     return self._send(401, {"error": "Bitte mit deinem Code anmelden"})
                 d = self._json()
                 if pfad == "/api/speichern":
-                    text = daten.speichern(p["id"], str(d.get("name", "")), d.get("balls"), bool(d.get("discard")))
-                    return self._send(200, {"message": text, "stand": daten.zaehler(p["id"])})
+                    text = daten.speichern(p["uuid"], str(d.get("name", "")), d.get("balls"), bool(d.get("discard")))
+                    return self._send(200, {"message": text, "stand": daten.zaehler(p["uuid"])})
                 if pfad == "/api/freigeben":
-                    daten.freigeben(p["id"])
+                    daten.freigeben(p["uuid"])
                     return self._send(200, {"ok": True})
                 return self._send(404, {"error": "Nicht gefunden"})
             except Fehler as e:
