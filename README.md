@@ -288,7 +288,7 @@ scannen), PIN **1212**. Danach bleibt das Gerät 30 Tage angemeldet.
 
 1. Kugeln aufbauen, Weiße hinlegen.
 2. Teamnamen eintragen, wählen wer anbricht, **„Spiel starten“**.
-3. Warten bis unten „Bereit“ steht (Tisch ruhig, 1–2 Sekunden), dann anbrechen.
+3. Warten bis unten „Bereit“ steht (Tisch ruhig, gut 1 Sekunde), dann anbrechen.
 4. Nach jedem Rack: Kugeln aufbauen, **dann** „Neues Rack“ drücken.
 
 **Was automatisch erkannt wird:** versenkte volle/halbe, versenkte Weiße (Foul), versenkte 8, Gruppenzuteilung, Zugwechsel, Sieg/Niederlage.
@@ -305,6 +305,20 @@ versenkt oder weniger Kugeln auf dem Tisch. Mit dem **Queue mit Gyroskop** kommt
 - **„Stoß fertig“** – Knopf am Queue während des Spiels (LED in Teamfarbe, blinkt kurz weiß) oder Knopf im
   Spiel-Panel: wertet sofort aus, sobald der Tisch frei ist (ohne 1,2 s Wartezeit), und zählt den Stoß auf
   jeden Fall – auch wenn keine Kugel getroffen wurde.
+
+**Kugel fehlt = im Loch:** Die Kamera liefert 3 Bilder pro Sekunde. Fehlt eine Kugel im Spiel auf **4 Bildern
+hintereinander** (gut 1 Sekunde), zählt sie sofort als versenkt – Beamer und Panel zeigen es gleich. Bilder, in
+denen jemand über dem Tisch hängt, zählen dabei nicht. Taucht die Kugel im nächsten ruhigen Zustand wieder auf
+(war nur verdeckt), kommt sie von selbst zurück. Beim Anstoß gilt das nicht (dort verdecken sich die Kugeln).
+
+**Kugeln antippen:** Im Spiel-Panel unter „Korrigieren“ stehen alle 15 Kugeln. Antippen legt eine Kugel ins Loch,
+nochmal antippen holt sie zurück (blass = im Loch). Die 8 fragt vorher nach, denn mit ihr endet das Rack nach den
+Regeln.
+
+**Manueller Modus** (Schalter „Manuell zählen“, falls die KI versagt): Die Kamera ändert den Spielstand dann nicht
+mehr. Nach jedem Stoß die versenkten Kugeln antippen; wer nichts Eigenes versenkt hat, drückt „Zug wechseln“. Bei
+offenem Tisch bekommt das Team, das gerade dran ist, die Gruppe der ersten angetippten Kugel. Der Schalter bleibt
+auch nach einem Neustart so.
 
 Geht etwas schief: **„Rückgängig“** macht die letzte Änderung rückgängig, unter „Weitere Korrekturen“ lassen sich Gruppen, Restkugeln und Sieger von Hand setzen.
 

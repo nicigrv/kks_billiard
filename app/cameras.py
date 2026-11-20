@@ -8,6 +8,9 @@ Kameraquellen. Alle liefern dieselbe Schnittstelle:
           gesetzt oder laesst sich das Bild nicht laden, laeuft das
           eingebaute simulierte Spiel (immer verfuegbar).
 
+Alle Quellen liefern hoechstens KAMERA_FPS (3) Bilder pro Sekunde: Fuer Spielstand und Grafik reicht
+das, und der Pi spart das Kopieren und Auswerten der vielen Zwischenbilder (weniger Waerme, kein Drosseln).
+
 Die Tisch-Ecken (Kalibrierung) werden je Quelle gespeichert (calib_key), damit der
 Wechsel zwischen Demo und echter Kamera die Einrichtung nicht zerstoert.
 """
@@ -21,6 +24,7 @@ import urllib.request
 import cv2
 import numpy as np
 
+KAMERA_FPS = 3.0          # Bilder pro Sekunde, die ins Programm kommen (Erkennung, Grafik, Aufnahmen)
 SOURCES = ("picam", "usb", "demo")
 SOURCE_NAMES = {"picam": "Pi-Kameramodul", "usb": "USB-Kamera am Pi", "demo": "Demo"}
 
@@ -43,7 +47,16 @@ class _Reader:
         self._n = 0
         self._t0 = time.monotonic()
         self._stop = threading.Event()
+        self._next = 0.0
         self._thread = threading.Thread(target=self._run, name=name, daemon=True)
+
+    def _faellig(self):
+        """Ist das naechste Bild dran? Haelt den Takt von KAMERA_FPS (Bilder dazwischen fallen weg)."""
+        now = time.monotonic()
+        if now < self._next:
+            return False
+        self._next = max(self._next + 1.0 / KAMERA_FPS, now + 0.5 / KAMERA_FPS)
+        return True
 
     def start(self):
         self._thread.start()
@@ -122,15 +135,21 @@ class V4L2Reader(_Reader):
             print(f"[kamera] USB-Kamera {self.device}: {w}x{h}", flush=True)
             fails = 0
             while not self._stop.is_set():
-                ok, frame = cap.read()
-                if not ok or frame is None:
+                # grab() holt das Bild nur ab (ohne Entpacken) - entpackt wird nur jedes, das dran ist
+                ok = cap.grab()
+                frame = None
+                if ok and self._faellig():
+                    ok, frame = cap.retrieve()
+                    ok = ok and frame is not None
+                if not ok:
                     fails += 1
                     if fails > 20:
                         break
                     time.sleep(0.05)
                     continue
                 fails = 0
-                self._push(frame)
+                if frame is not None:
+                    self._push(frame)
             cap.release()
             if not self._stop.is_set():
                 self._fail("USB-Kamera liefert keine Bilder mehr, verbinde neu ...", 1.0)
@@ -172,7 +191,7 @@ class PiCamReader(_Reader):
             img = np.ndarray((h, w, 3), np.uint8, mm, 8)
             proc = subprocess.Popen(
                 [sys.executable, "-c", "import cameras, sys; cameras.picam_worker(*sys.argv[1:])",
-                 path, str(w), str(h)],
+                 path, str(w), str(h), str(KAMERA_FPS)],
                 cwd=os.path.dirname(os.path.abspath(__file__)))
             self._proc = proc
             last, last_t, started, msg = 0, time.monotonic(), False, ""
@@ -213,8 +232,10 @@ class PiCamReader(_Reader):
                 self._fail(msg or "Pi-Kameramodul: neu starten", 2.0)
 
 
-def picam_worker(path, w, h):
-    """Laeuft im Kamera-Prozess: Bilder von picamera2 holen und in die Datei schreiben."""
+def picam_worker(path, w, h, fps=KAMERA_FPS):
+    """Laeuft im Kamera-Prozess: Bilder von picamera2 holen und in die Datei schreiben - nur im Takt
+    von fps. Der Sensor laeuft schneller weiter (kurze Belichtung, keine Bewegungsunschaerfe), aber
+    nur jedes noetige Bild wird abgeholt und kopiert."""
     import ctypes
     import mmap
     import signal
@@ -244,8 +265,14 @@ def picam_worker(path, w, h):
         print(f"[kamera] Pi-Kameramodul: {e}", flush=True)
         os._exit(3)
     n = 0
+    takt = 1.0 / float(fps)
+    naechstes = time.monotonic()
     while True:
-        arr = cam.capture_array("main")
+        warte = naechstes - time.monotonic()
+        if warte > 0:
+            time.sleep(warte)
+        naechstes = max(naechstes + takt, time.monotonic())
+        arr = cam.capture_array("main")              # wartet auf das naechste fertige Bild
         if arr.shape[0] != h or arr.shape[1] != w:
             arr = cv2.resize(arr[:, :, :3], (w, h))
         n += 1
@@ -285,7 +312,7 @@ def load_image(url, cache_dir, timeout=15):
 class DemoReader(_Reader):
     """Demo ohne Kamera: ein Foto aus dem Internet - oder das eingebaute simulierte Spiel."""
 
-    def __init__(self, url="", cache_dir="/data", fps=5):
+    def __init__(self, url="", cache_dir="/data", fps=KAMERA_FPS):
         super().__init__("demo")
         self.url = (url or "").strip()
         self.cache_dir = cache_dir
@@ -323,7 +350,7 @@ class DemoReader(_Reader):
             else:
                 with self.scenario.lock:
                     jpg = self.scenario.jpeg
-                if jpg is not None and jpg is not last:
+                if jpg is not None and jpg is not last and self._faellig():
                     last = jpg
                     frame = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
                     if frame is not None:

@@ -54,7 +54,7 @@ from single_ball import SingleBall
 
 # Bildraten (weniger CPU -> der Pi bleibt kuehler und drosselt nicht)
 DISPLAY_FPS = 10          # HDMI-Bild (Beamer); reicht fuer Scoreboard und Kamerabild
-IDLE_PROCESS_FPS = 10     # Erkennung, solange sich auf dem Tisch nichts bewegt (sonst jedes Bild)
+# Kamera und Erkennung: hoechstens cameras.KAMERA_FPS (3) Bilder pro Sekunde - jedes wird ausgewertet
 
 # Farbe der Teams auf der LED am Queue (wer dran ist). Rot/Gruen sind fuer die Verbindung reserviert.
 TEAM_COLORS = ([0, 90, 255], [255, 110, 0])        # Team A blau, Team B orange
@@ -87,6 +87,7 @@ class App:
         table = self._table_for(self.reader)
         self.pipe = Pipeline(table, lambda r: CoralDetector(r, self.coral, klassen=self.klassen), recorder=self.recorder)
         self.pipe.auto_capture = bool(self.cfg.get("auto_capture"))
+        self.pipe.game.manual = bool(self.cfg.get("manual"))
         self.pipe.on_capture = self._captured
         last = self.cfg.get("cue_address")
         self.cue = CueSensor(self.cfg.get("cue_castcode", ""), self.cfg.get("cue_offset", 0.0),
@@ -187,26 +188,19 @@ class App:
     # ------------------------------------------------------------ Erkennung
     def _process_loop(self):
         last_id = -1
-        last_t = 0.0
         n, t0 = 0, time.monotonic()
         while not self._stop.is_set():
             frame, fid, age = self.reader.latest()
             if frame is None or fid == last_id or age > 2.0:
                 time.sleep(0.01)
                 continue
-            # Ruhiger Tisch: gedrosselt; Bewegung oder Verdeckung: jedes Bild (Stoss sauber erfassen)
-            if not (self.pipe.moving or self.pipe.occluded) and \
-                    time.monotonic() - last_t < 1.0 / IDLE_PROCESS_FPS:
-                time.sleep(0.01)
-                continue
             last_id = fid
-            last_t = time.monotonic()
             try:
                 ev = self.pipe.process(frame)
                 if isinstance(ev, tuple):
                     print(f"[spiel] {ev[1]}", flush=True)
-                if self.pipe.monitor.ref_id != self._ref_id:
-                    self.refresh_scene()
+                if isinstance(ev, tuple) or self.pipe.monitor.ref_id != self._ref_id:
+                    self.refresh_scene()          # auch "Kugel im Loch" sofort in Grafik und Panel
                 if isinstance(ev, tuple):
                     self._record_step()
             except Exception as e:  # ein kaputtes Bild darf das System nicht stoppen
@@ -586,7 +580,7 @@ class App:
         if name in ("start", "new_rack"):
             self.rounds.start(self.scene(live=False))      # eine noch laufende wird vorher abgeschlossen
         elif self.rounds.active and name in ("foul", "undo", "undo_shot", "winner", "abort", "switch_turn",
-                                             "set_group", "adjust"):
+                                             "set_group", "adjust", "ball"):
             sc = self.scene(live=False)
             if name in ("winner", "abort") or sc["game"]["phase"] != "playing":
                 self.rounds.stop(sc)
@@ -701,6 +695,17 @@ class App:
                 g.adjust(p["group"], int(p["delta"]))
             elif name == "winner":
                 g.declare_winner(int(p["team"]) % 2)
+            elif name == "ball":
+                # Spiel-Panel: Kugel ins Loch / zurueck auf den Tisch (auch im Automatik-Modus als Korrektur)
+                n = int(p.get("number", -1))
+                if not 1 <= n <= 15:
+                    raise ValueError("Kugel 1 bis 15")
+                return g.pocket_ball(n) if p.get("pocketed", True) else g.restore_ball(n)
+            elif name == "manual":
+                on = bool(p.get("enabled"))
+                self.cfg["manual"] = on
+                config.save(self.cfg)
+                g.set_manual(on)
             elif name == "calibrate":
                 corners = p.get("corners")
                 size = p.get("table_size", "8ft")

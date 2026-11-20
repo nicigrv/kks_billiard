@@ -20,7 +20,7 @@ from sim.render import DEFAULT_CORNERS, SimBall, rack_positions, random_layout, 
 L = TABLE_SIZES["8ft"]
 CLOTH = os.environ.get("SIM_CLOTH", "blau")   # Tuchfarbe der simulierten Kamera
 W = L / 2
-FPS = 10
+FPS = 3                 # wie cameras.KAMERA_FPS - mehr Bilder wuerden nur gerendert und verworfen
 
 
 class Scenario(threading.Thread):

@@ -16,6 +16,7 @@ Grundsaetze (damit Erkennungsfehler nicht zu falschen Punkten fuehren):
 """
 
 import itertools
+import math
 import time
 from collections import Counter
 from dataclasses import dataclass
@@ -23,7 +24,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from ballnum import Ball
+from ballnum import Ball, ball_number
 
 OBJECT_KINDS = ("solid", "stripe", "eight")
 
@@ -241,6 +242,7 @@ class ShotDiff:
     uncertain: bool
     break_estimate: dict = None   # Auswertung ueber Farben, nur fuer den Break gedacht
     break_uncertain: bool = False
+    pocketed_numbers: tuple = ()  # Nummern der versenkten Kugeln, soweit die Farbe bekannt ist
 
 
 BALL_COLORS = ("gelb", "blau", "rot", "violett", "orange", "gruen", "weinrot")
@@ -327,7 +329,8 @@ def diff_states(before: TableState, after: TableState, radius: float) -> ShotDif
     moved = len(gone_or_moved) + (1 if before.cue and not (after.cue and np.hypot(
         before.cue.x - after.cue.x, before.cue.y - after.cue.y) < 0.6 * radius) else 0)
     be, bu = break_pocketed(after)
-    return ShotDiff(pocketed, before.cue is not None, after.cue is not None, moved, uncertain, be, bu)
+    nums = tuple(n for n in (ball_number(b.kind, b.color) for b in pocketed_balls) if n)
+    return ShotDiff(pocketed, before.cue is not None, after.cue is not None, moved, uncertain, be, bu, nums)
 
 
 def shot_happened(before: TableState, after: TableState, radius: float, allow_growth=False,
@@ -349,7 +352,9 @@ def shot_happened(before: TableState, after: TableState, radius: float, allow_gr
 class ShotMonitor:
     """Zustaende: 'warte' (noch kein Ausgangszustand), 'ruhig', 'bewegung'."""
 
-    def __init__(self, radius, settle_s=1.2, min_frames=6, window=15, clock=time.monotonic):
+    # Bei 3 Bildern pro Sekunde (cameras.KAMERA_FPS): ruhig = 1,2 s und mindestens 3 Bilder,
+    # abgestimmt wird ueber die letzten 6 Bilder (2 s)
+    def __init__(self, radius, settle_s=1.2, min_frames=3, window=6, clock=time.monotonic):
         self.radius = radius
         self.settle_s = settle_s
         self.min_frames = min_frames
@@ -438,3 +443,68 @@ class ShotMonitor:
             inherit_votes(self.reference, stable, self.radius)
             self.reference = stable
         return None
+
+
+MISS_FRAMES = 4          # so viele Bilder hintereinander nicht gesehen = im Loch (bei 3 Bildern/s gut 1 s)
+
+
+class PocketTracker:
+    """Fehlt eine Kugel im Spiel auf MISS_FRAMES Bildern hintereinander, ist sie im Loch.
+
+    Bekannt sind die Kugeln des letzten ruhigen Zustands (mit ihrer ueber viele Bilder abgestimmten
+    Art und Farbe). In jedem Bild wird jede bekannte Kugel wiedergesucht - auch wenn sie rollt: die
+    naechste Erkennung gleicher Art (und Farbe), hoechstens MAX_WEG Kugelradien entfernt.
+    Bilder, in denen der Tisch verdeckt ist (Arm, Oberkoerper), zaehlen nicht - verdeckt ist nicht weg.
+    Die Weisse wird hier nicht gezaehlt (wird fuer Ball in der Hand oft aufgenommen); ob sie versenkt
+    wurde, entscheidet weiter der ruhige Zustand nach dem Stoss."""
+
+    MAX_WEG = 14.0
+
+    def __init__(self, radius, miss_frames=MISS_FRAMES):
+        self.radius = radius
+        self.miss_frames = miss_frames
+        self.known = []            # [[Ball, Fehlbilder]]
+
+    def reset(self, balls):
+        self.known = [[Ball(b.x, b.y, b.r, b.kind, getattr(b, "color", "")), 0]
+                      for b in balls if b.kind in OBJECT_KINDS]
+
+    def _farbe_passt(self, k, d):
+        return not (k.color and d.color and k.color != d.color)
+
+    def update(self, balls, occluded):
+        """Pro Bild. -> Liste der Kugeln, die jetzt als versenkt gelten (Ball mit Art und Farbe)."""
+        if occluded or not self.known:
+            return []
+        dets = [b for b in balls if b.kind in OBJECT_KINDS]
+        k_frei, d_frei = set(range(len(self.known))), set(range(len(dets)))
+
+        def zuordnen(paare):
+            for _, i, j in sorted(paare):
+                if i in k_frei and j in d_frei:
+                    k_frei.discard(i)
+                    d_frei.discard(j)
+                    self.known[i][0].x, self.known[i][0].y = dets[j].x, dets[j].y   # rollt weiter
+                    self.known[i][1] = 0
+        def abstand(i, j):
+            return math.hypot(self.known[i][0].x - dets[j].x, self.known[i][0].y - dets[j].y) / self.radius
+        # 1. gleiche Art und Farbe in der Naehe (rollt), 2. gleiche Nummer irgendwo (jede gibt es nur
+        # einmal - auch nach einem schnellen Stoss weit weg), 3. gleiche Art irgendwo, 4. andere Art nur
+        # direkt an der Stelle (Erkennung hat sich bei einer liegenden Kugel vertan). Eine andere Kugel
+        # in der Naehe darf nie fuer eine versenkte "einspringen" - sonst gaelte die falsche als versenkt.
+        zuordnen([(abstand(i, j), i, j) for i in list(k_frei) for j in d_frei
+                  if self.known[i][0].kind == dets[j].kind and self._farbe_passt(self.known[i][0], dets[j])
+                  and abstand(i, j) <= self.MAX_WEG])
+        zuordnen([(abstand(i, j), i, j) for i in list(k_frei) for j in d_frei
+                  if self.known[i][0].color and self.known[i][0].kind == dets[j].kind
+                  and self.known[i][0].color == dets[j].color])
+        zuordnen([(abstand(i, j), i, j) for i in list(k_frei) for j in d_frei if self.known[i][0].kind == dets[j].kind])
+        zuordnen([(abstand(i, j), i, j) for i in list(k_frei) for j in d_frei if abstand(i, j) <= 0.8])
+        weg = []
+        for i in sorted(k_frei):
+            self.known[i][1] += 1
+            if self.known[i][1] >= self.miss_frames:
+                weg.append(i)
+        out = [self.known[i][0] for i in weg]
+        self.known = [k for i, k in enumerate(self.known) if i not in weg]
+        return out

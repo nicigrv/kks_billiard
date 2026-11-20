@@ -97,9 +97,9 @@ def test_simulated_game(seed=42):
     det = TruthDetector(table.ball_radius_px, L, W, rng)
     pipe = Pipeline(table, lambda r: det, clock=clock)
     g = pipe.game
-    fps = 12
+    fps = 3                     # wie cameras.KAMERA_FPS
 
-    def show(balls, n_frames=24, occluder=None):
+    def show(balls, n_frames=10, occluder=None):
         det.balls, det.occluder = balls, occluder
         for _ in range(n_frames):
             cam = to_camera(render_topdown(balls, L, W, "gruen", rng, occluder), DEFAULT_CORNERS)

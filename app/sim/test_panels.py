@@ -134,6 +134,17 @@ def run_panels(d):
     check(code == 200 and json.loads(body)["state"]["game"]["phase"] == "playing", "Spiel-Panel: Spiel starten")
     check(json.loads(body)["state"]["round"]["active"], "Spielstart: Aufzeichnung läuft automatisch")
     check(req("/api/record_round", {"enabled": True}, cookie=game)[0] == 403, "Aufzeichnen-Knopf gibt es nicht mehr")
+    code, body, _ = req("/api/ball", {"number": 5, "pocketed": True}, cookie=game)
+    g5 = json.loads(body)["state"]["game"] if code == 200 else {}
+    check(code == 200 and 5 not in g5.get("on_table", []) and g5["remaining"]["solid"] == 6,
+          "Spiel-Panel: Kugel 5 antippen -> im Loch")
+    code, body, _ = req("/api/ball", {"number": 5, "pocketed": False}, cookie=game)
+    check(code == 200 and 5 in json.loads(body)["state"]["game"]["on_table"], "… nochmal antippen -> zurück")
+    check(req("/api/ball", {"number": 0, "pocketed": True}, cookie=game)[0] == 400, "Weiße/ungültige Nummer abgelehnt")
+    code, body, _ = req("/api/manual", {"enabled": True}, cookie=game)
+    check(code == 200 and json.loads(body)["state"]["game"]["manual"] is True, "Spiel-Panel: manueller Modus an")
+    code, body, _ = req("/api/manual", {"enabled": False}, cookie=game)
+    check(code == 200 and json.loads(body)["state"]["game"]["manual"] is False, "… und wieder aus")
     code, body, _ = req("/api/cue_use", {"enabled": False}, cookie=game)
     check(code == 200 and json.loads(body)["state"]["cue"]["enabled"] is False, "Spiel-Panel: Queue aus")
     for cmd, payload in (("camera", {"source": "demo"}), ("qr_settings", {"enabled": False}),
